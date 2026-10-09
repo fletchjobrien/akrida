@@ -46,7 +46,7 @@ const SPRINT_SPEED = 6.3;
 const CROUCH_SPEED = 1.05;
 const HIP_HEIGHT = 0.7;
 const WALK_HIP = 0.645;
-const CROUCH_HIP = 0.47;
+const CROUCH_HIP = 0.45;
 const BODY_RADIUS = 0.22;
 const LEG_REACH = LEG.thigh + LEG.shin + LEG.cannon * 0.92;
 
@@ -493,7 +493,7 @@ export class Creature {
         ? (world.height(this.pos.x + (this.vel.x / speed) * 0.5, this.pos.z + (this.vel.z / speed) * 0.5) - this.pos.y) / 0.5
         : 0;
     const leanTarget =
-      speed * 0.035 + run * 0.13 + clamp(this.accelFwd, -7, 7) * 0.02 + crouch * 0.27 + clamp(slopeAhead, -0.5, 0.6) * 0.25;
+      speed * 0.035 + run * 0.13 + clamp(this.accelFwd, -7, 7) * 0.02 + crouch * 0.5 + clamp(slopeAhead, -0.5, 0.6) * 0.25;
     const lean = this.leanDyn.update(dt, leanTarget);
     const bank = this.bankDyn.update(dt, clamp(-this.yawRate * speed * 0.045, -0.35, 0.35));
 
@@ -506,7 +506,8 @@ export class Creature {
     rig.body.position.set(this.pos.x + delta.x, 0, this.pos.z + delta.z);
     rig.body.rotation.set(0, this.yaw, 0);
 
-    rig.pelvis.position.set(sway + idleSway, py, -crouch * 0.03);
+    // pelvis sits back to balance the forward bend of a crouch
+    rig.pelvis.position.set(sway + idleSway, py, -crouch * 0.07);
     rig.pelvis.rotation.set(lean * 0.55, twist, roll + bank, 'YXZ');
     rig.spine.rotation.set(lean * 0.25 + breath * 0.012 * breathAmp, -twist * 0.6, -roll * 0.5, 'YXZ');
 

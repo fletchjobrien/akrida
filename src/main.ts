@@ -98,6 +98,8 @@ function update(dt: number, now: number) {
 
   control.move.copy(input.move);
   control.sprint = input.sprint;
+  // sprinting stands the creature back up
+  if (input.crouch && input.sprint && control.move.lengthSq() > 0) input.crouch = false;
   control.crouch = input.crouch;
   control.look = look;
   creature.update(dt, control, world);

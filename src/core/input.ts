@@ -18,10 +18,11 @@ const GAME_KEYS = new Set([
 ]);
 
 /**
- * Keyboard and mouse state. Ctrl is crouch, which collides with browser
- * shortcuts: most (Ctrl+S, Ctrl+D...) can be cancelled, but Ctrl+W cannot.
- * While Ctrl is held we ask the browser to confirm before closing the tab,
- * and in fullscreen we use the Keyboard Lock API where it exists.
+ * Keyboard and mouse state. A tap of Ctrl (or C) toggles crouch. Ctrl is also
+ * a browser modifier: most Ctrl shortcuts (Ctrl+S, Ctrl+D...) can be
+ * cancelled, but Ctrl+W cannot. While Ctrl is held we ask the browser to
+ * confirm before closing the tab, and in fullscreen we use the Keyboard Lock
+ * API where it exists.
  */
 export class Input {
   private readonly keys = new Set<string>();
@@ -85,8 +86,12 @@ export class Input {
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
+    const crouchKey = e.code === 'ControlLeft' || e.code === 'ControlRight' || (e.code === 'KeyC' && !e.ctrlKey);
+    if (crouchKey && !e.repeat) {
+      this.crouch = !this.crouch;
+    }
     if (GAME_KEYS.has(e.code) || e.ctrlKey) {
-      // keep Ctrl+key browser shortcuts from firing while crouch-walking
+      // keep Ctrl+key browser shortcuts from firing during play
       if (!(e.ctrlKey && (e.code === 'KeyR' || e.code === 'F5')) && e.code !== 'F11' && e.code !== 'F12') {
         e.preventDefault();
       }
@@ -132,7 +137,6 @@ export class Input {
     return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
   }
 
-  get crouch() {
-    return this.keys.has('ControlLeft') || this.keys.has('ControlRight') || this.keys.has('KeyC');
-  }
+  /** Crouch mode, toggled by tapping Ctrl or C. */
+  crouch = false;
 }

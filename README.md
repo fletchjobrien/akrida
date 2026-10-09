@@ -9,19 +9,20 @@ low resolution so that it looks like hand-made 2D pixel art.
 | --- | --- |
 | W A S D (or arrow keys) | Walk |
 | Shift (hold) | Sprint |
-| Ctrl (hold) or C | Crouch |
+| Ctrl or C (tap) | Crouch on or off. Sprinting also stands the creature up. |
 | Mouse | Look. When the creature stands still, it looks at the cursor. When it runs, it tilts its head toward the cursor. |
-| Mouse wheel | Zoom in (wheel up) or out (wheel down) |
+| Mouse wheel | Zoom in (wheel up) or out (wheel down). The game starts fully zoomed out. |
 | Double-click | Fullscreen |
 
 The game shows no UI. A small pixel cursor shows when you move the mouse and
 hides when the mouse stops. Sound starts at your first key press or click,
 because browsers block audio until the page gets a user gesture.
 
-**Ctrl and Chrome:** Chrome reserves Ctrl+W (close tab), and a web page cannot
-cancel it. While you hold Ctrl, the game asks the browser to confirm before the
-tab closes. In fullscreen (double-click), the game uses the Keyboard Lock API,
-which lets the page receive Ctrl+W. You can also use C to crouch.
+**Ctrl and Chrome:** Crouch is a tap, so you do not hold Ctrl while you walk.
+If you press Ctrl+W by accident, Chrome closes the tab, because a web page
+cannot cancel that shortcut. While Ctrl is down, the game asks the browser to
+confirm before the tab closes. In fullscreen (double-click), the game uses the
+Keyboard Lock API, which lets the page receive Ctrl+W.
 
 ## Run locally
 
@@ -50,7 +51,7 @@ To add server logic later (saves, story state), add a `main` script to
 ## How the rendering works
 
 - **Low resolution, orthographic camera.** The scene renders into a small
-  target (about 180 rows by default), then a nearest-neighbour upscale draws it
+  target (about 300 rows at the start), then a nearest-neighbour upscale draws it
   to the screen. The camera angle is fixed.
 - **Texel-snapped camera.** The camera moves in whole low-res pixels, so static
   objects never shimmer. The fractional part of the camera position shifts the

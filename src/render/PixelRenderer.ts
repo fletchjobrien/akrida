@@ -131,7 +131,8 @@ export class PixelRenderer {
   dpr = 1;
   /** Target number of low-res rows; the mouse wheel steps through these. */
   private zoomSteps = [150, 180, 210, 250, 300];
-  zoomIndex = 1;
+  /** Start fully zoomed out. */
+  zoomIndex = this.zoomSteps.length - 1;
   /** Continuous (unsnapped) focus point of the camera. */
   readonly focus = new Vector3();
   private readonly offset = new Vector2();

@@ -61,7 +61,7 @@ function stepBuffer(ctx: BaseAudioContext, seed: number, heavy: number): Buf {
   while (t < dur * 0.8) {
     const density = 2200 * Math.exp(-t / (0.035 + heavy * 0.02)) + 60;
     t += -Math.log(1 - r() * 0.999) / density;
-    const env = Math.exp(-t / (0.05 + heavy * 0.03));
+    const env = Math.exp(-t / (0.05 + heavy * 0.015));
     grains.push({
       start: Math.floor(t * sr),
       len: Math.floor(sr * (0.0004 + r() * 0.0018)),
@@ -79,7 +79,7 @@ function stepBuffer(ctx: BaseAudioContext, seed: number, heavy: number): Buf {
   let lp = 0;
   let hp = 0;
   let prev = 0;
-  const lpA = 1 - Math.exp((-2 * Math.PI * (3000 + heavy * 1500)) / sr);
+  const lpA = 1 - Math.exp((-2 * Math.PI * (3000 + heavy * 500)) / sr);
   const hpA = Math.exp((-2 * Math.PI * 180) / sr);
   for (let i = 0; i < len; i++) {
     lp += (d[i] - lp) * lpA;
@@ -94,7 +94,7 @@ function stepBuffer(ctx: BaseAudioContext, seed: number, heavy: number): Buf {
     const f = 52 + 70 * Math.exp(-ts / 0.03);
     phase += (2 * Math.PI * f) / sr;
     const env = (1 - Math.exp(-ts / 0.003)) * Math.exp(-ts / (0.035 + heavy * 0.02));
-    d[i] += Math.sin(phase) * env * (0.45 + heavy * 0.35);
+    d[i] += Math.sin(phase) * env * (0.45 + heavy * 0.1);
   }
   let peak = 0;
   for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(d[i]));
@@ -371,9 +371,11 @@ export class AudioEngine {
     src.playbackRate.value = (heavy ? 0.92 : 1) * (0.9 + Math.random() * 0.22) * lerp(1, 0.86, ev.crouch);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = lerp(lerp(3800, 7000, ev.run), 1500, ev.crouch);
+    lp.frequency.value = lerp(lerp(3800, 4600, ev.run), 1500, ev.crouch);
     const gain = ctx.createGain();
-    const loud = ev.scuff ? 0.11 : clamp(0.22 + ev.speed * 0.09, 0.2, 0.75) * lerp(1, 0.45, ev.crouch);
+    // louder with speed, but a sprint only a little louder than a walk
+    const pace = 0.25 + Math.min(ev.speed, 2) * 0.07 + Math.max(0, ev.speed - 2) * 0.012;
+    const loud = ev.scuff ? 0.11 : pace * lerp(1, 0.45, ev.crouch);
     gain.gain.value = loud * (0.85 + Math.random() * 0.3);
     const pan = ctx.createStereoPanner();
     pan.pan.value = ev.side * 0.12;
@@ -387,10 +389,13 @@ export class AudioEngine {
       sp.buffer = this.sprays[Math.floor(Math.random() * this.sprays.length)];
       sp.playbackRate.value = 0.85 + Math.random() * 0.4;
       const g = ctx.createGain();
-      g.gain.value = ev.scuff ? 0.05 : ev.run * 0.22 * (0.7 + Math.random() * 0.6);
+      g.gain.value = ev.scuff ? 0.05 : ev.run * 0.07 * (0.7 + Math.random() * 0.6);
+      const soft = ctx.createBiquadFilter();
+      soft.type = 'lowpass';
+      soft.frequency.value = 4500;
       const p = ctx.createStereoPanner();
       p.pan.value = ev.side * 0.2;
-      sp.connect(g).connect(p).connect(this.master);
+      sp.connect(soft).connect(g).connect(p).connect(this.master);
       sp.start(now + 0.012);
     }
   }
