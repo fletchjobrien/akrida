@@ -1,7 +1,7 @@
 import { clamp, lerp, noise1, rng } from '../core/math';
 import type { StaminaCue, StepEvent } from '../character/Creature';
 import type { Wind } from '../world/wind';
-import { breathSamples, gargleSamples, noteSamples } from './voice';
+import { breathSamples, gargleSamples, noteSamples, padSamples } from './voice';
 import { TONES } from '../story/tune';
 
 /**
@@ -419,6 +419,7 @@ export class AudioEngine {
   private inhales: Buf[] = [];
   private exhales: Buf[] = [];
   private notes: Buf[][] = [];
+  private padVoices: Buf[] = [];
   /** 0..1 multiplier on the surroundings (wind, the wreck), lowered for close moments. */
   private envLevel = 1;
 
@@ -1052,39 +1053,22 @@ export class AudioEngine {
 
   // ------------------------------------------------------------ the keypad
 
-  /** One keypad button: a clean, glassy electronic tone at TONES[tone]. */
+  /** One keypad button: its tone (TONES[tone]) hummed in a clean version of the stranger's voice. */
   padTone(tone: number, level: number, pan = 0) {
     const ctx = this.ctx;
-    if (!ctx) return;
-    const f = TONES[tone];
-    if (!f) return;
-    const now = ctx.currentTime;
-    const out = ctx.createGain();
-    out.gain.setValueAtTime(0.0001, now);
-    out.gain.exponentialRampToValueAtTime(level, now + 0.008);
-    out.gain.setTargetAtTime(level * 0.55, now + 0.05, 0.08);
-    out.gain.setTargetAtTime(0.0001, now + 0.55, 0.12);
+    const buf = this.padVoices[tone];
+    if (!ctx || !buf) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const g = ctx.createGain();
+    g.gain.value = level;
     const p = ctx.createStereoPanner();
     p.pan.value = pan;
-    out.connect(p).connect(this.master);
+    src.connect(g).connect(p).connect(this.master);
     const send = ctx.createGain();
-    send.gain.value = 0.35;
+    send.gain.value = 0.4;
     p.connect(send).connect(this.reverbSend);
-    // a sine with a soft bell-like partial and a faint click at the press
-    for (const [mul, type, g] of [
-      [1, 'sine', 0.7],
-      [2, 'triangle', 0.12],
-      [3.01, 'sine', 0.06],
-    ] as const) {
-      const o = ctx.createOscillator();
-      o.type = type;
-      o.frequency.value = f * mul;
-      const og = ctx.createGain();
-      og.gain.value = g;
-      o.connect(og).connect(out);
-      o.start(now);
-      o.stop(now + 1.3);
-    }
+    src.start();
     this.click(0.08);
   }
 
@@ -1315,6 +1299,7 @@ export class AudioEngine {
     for (let i = 0; i < 4; i++) this.inhales.push(mono(breathSamples(sr, 400 + i, true)));
     for (let i = 0; i < 5; i++) this.exhales.push(mono(breathSamples(sr, 500 + i, false)));
     this.notes = TONES.map((f, k) => [0, 1].map((v) => mono(noteSamples(sr, f, 600 + k * 10 + v))));
+    this.padVoices = TONES.map((f) => mono(padSamples(sr, f)));
 
     this.strangerBus = ctx.createGain();
     this.strangerBus.gain.value = 0;

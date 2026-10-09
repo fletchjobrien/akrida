@@ -195,15 +195,15 @@ function stationsBetween(x0: number, x1: number, extra: number[] = []) {
 
 /** 7x7 glyphs for the keypad: an alien script, one per button. */
 const GLYPHS = [
-  ['..###..', '.#...#.', '...#...', '..###..', '...#...', '.#...#.', '..###..'],
-  ['#.....#', '.#...#.', '..#.#..', '...#...', '...#...', '..#.#..', '.#...#.'],
-  ['...#...', '..#.#..', '.#...#.', '#######', '.......', '..###..', '.......'],
-  ['#######', '#......', '#.###..', '#.#.#..', '#.###..', '#......', '#######'],
-  ['..#.#..', '..#.#..', '#######', '..#.#..', '#######', '..#.#..', '..#.#..'],
-  ['.#####.', '#.....#', '#..#..#', '#.###.#', '#..#..#', '#.....#', '.#####.'],
-  ['#...#..', '.#.#...', '..#....', '.#.#...', '#...#..', '....#..', '...###.'],
-  ['...#...', '...#...', '.#####.', '#..#..#', '...#...', '..#.#..', '.#...#.'],
-  ['.##.##.', '#..#..#', '#.....#', '.#...#.', '..#.#..', '...#...', '.......'],
+  ['...#...', '..#.#..', '.#...#.', '.#.#.#.', '..#.#..', '...#...', '.#####.'],
+  ['#..#...', '#.#.#..', '##...#.', '#....#.', '#...#..', '#..#...', '####..#'],
+  ['..##...', '.#..#..', '....#..', '..##.#.', '.#....#', '.#.#..#', '..#.##.'],
+  ['...##..', '..#..#.', '..#....', '###..##', '..#...#', '..#..#.', '...##..'],
+  ['#.....#', '#.###.#', '#.#.#.#', '#.#...#', '#.####.', '#......', '.##.##.'],
+  ['..#....', '.#.#...', '#...#..', '.#...#.', '..#...#', '...#.#.', '....#..'],
+  ['.#...#.', '#.#.#.#', '...#...', '...#...', '..###..', '.#...#.', '..#.#..'],
+  ['###....', '#..#...', '#...#..', '.#...##', '..#....', '...#.#.', '....#..'],
+  ['..#.#..', '..#.#..', '.#...#.', '#..#..#', '.#...#.', '..###..', '...#...'],
 ];
 
 function glyphTexture() {
@@ -266,6 +266,8 @@ const INK_GOOD = rgb(0xa8dcff);
 const INK_BAD = rgb(0xff5040);
 const BUTTON_BASE = rgb(0x1d1a1a);
 const BUTTON_BASE_LIT = rgb(0x2a2420);
+/** The order the broken keypad lights its buttons in as it tries to boot. */
+const BOOT_ORDER = [4, 0, 8, 2, 6, 1, 7, 3, 5];
 
 interface Button {
   group: Object3D;
@@ -360,6 +362,11 @@ export class Ship {
   private verdictT = 0;
   private hovered = -1;
   private crackT = -1;
+  private sincePress = 99;
+  private wasDark = false;
+  private flashT = 0;
+  private padSparkTimer = 3;
+  private readonly padSparkFrom = new Object3D();
 
   constructor(
     rocks: Rocks,
@@ -1016,8 +1023,9 @@ export class Ship {
     const lower = this.add(D, new BoxGeometry(dw, dh * 0.5, 0.07), m.panel, 0, -dh * 0.25, 0.012);
     lower.rotation.x = 0.06;
     this.add(D, new BoxGeometry(dw * 0.95, 0.07, 0.08), m.accent, 0, dh * 0.38, 0.02);
-    this.add(D, new BoxGeometry(0.06, dh * 0.35, 0.09), m.metal, -dw * 0.38, 0, 0.03);
-    const dent = this.add(D, new IcosahedronGeometry(0.22, 0), m.charred, dw * 0.12, -0.05, 0.0);
+    // the handle, on the edge that opens (the door's local x is mirrored on the -z side)
+    this.add(D, new BoxGeometry(0.06, dh * 0.35, 0.09), m.metal, dw * 0.38 * cs, 0, 0.03);
+    const dent = this.add(D, new IcosahedronGeometry(0.22, 0), m.charred, -dw * 0.12 * cs, -0.05, 0.0);
     dent.scale.set(1.2, 0.8, 0.25);
     this.doorLocal = { x: xc, y: yc };
     this.slideSign = -1; // back toward the stern, into the hull
@@ -1033,6 +1041,8 @@ export class Ship {
     pad.rotation.y = cs > 0 ? 0 : Math.PI;
     G.add(pad);
     const panel = this.add(pad, new BoxGeometry(0.74, 0.74, 0.04), m.metal, 0, 0, -0.005);
+    this.padSparkFrom.position.set(0.38, 0.36, 0.05);
+    pad.add(this.padSparkFrom);
     this.add(pad, new BoxGeometry(0.82, 0.05, 0.05), m.accent, 0, 0.42, 0);
     this.add(pad, new BoxGeometry(0.82, 0.04, 0.05), m.metal, 0, -0.41, 0);
     this.add(pad, new BoxGeometry(0.04, 0.82, 0.05), m.metal, -0.41, 0, 0);
@@ -1137,8 +1147,9 @@ export class Ship {
     if (this.state !== 'locked' || this.verdict !== 'none') return;
     const b = this.buttons[i];
     b.press = 1;
+    this.sincePress = 0;
     const tone = PAD_TONES[i];
-    this.audio.padTone(tone, 0.22);
+    this.audio.padTone(tone, 0.5);
     this.seq.push(tone);
     this.seqTimer = 5;
     if (this.seq.length === 3) {
@@ -1369,19 +1380,48 @@ export class Ship {
       }
       if (this.verdictT > (this.verdict === 'bad' ? 1.3 : 99)) this.verdict = 'none';
     }
+    // a damaged keypad: it keeps trying to boot, scrambling through its buttons; now and
+    // then it blacks out and comes back with a flash; two of its buttons stutter. It
+    // calms down while someone is pressing it.
+    this.sincePress += dt;
+    const glitchy = this.state === 'locked' && this.verdict === 'none' && this.sincePress > 2.5;
     const powered = this.state === 'locked' ? 0.85 + 0.15 * noise1(time * 13, 9) : 1;
+    const cycle = Math.floor(time / 2.4);
+    const ph = time - cycle * 2.4;
+    const boot = glitchy && ph < 0.5 ? BOOT_ORDER[(Math.floor(ph / 0.055) + cycle) % 9] : -1;
+    // ...then the whole pad flashes twice, like a display that keeps failing its self-test
+    const allFlash = glitchy && ((ph > 0.62 && ph < 0.74) || (ph > 0.86 && ph < 0.98));
+    const dark = glitchy && noise1(time * 1.7, 61) > 0.62 && noise1(time * 23, 62) > -0.2;
+    const comeback = glitchy && !dark && this.wasDark;
+    if (comeback) this.flashT = 0.12;
+    this.wasDark = dark;
+    this.flashT = Math.max(0, this.flashT - dt);
     this.buttons.forEach((b, i) => {
       b.press = Math.max(0, b.press - dt * 4);
       let ink = INK_IDLE;
+      let scale = powered;
       if (this.state !== 'locked' || this.verdict === 'good') ink = INK_GOOD;
       else if (this.verdict === 'bad' && this.verdictT > 0.45) ink = Math.floor((this.verdictT - 0.45) * 6) % 2 === 0 ? INK_BAD : INK_IDLE;
       else if (b.press > 0) ink = INK_PRESS;
       else if (i === this.hovered) ink = INK_HOVER;
+      else if (dark) scale = 0.15;
+      else if (this.flashT > 0 || i === boot || allFlash) ink = INK_PRESS;
+      else if (glitchy && (i === 2 || i === 6) && Math.sin(time * (29 + i * 3)) > 0.2) ink = INK_HOVER;
       const u = b.mat.uniforms;
-      (u.uInk.value as Vector3).copy(ink).multiplyScalar(ink === INK_IDLE ? powered : 1);
-      (u.uBase.value as Vector3).copy(b.press > 0 ? BUTTON_BASE_LIT : BUTTON_BASE);
-      b.group.position.z = 0.035 - b.press * 0.018;
+      (u.uInk.value as Vector3).copy(ink).multiplyScalar(ink === INK_IDLE ? scale : 1);
+      (u.uBase.value as Vector3).copy(b.press > 0 || i === boot || allFlash ? BUTTON_BASE_LIT : BUTTON_BASE);
+      b.group.position.z = 0.02 - b.press * 0.012;
     });
+    // it spits a spark now and then while it is broken
+    if (glitchy) {
+      this.padSparkTimer -= dt;
+      if (this.padSparkTimer <= 0) {
+        this.padSparkTimer = 2.5 + Math.random() * 4;
+        this.padSparkFrom.getWorldPosition(this.tmp);
+        this.burst(this.tmp, 6, 1.4, SPARK_HOT, SPARK_COOL, 1);
+        this.audio.siteZap(this.sound, 0.22);
+      }
+    }
   }
 
   private updateDoor(dt: number, time: number) {

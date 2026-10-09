@@ -232,9 +232,10 @@ export function noteSamples(sr: number, freq: number, seed: number, seconds = 0.
         f0: freq * vib * sag,
         voice: a * broken,
         breath: a * 2.2,
-        f1: 360,
-        f2: 860,
-        f3: 2350,
+        // the mouth opens up for the high notes, so they still ring
+        f1: Math.max(360, freq * 1.15),
+        f2: Math.max(860, freq * 2.3),
+        f3: Math.max(2350, freq * 3.6),
         gurgle: 0.22,
         stat: 0.14,
         rasp: 0.45,
@@ -248,7 +249,49 @@ export function noteSamples(sr: number, freq: number, seed: number, seconds = 0.
     const t = i / sr;
     const a = env(t, 0.02, 0.12) * (1 - env(t, seconds - 0.28, seconds - 0.02));
     const vib = Math.sin(t * 2 * Math.PI * 5.2) * 0.006 * env(t, 0.2, 0.6);
-    voice[i] += Math.sin(2 * Math.PI * freq * t * (1 + vib)) * 0.2 * a;
+    voice[i] += Math.sin(2 * Math.PI * freq * t * (1 + vib)) * 0.3 * a;
+  }
+  return voice;
+}
+
+/**
+ * The keypad's voice for a tone: the same hummed sound the stranger makes, but
+ * clean and steady (no rasp, no gurgle), over a pure electronic tone and a
+ * bright blip as it starts. It is meant to be matched by ear with the
+ * stranger's notes.
+ */
+export function padSamples(sr: number, freq: number, seconds = 1.0) {
+  const voice = render(
+    sr,
+    seconds,
+    11,
+    (t) => {
+      const a = env(t, 0, 0.04) * (1 - env(t, seconds * 0.55, seconds));
+      const vib = 1 + Math.sin(t * 2 * Math.PI * 5.5) * 0.005 * env(t, 0.15, 0.4);
+      return {
+        f0: freq * vib,
+        voice: a,
+        breath: a * 0.25,
+        f1: Math.max(380, freq * 1.15),
+        f2: Math.max(900, freq * 2.3),
+        f3: Math.max(2400, freq * 3.6),
+        gurgle: 0,
+        stat: 0,
+        rasp: 0.05,
+        jitter: 0.002,
+      };
+    },
+    0.45,
+  );
+  for (let i = 0; i < voice.length; i++) {
+    const t = i / sr;
+    const a = env(t, 0, 0.01) * (1 - env(t, seconds * 0.5, seconds));
+    const vib = Math.sin(t * 2 * Math.PI * 5.5) * 0.005 * env(t, 0.15, 0.4);
+    const blip = Math.exp(-t / 0.03);
+    voice[i] +=
+      Math.sin(2 * Math.PI * freq * t * (1 + vib)) * 0.4 * a +
+      Math.sin(2 * Math.PI * freq * 2 * t) * 0.18 * blip +
+      Math.sin(2 * Math.PI * freq * 4 * t) * 0.06 * blip;
   }
   return voice;
 }

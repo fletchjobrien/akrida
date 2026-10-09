@@ -89,10 +89,10 @@ interface SecondPodLayout {
 const POD2_DISTANCE = 26;
 const TRAIL_LENGTH = 22;
 /**
- * Where the ship's centre lies from the stranger: further right and a little up the
- * screen, so its tail is just in sight from there and its trench runs past the trail.
+ * Where the ship's centre lies from the stranger: well further right and a little up
+ * the screen, out of sight from there, its trench running back past the trail.
  */
-const SHIP_OFFSET = new Vector2(20, -11);
+const SHIP_OFFSET = new Vector2(32, -12);
 
 /**
  * Lay out the second pod and its survivor around the crater (crater at 0, 0),

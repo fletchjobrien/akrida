@@ -54,7 +54,7 @@ wakes. Walk right:
 | Its crater | 38 |
 | The second pod | 64 |
 | The dying stranger | 86 |
-| The ship (centre, a little up the screen) | 106 |
+| The ship (centre, a little up the screen) | 118 |
 
 The first pod lies nose-down in its crater. Its skid trench runs off to the
 left, back toward the start, with wreckage along it and past the rim, so you
@@ -140,9 +140,11 @@ down differently:
   4. Then everything eases back and you have control again. Click again to hear
      the tune again.
 - **The tune** opens the ship's door (see below). `src/story/tune.ts` has the
-  nine tones (an A minor pentatonic over two octaves: A3 C4 D4 E4 G4 A4 C5 D5
-  E5) and the stranger's three (D4, G4, C4). Under the rasp there is a thin
-  pure tone, so you can tell each pitch apart.
+  nine tones and the stranger's three. The nine are a stack of thirds over more
+  than two octaves (G3 B3 D4 F4 A4 C5 E5 G5 B5), at least three semitones
+  apart, so no two are easy to confuse. The stranger's tune leaps low, high,
+  then middle (B3, E5, F4). Under the rasp there is a pure tone, so you can
+  tell each pitch apart.
 - **Code:**
   - The skid and skip marks are part of the terrain height, on the CPU and the
     GPU (`src/world/crater.ts`, uniforms `uSite2`, `uSite2Trail`, `uSite2On`).
@@ -156,12 +158,11 @@ down differently:
 
 ## The ship
 
-The ship you escaped from lies about 20 units further right than the stranger and
-a little up the screen. Like the pods, it points nose-right. From where the
-stranger lies, only the ship's tail shows, in the top-right corner of the
-screen, with its trench and wreckage running back past the stranger. As you
-come closer, a low swell plays and the
-creature turns to look.
+The ship you escaped from lies about 32 units further right than the stranger
+and a little up the screen. Like the pods, it points nose-right. From where the
+stranger lies you cannot see the ship, only wreckage at the tail of its trench
+at the top of the screen, and its smoke and roar. As you come closer, a low
+swell plays and the creature turns to look.
 
 - **The crash:** it came in long and low. It ploughed a 28-unit trench, banked
   and flat-floored, scorched black toward the wreck. It shoved up a great bank
@@ -214,13 +215,17 @@ On the flank facing you, under the chine, an airlock is cut into the hull
 itself, with a dark recess behind the doorway. A metal trim, hazard chevrons
 and an orange band run round it into the plating. Its door is buckled and
 jammed, and an amber light set into the trim blinks over it. Beside it, a 3x3
-keypad of glowing glyphs is set flush into the hull plating.
+keypad of alien glyphs is set flush into the hull plating. The keypad is broken
+and keeps trying to boot: it scrambles through its buttons, the whole pad
+flashes twice, it sometimes blacks out and comes back with a flash, two
+buttons stutter, and it spits the odd spark. It calms down while you press it.
 
 1. Walk up and click the keypad. Your creature steps aside toward the door so
    it does not block your view, and the camera closes in, so the glyphs are
    easy to read.
-2. Click buttons. Each one plays a clean tone, one of the nine. The order of
-   tones on the pad is shuffled (`PAD_TONES` in `src/story/tune.ts`).
+2. Click buttons. Each one hums its tone in the stranger's own voice, but
+   clean and steady, so you can match it against what the stranger sang. The
+   order of tones on the pad is shuffled (`PAD_TONES` in `src/story/tune.ts`).
 3. Play the stranger's three tones in order. A wrong sequence buzzes and the
    pad flashes red. The right one turns the glyphs blue and the light green.
    The lock's servo strains, bolts clunk back, and the seal breaks with a puff
