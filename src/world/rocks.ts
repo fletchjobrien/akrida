@@ -173,7 +173,7 @@ export class Rocks {
   readonly meshes: InstancedMesh[] = [];
   readonly nearby: RockInfo[] = [];
   private readonly cellSize = 6;
-  private readonly range = 6; // cells in each direction
+  private readonly range = 7; // cells in each direction
   private lastCx = Number.NaN;
   private lastCz = Number.NaN;
   private readonly capacity = 160;

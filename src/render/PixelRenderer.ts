@@ -23,6 +23,45 @@ import { glslRgb, PALETTE } from './palette';
 /** Layer used for objects that cast shadows. */
 export const SHADOW_LAYER = 1;
 
+/** Low-res pixels per world unit at the normal art density. */
+const BASE_PPU = 18;
+const ZOOM_KEY = 'akrida.zoom';
+
+/**
+ * Zoom levels. `rows` is the target height of the low-res image; `world` is
+ * how much more of the world to fit in it. Up to the default level, zooming
+ * changes the pixel size. Past it, the pixel size stays and the world gets
+ * smaller in pixels, so the chunky pixel-art look stays.
+ */
+const ZOOM_LEVELS = [
+  { rows: 150, world: 1 },
+  { rows: 180, world: 1 },
+  { rows: 210, world: 1 },
+  { rows: 250, world: 1 },
+  { rows: 300, world: 1 },
+  { rows: 300, world: 1.25 },
+  { rows: 300, world: 1.5 },
+];
+const DEFAULT_ZOOM = 4;
+
+function loadZoom(): number {
+  try {
+    const n = Number.parseInt(localStorage.getItem(ZOOM_KEY) ?? '', 10);
+    if (Number.isInteger(n) && n >= 0 && n < ZOOM_LEVELS.length) return n;
+  } catch {
+    // storage blocked: use the default
+  }
+  return DEFAULT_ZOOM;
+}
+
+function saveZoom(i: number) {
+  try {
+    localStorage.setItem(ZOOM_KEY, String(i));
+  } catch {
+    // storage blocked: the zoom is simply not remembered
+  }
+}
+
 const FULLSCREEN_VERT = /* glsl */ `
 void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
 `;
@@ -117,8 +156,8 @@ export class PixelRenderer {
   readonly renderer: WebGLRenderer;
   readonly camera: OrthographicCamera;
   readonly shadowCam: OrthographicCamera;
-  /** Low-res pixels per world unit. */
-  ppu = 18;
+  /** Low-res pixels per world unit (changes with the far zoom levels). */
+  ppu = BASE_PPU;
   readonly pitch = (38 * Math.PI) / 180;
   readonly R = new Vector3(1, 0, 0);
   readonly U = new Vector3();
@@ -129,10 +168,8 @@ export class PixelRenderer {
   screenW = 0;
   screenH = 0;
   dpr = 1;
-  /** Target number of low-res rows; the mouse wheel steps through these. */
-  private zoomSteps = [150, 180, 210, 250, 300];
-  /** Start fully zoomed out. */
-  zoomIndex = this.zoomSteps.length - 1;
+  /** Current zoom level; remembered between visits. */
+  zoomIndex = loadZoom();
   /** Continuous (unsnapped) focus point of the camera. */
   readonly focus = new Vector3();
   private readonly offset = new Vector2();
@@ -142,7 +179,7 @@ export class PixelRenderer {
   private postRT!: WebGLRenderTarget;
   private readonly shadowRT: WebGLRenderTarget;
   private readonly shadowSize = 2048;
-  private readonly shadowExtent = 34;
+  private readonly shadowExtent = 40;
   private readonly depthMat = new MeshDepthMaterial({ depthPacking: RGBADepthPacking });
 
   private readonly quadCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -229,12 +266,25 @@ export class PixelRenderer {
     this.resize();
   }
 
+  private scaleFor(i: number) {
+    return Math.max(1, Math.round(this.screenH / ZOOM_LEVELS[i].rows));
+  }
+
+  /** Step the zoom, skipping levels that look the same on this screen. */
   zoom(dir: number) {
-    const next = Math.min(this.zoomSteps.length - 1, Math.max(0, this.zoomIndex + dir));
-    if (next !== this.zoomIndex) {
-      this.zoomIndex = next;
-      this.resize();
+    const look = (i: number) => `${this.scaleFor(i)}:${ZOOM_LEVELS[i].world}`;
+    const current = look(this.zoomIndex);
+    let i = this.zoomIndex;
+    for (;;) {
+      const next = Math.min(ZOOM_LEVELS.length - 1, Math.max(0, i + dir));
+      if (next === i) break;
+      i = next;
+      if (look(i) !== current) break;
     }
+    if (look(i) === current) return;
+    this.zoomIndex = i;
+    saveZoom(i);
+    this.resize();
   }
 
   resize() {
@@ -244,16 +294,30 @@ export class PixelRenderer {
     this.screenW = w;
     this.screenH = h;
     this.renderer.setSize(w, h, false);
-    this.scale = Math.max(1, Math.round(h / this.zoomSteps[this.zoomIndex]));
+    this.scale = this.scaleFor(this.zoomIndex);
+    this.ppu = BASE_PPU / ZOOM_LEVELS[this.zoomIndex].world;
     const lowW = Math.ceil(w / this.scale) + 2;
     const lowH = Math.ceil(h / this.scale) + 2;
-    if (lowW === this.lowW && lowH === this.lowH && this.mainRT) {
-      this.updateBlitUniforms();
-      return;
+    if (lowW !== this.lowW || lowH !== this.lowH || !this.mainRT) {
+      this.lowW = lowW;
+      this.lowH = lowH;
+      this.allocateTargets();
     }
-    this.lowW = lowW;
-    this.lowH = lowH;
 
+    const hw = lowW / 2 / this.ppu;
+    const hh = lowH / 2 / this.ppu;
+    this.camera.left = -hw;
+    this.camera.right = hw;
+    this.camera.top = hh;
+    this.camera.bottom = -hh;
+    this.camera.updateProjectionMatrix();
+    shared.uPixelWorld.value.set(1 / this.ppu, 1 / (this.ppu * Math.sin(this.pitch)));
+    this.updateBlitUniforms();
+  }
+
+  private allocateTargets() {
+    const lowW = this.lowW;
+    const lowH = this.lowH;
     this.mainRT?.dispose();
     this.mainRT?.depthTexture?.dispose();
     this.postRT?.dispose();
@@ -273,16 +337,6 @@ export class PixelRenderer {
       generateMipmaps: false,
       depthBuffer: false,
     });
-
-    const hw = lowW / 2 / this.ppu;
-    const hh = lowH / 2 / this.ppu;
-    this.camera.left = -hw;
-    this.camera.right = hw;
-    this.camera.top = hh;
-    this.camera.bottom = -hh;
-    this.camera.updateProjectionMatrix();
-    shared.uPixelWorld.value.set(1 / this.ppu, 1 / (this.ppu * Math.sin(this.pitch)));
-    this.updateBlitUniforms();
   }
 
   private updateBlitUniforms() {

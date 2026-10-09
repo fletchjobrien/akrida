@@ -200,7 +200,7 @@ export class Terrain {
   readonly cell: number;
   private offset = new Vector2();
 
-  constructor(size = 96, segments = 192) {
+  constructor(size = 128, segments = 224) {
     const geo = new PlaneGeometry(size, size, segments, segments);
     geo.rotateX(-Math.PI / 2);
     this.cell = size / segments;

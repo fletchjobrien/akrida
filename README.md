@@ -11,7 +11,7 @@ low resolution so that it looks like hand-made 2D pixel art.
 | Shift (hold) | Sprint |
 | Ctrl or C (tap) | Crouch on or off. Sprinting also stands the creature up. |
 | Mouse | Look. When the creature stands still, it looks at the cursor. When it runs, it tilts its head toward the cursor. |
-| Mouse wheel | Zoom in (wheel up) or out (wheel down). The game starts fully zoomed out. |
+| Mouse wheel | Zoom in (wheel up) or out (wheel down). The game remembers your zoom. |
 | Double-click | Fullscreen |
 
 The game shows no UI. A small pixel cursor shows when you move the mouse and
@@ -51,8 +51,11 @@ To add server logic later (saves, story state), add a `main` script to
 ## How the rendering works
 
 - **Low resolution, orthographic camera.** The scene renders into a small
-  target (about 300 rows at the start), then a nearest-neighbour upscale draws it
-  to the screen. The camera angle is fixed.
+  target (about 300 rows at the default zoom), then a nearest-neighbour upscale
+  draws it to the screen. The camera angle is fixed.
+- **Zoom.** Up to the default zoom, zooming changes the size of the pixels.
+  The two furthest levels keep the pixel size and fit 1.25 and 1.5 times more
+  of the world into the image, so the pixels stay chunky.
 - **Texel-snapped camera.** The camera moves in whole low-res pixels, so static
   objects never shimmer. The fractional part of the camera position shifts the
   upscaled image instead, so scrolling stays smooth.

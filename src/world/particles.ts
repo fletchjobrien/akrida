@@ -73,7 +73,7 @@ export class SandStreaks {
   private readonly fade: Float32Array;
   private readonly geo: BufferGeometry;
 
-  constructor(private readonly capacity = 260) {
+  constructor(private readonly capacity = 520) {
     this.geo = new BufferGeometry();
     this.pos = new Float32Array(capacity * 6);
     this.col = new Float32Array(capacity * 6);
@@ -97,7 +97,9 @@ export class SandStreaks {
     height: (x: number, z: number) => number,
   ) {
     const s = wind.strength;
-    const want = Math.floor(this.capacity * Math.max(0, (s - 0.18) / 0.82) ** 1.4);
+    // same density on screen at any zoom: more grains when more ground is in view
+    const area = Math.min(2, Math.max(0.5, (halfW * halfD) / 200));
+    const want = Math.min(this.capacity, Math.floor(260 * area * Math.max(0, (s - 0.18) / 0.82) ** 1.4));
     const wx = wind.dir.x;
     const wz = wind.dir.y;
     // spawn upwind of the view so streaks enter from the edge, or anywhere at first
