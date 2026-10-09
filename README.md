@@ -167,9 +167,22 @@ creature turns to look.
   and flat-floored, scorched black toward the wreck. It shoved up a great bank
   of sand in front of its bow, and its back broke on landing.
 - **The ship:** about 20 units long, eight times a pod's length. It has the
-  same off-white faceted hull, orange bands and charred heat shielding, so it
-  reads as the pods' mothership. On its flank is a row of four pod bays: two
-  are sealed, two stand empty (your pod and the stranger's).
+  pods' off-white plating, orange bands and charred heat shielding, so it reads
+  as their mothership. It is not a tube:
+  - the hull is lofted through an angular cross-section: a flat top, sloped
+    upper flanks, a sharp chine where they meet the vertical lower flanks, and
+    a chamfered keel;
+  - the prow narrows and droops into a beak;
+  - blade-like strakes run along both chines;
+  - a dorsal spine with vents runs along the stern half, ending in a swept fin;
+  - a wedge-fronted bridge tower with a dark canopy sits on the bow half;
+  - radiator vanes stand over the stern, behind a squared-off drive block with
+    hexagonal thrusters;
+  - delta wings sweep back low on the flanks, and hatches, vents and conduits
+    cover the top.
+
+  On its upper flank is a row of four pod bays: two are sealed, two stand empty
+  (your pod and the stranger's).
 - **Damage:**
   - its back is broken: the bow half is bent down and aside, with frame rings,
     hanging cables and fire in the gap;
@@ -197,12 +210,15 @@ creature turns to look.
 
 ### The door and the keypad
 
-On the flank facing you there is an airlock. Its door is buckled and jammed,
-an amber light blinks over it, and beside it is a 3x3 keypad of glowing
-glyphs.
+On the flank facing you, under the chine, an airlock is cut into the hull
+itself, with a dark recess behind the doorway. A metal trim, hazard chevrons
+and an orange band run round it into the plating. Its door is buckled and
+jammed, and an amber light set into the trim blinks over it. Beside it, a 3x3
+keypad of glowing glyphs is set flush into the hull plating.
 
-1. Walk up and click the keypad. The camera closes in, so the glyphs are easy
-   to read.
+1. Walk up and click the keypad. Your creature steps aside toward the door so
+   it does not block your view, and the camera closes in, so the glyphs are
+   easy to read.
 2. Click buttons. Each one plays a clean tone, one of the nine. The order of
    tones on the pad is shuffled (`PAD_TONES` in `src/story/tune.ts`).
 3. Play the stranger's three tones in order. A wrong sequence buzzes and the
@@ -213,7 +229,7 @@ glyphs.
 5. Click the cracked door. Your creature steps up and gets its hands into the
    gap. It braces and hauls while the door grinds and judders along its track.
    It rests, then pulls again with everything it has. The door gives all at
-   once with a clang. The creature is thrown off balance, stumbles away,
+   once with a clang and slides back into the hull. The creature is thrown off balance, stumbles away,
    catches itself doubled over, and straightens beside the open doorway. A red
    emergency light flickers inside.
 

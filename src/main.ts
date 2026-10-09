@@ -409,6 +409,13 @@ function update(dt: number, now: number) {
     control.move.set(0, 0);
     control.sprint = false;
     control.crouch = !padMode;
+    if (padMode) {
+      // step to the keypad's door side, so the creature does not block the view of it
+      const dx = ship!.padStand.x - creature.pos.x;
+      const dz = ship!.padStand.z - creature.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.08) control.move.set((dx / d) * Math.min(0.7, d * 2), (-dz / d) * Math.min(0.7, d * 2));
+    }
   }
   strangerHover = !!stranger && input.hasMouse && !holding && stranger.canInteract(creature.pos, mouseGround);
   // what the cursor is over at the ship: a keypad button, the keypad, the cracked door

@@ -3,10 +3,12 @@ import {
   BufferGeometry,
   CylinderGeometry,
   DataTexture,
+  ExtrudeGeometry,
+  Float32BufferAttribute,
+  Shape,
   GLSL3,
   Group,
   IcosahedronGeometry,
-  LatheGeometry,
   Mesh,
   NearestFilter,
   Object3D,
@@ -54,36 +56,141 @@ const ARC_COOL = C(0x6aa8ff);
 /** Flame colours, hottest last. */
 const FLAME = [rgb(0x7a1c10), rgb(0xc8401c), rgb(0xf08a2c), rgb(0xffd060), rgb(0xfff4c0)];
 
-/** The hull's cross-section radius along its length (x from aft to bow). */
-const PROFILE: [number, number][] = [
-  [-10, 1.55],
-  [-9.6, 1.9],
-  [-8, 2.15],
-  [-2, 2.3],
-  [3, 2.25],
-  [6, 1.95],
-  [8, 1.45],
-  [9.3, 0.85],
-  [10, 0.25],
-  [10.15, 0],
+/**
+ * The hull is lofted through these stations, aft to bow: half-width w, half-height
+ * h and the height y of the section's centre. The section is angular, not round:
+ * sloped upper flanks meeting vertical lower flanks at a sharp chine, a flat top,
+ * chamfered keel, and a beak of a prow that droops.
+ */
+interface Station {
+  x: number;
+  w: number;
+  h: number;
+  y: number;
+}
+const STATIONS: Station[] = [
+  { x: -10.2, w: 1.75, h: 1.2, y: 0.05 },
+  { x: -9.4, w: 2.25, h: 1.5, y: 0 },
+  { x: -6, w: 2.45, h: 1.62, y: 0 },
+  { x: 1, w: 2.45, h: 1.6, y: 0 },
+  { x: 4.5, w: 2.2, h: 1.42, y: -0.05 },
+  { x: 7, w: 1.5, h: 0.92, y: -0.22 },
+  { x: 9, w: 0.7, h: 0.42, y: -0.45 },
+  { x: 10.4, w: 0.06, h: 0.05, y: -0.62 },
 ];
-/** The hull is a little flatter than it is wide. */
-const FLAT = 0.82;
 /** Where its back broke. */
 const BREAK = -1.25;
-/** How far its centre sits above the trench floor. */
-const RIDE = 1.2;
+/** How far its centre sits above the trench floor (its keel is buried). */
+const RIDE = 1.0;
+/** The airlock door, cut into the near flank: stations it spans and heights (ship space). */
+const DOOR = { x0: -3.875, x1: -2.925, y0: -0.96, y1: 0.54 };
 
-function radiusAt(x: number) {
-  if (x <= PROFILE[0][0]) return PROFILE[0][1];
-  for (let i = 1; i < PROFILE.length; i++) {
-    const [x1, r1] = PROFILE[i];
-    if (x <= x1) {
-      const [x0, r0] = PROFILE[i - 1];
-      return r0 + ((r1 - r0) * (x - x0)) / (x1 - x0);
+function stationAt(x: number): Station {
+  if (x <= STATIONS[0].x) return STATIONS[0];
+  for (let i = 1; i < STATIONS.length; i++) {
+    const b = STATIONS[i];
+    if (x <= b.x) {
+      const a = STATIONS[i - 1];
+      const t = (x - a.x) / (b.x - a.x);
+      return { x, w: a.w + (b.w - a.w) * t, h: a.h + (b.h - a.h) * t, y: a.y + (b.y - a.y) * t };
     }
   }
-  return 0;
+  return STATIONS[STATIONS.length - 1];
+}
+
+/**
+ * The hull's cross-section at station x, as (z, y) points round the outside.
+ * `cs` is the side the door is on; its two corners are part of every section so
+ * the loft can leave a hole there. Returns the points and the door edge's index.
+ */
+function hullSection(x: number, cs: number, inflate = 0): { pts: [number, number][]; door: number } {
+  const st = stationAt(x);
+  const w = st.w + inflate;
+  const h = st.h + inflate;
+  const y = st.y;
+  const shoulder = 0.5 * h;
+  const keel = -0.65 * h;
+  const clampY = (v: number) => Math.min(shoulder, Math.max(keel, v - y)) + y;
+  const near: [number, number][] = [
+    [0.58 * w, h + y],
+    [w, shoulder + y],
+    [w, clampY(DOOR.y1)],
+    [w, clampY(DOOR.y0)],
+    [w, keel + y],
+    [0.7 * w, -h + y],
+  ];
+  const far: [number, number][] = [
+    [-0.7 * w, -h + y],
+    [-w, keel + y],
+    [-w, shoulder + y],
+    [-0.58 * w, h + y],
+  ];
+  // on the -z side, mirrored (the loft turns every face outward whatever the winding)
+  return { pts: [...near, ...far].map(([z, yy]) => [cs * z, yy] as [number, number]), door: 2 };
+}
+
+/**
+ * Loft a closed section along stations xs: quads between neighbouring sections,
+ * faces turned outward, ends optionally capped. `skip(i, k)` leaves out the face
+ * between stations i, i+1 on edge k.
+ */
+function loft(
+  xs: number[],
+  section: (x: number) => [number, number][],
+  centre: (x: number) => [number, number],
+  offsetX = 0,
+  skip?: (i: number, k: number) => boolean,
+  caps: [boolean, boolean] = [false, false],
+) {
+  const pos: number[] = [];
+  const tri = (a: number[], b: number[], c: number[], out: number[]) => {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    if (nx * out[0] + ny * out[1] + nz * out[2] < 0) pos.push(...a, ...c, ...b);
+    else pos.push(...a, ...b, ...c);
+  };
+  const secs = xs.map((x) => section(x));
+  for (let i = 0; i < xs.length - 1; i++) {
+    const A = secs[i];
+    const B = secs[i + 1];
+    const n = A.length;
+    for (let k = 0; k < n; k++) {
+      if (skip?.(i, k)) continue;
+      const k2 = (k + 1) % n;
+      const p00 = [xs[i] - offsetX, A[k][1], A[k][0]];
+      const p01 = [xs[i] - offsetX, A[k2][1], A[k2][0]];
+      const p10 = [xs[i + 1] - offsetX, B[k][1], B[k][0]];
+      const p11 = [xs[i + 1] - offsetX, B[k2][1], B[k2][0]];
+      // outward: from the section's centre toward the middle of this edge
+      const [cy, cz] = centre((xs[i] + xs[i + 1]) / 2);
+      const out = [0, (A[k][1] + A[k2][1]) / 2 - cy, (A[k][0] + A[k2][0]) / 2 - cz];
+      tri(p00, p01, p11, out);
+      tri(p00, p11, p10, out);
+    }
+  }
+  caps.forEach((on, e) => {
+    if (!on) return;
+    const i = e === 0 ? 0 : xs.length - 1;
+    const S = secs[i];
+    const x = xs[i] - offsetX;
+    const [cy, cz] = centre(xs[i]);
+    for (let k = 0; k < S.length; k++) {
+      const k2 = (k + 1) % S.length;
+      tri([x, cy, cz], [x, S[k][1], S[k][0]], [x, S[k2][1], S[k2][0]], [e === 0 ? -1 : 1, 0, 0]);
+    }
+  });
+  const g = new BufferGeometry();
+  g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** Stations from x0 to x1: the hull's own, plus any extras, in order. */
+function stationsBetween(x0: number, x1: number, extra: number[] = []) {
+  const xs = [x0, ...STATIONS.map((s) => s.x), ...extra].filter((x) => x >= x0 && x <= x1);
+  xs.push(x1);
+  return [...new Set(xs.map((x) => +x.toFixed(4)))].sort((a, b) => a - b);
 }
 
 /** 7x7 glyphs for the keypad: an alien script, one per button. */
@@ -198,6 +305,8 @@ export class Ship {
 
   // the door and its keypad, in world space
   readonly padCenter = new Vector3();
+  /** Where to stand to use the keypad: in front of it, a step toward the door, so the view of it is clear. */
+  readonly padStand = new Vector3();
   readonly doorCenter = new Vector3();
   /** Out of the door's face, on the ground (unit). */
   readonly doorNormal = new Vector3();
@@ -220,7 +329,6 @@ export class Ship {
   private readonly fireFrom: Object3D[] = [];
   private readonly sparkFrom: Object3D[] = [];
   private readonly navLights: { mat: ShaderMaterial; on: Vector3; off: Vector3; period: number; phase: number }[] = [];
-  private readonly housing = new Group();
   private readonly doorPanel = new Group();
   private readonly doorSparkFrom = new Object3D();
   private readonly statusMat: ShaderMaterial;
@@ -230,7 +338,6 @@ export class Ship {
   private readonly glyphs = glyphTexture();
   private readonly ray = new Raycaster();
   private readonly tmp = new Vector3();
-  private readonly tmp2 = new Vector3();
   private readonly cs: number;
   private readonly cosY: number;
   private readonly sinY: number;
@@ -294,7 +401,7 @@ export class Ship {
     for (const part of this.hullParts) rocks.addStatic(footprintOf(part, 3));
 
     this.buildDebris(rocks);
-    this.padPanel = this.buildAirlock(rocks);
+    this.padPanel = this.buildDoor();
   }
 
   // ------------------------------------------------------------------ build
@@ -314,34 +421,106 @@ export class Ship {
     return x > BREAK ? [this.bow, x - BREAK] : [this.group, x];
   }
 
+  /**
+   * Where a ray from the hull's centre line at station x, angle phi from the top
+   * toward local +z, meets the hull (plus `lift` out of it), and the angle of the
+   * surface's normal there (from up, toward +z).
+   */
+  private hullPoint(x: number, phi: number, lift = 0) {
+    const st = stationAt(x);
+    const { pts } = hullSection(x, this.cs);
+    const dy = Math.cos(phi);
+    const dz = Math.sin(phi);
+    let best = Infinity;
+    let ny = dy;
+    let nz = dz;
+    for (let k = 0; k < pts.length; k++) {
+      const [z1, y1] = pts[k];
+      const [z2, y2] = pts[(k + 1) % pts.length];
+      const ez = z2 - z1;
+      const ey = y2 - y1;
+      const den = dz * ey - dy * ez;
+      if (Math.abs(den) < 1e-9) continue;
+      // centre + t*d = p1 + u*e
+      const oz = z1;
+      const oy = y1 - st.y;
+      const t = (oz * ey - oy * ez) / den;
+      const u = (oz * dy - oy * dz) / den;
+      if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6 && t < best) {
+        best = t;
+        const l = Math.hypot(ez, ey) || 1;
+        // the edge's normal, turned to face the way the ray came out
+        ny = -ez / l;
+        nz = ey / l;
+        if (ny * dy + nz * dz < 0) {
+          ny = -ny;
+          nz = -nz;
+        }
+      }
+    }
+    if (!Number.isFinite(best)) best = st.w;
+    const p = new Vector3(x, st.y + dy * best + ny * lift, dz * best + nz * lift);
+    return { p, angle: Math.atan2(nz, ny) };
+  }
+
   /** A point on (or `lift` off) the hull surface at station x, angle phi from the top toward local +z. */
   private surface(x: number, phi: number, lift = 0) {
-    const r = radiusAt(x);
-    return new Vector3(x, (r * FLAT + lift) * Math.cos(phi), (r + lift) * Math.sin(phi));
+    return this.hullPoint(x, phi, lift).p;
   }
 
   /** Put a mesh on the hull at (x, phi), its local +y pointing out of the surface. */
   private onHull(geo: BufferGeometry, mat: Material, x: number, phi: number, lift = 0, spin = 0) {
     const [parent, hx] = this.host(x);
-    const p = this.surface(x, phi, lift);
+    const { p, angle } = this.hullPoint(x, phi, lift);
     const m = this.add(parent, geo, mat, hx, p.y, p.z);
-    m.rotation.set(phi, 0, 0);
+    m.rotation.set(angle, 0, 0);
     m.rotateY(spin);
     return m;
   }
 
-  /** A lathed slice of the hull between stations x0 and x1, optionally only an arc of it. */
-  private hullSlice(x0: number, x1: number, mat: Material, inflate = 0, from = 0, arc = Math.PI * 2, segs = 14) {
+  /**
+   * A skin of hull between stations x0 and x1, `inflate` proud of it; `faces`
+   * picks which facets by their normal (y up, z toward local +z).
+   */
+  private hullBand(x0: number, x1: number, mat: Material, inflate = 0, faces?: (ny: number, nz: number) => boolean, shadow = true) {
     const [parent] = this.host((x0 + x1) / 2);
     const offset = parent === this.bow ? BREAK : 0;
-    const pts: Vector2[] = [];
-    const xs = [x0, ...PROFILE.map((p) => p[0]).filter((x) => x > x0 && x < x1), x1];
-    for (const x of xs) pts.push(new Vector2(radiusAt(x) + inflate, x - offset));
-    // (lathe angle a puts a vertex at height -r sin a and depth r cos a once turned on its side,
-    // so phi from the top toward +z is lathe angle phi - pi/2)
-    const g = new LatheGeometry(pts, segs, from - Math.PI / 2, arc);
-    g.rotateZ(-Math.PI / 2);
-    g.scale(1, FLAT, 1);
+    const mid = hullSection((x0 + x1) / 2, this.cs, inflate).pts;
+    const cy = stationAt((x0 + x1) / 2).y;
+    const keep = mid.map((p, k) => {
+      if (!faces) return true;
+      const q = mid[(k + 1) % mid.length];
+      const ez = q[0] - p[0];
+      const ey = q[1] - p[1];
+      const l = Math.hypot(ez, ey) || 1;
+      let ny = -ez / l;
+      let nz = ey / l;
+      if (ny * ((p[1] + q[1]) / 2 - cy) + nz * ((p[0] + q[0]) / 2) < 0) {
+        ny = -ny;
+        nz = -nz;
+      }
+      return faces(ny, nz);
+    });
+    const g = loft(
+      stationsBetween(x0, x1),
+      (x) => hullSection(x, this.cs, inflate).pts,
+      (x) => [stationAt(x).y, 0],
+      offset,
+      (_i, k) => !keep[k],
+    );
+    return this.add(parent, g, mat, 0, 0, 0, shadow);
+  }
+
+  /** A solid loft of any section along x0..x1 (spine, tower, chines), capped. */
+  private prism(x0: number, x1: number, section: (x: number) => [number, number][], mat: Material, steps = 6) {
+    const [parent] = this.host((x0 + x1) / 2);
+    const offset = parent === this.bow ? BREAK : 0;
+    const xs = Array.from({ length: steps + 1 }, (_, i) => x0 + ((x1 - x0) * i) / steps);
+    const centre = (x: number): [number, number] => {
+      const p = section(x);
+      return [p.reduce((a, q) => a + q[1], 0) / p.length, p.reduce((a, q) => a + q[0], 0) / p.length];
+    };
+    const g = loft(xs, section, centre, offset, undefined, [true, true]);
     return this.add(parent, g, mat, 0, 0, 0);
   }
 
@@ -353,37 +532,151 @@ export class Ship {
     this.bow.rotation.set(0, 0.07 * cs, -0.045);
     this.group.add(this.bow);
 
-    const aft = this.hullSlice(-10, BREAK - 0.32, m.hull);
-    const fore = this.hullSlice(BREAK + 0.3, 10.15, m.hull);
+    // ---- the hull: two lofted halves, a hole left in the near flank for the airlock
+    const aftEnd = BREAK - 0.32;
+    const aftXs = stationsBetween(-10.2, aftEnd, [DOOR.x0, DOOR.x1, -8, -5, -3]);
+    const d0 = aftXs.indexOf(DOOR.x0);
+    const aft = this.add(
+      this.group,
+      loft(aftXs, (x) => hullSection(x, cs).pts, (x) => [stationAt(x).y, 0], 0, (i, k) => i === d0 && k === 2, [true, false]),
+      m.hull,
+      0,
+      0,
+      0,
+    );
+    const foreXs = stationsBetween(BREAK + 0.3, 10.4, [3, 6, 8, 9.7]);
+    const fore = this.add(
+      this.bow,
+      loft(foreXs, (x) => hullSection(x, cs).pts, (x) => [stationAt(x).y, 0], BREAK, undefined, [false, true]),
+      m.hull,
+      0,
+      0,
+      0,
+    );
     this.hullParts.push(aft, fore);
-    // seared underside and flanks from coming in hot
-    this.hullSlice(-9.8, BREAK - 0.35, m.charred, 0.02, Math.PI * 0.62, Math.PI * 0.76);
-    this.hullSlice(BREAK + 0.33, 9.6, m.charred, 0.02, Math.PI * 0.6, Math.PI * 0.8);
-    // bands, the same orange as the pods'
-    for (const [x0, x1] of [
-      [-8.9, -8.5],
-      [-3.2, -3.0],
-      [4.3, 4.7],
-      [7.1, 7.22],
-    ]) {
-      this.hullSlice(x0, x1, m.accent, 0.025);
-    }
-    // panel lines: slightly darker plates along the top
-    for (const x of [-7, -5.2, 1.4, 5.6]) this.hullSlice(x, x + 0.9, m.panel, 0.012, -0.5, 1.0, 14);
 
-    // the broken ends: frame rings, a dark inside, plates bent into the gap
-    for (const [x, sgn] of [
-      [BREAK - 0.34, -1],
-      [BREAK + 0.32, 1],
+    // seared keel from coming in hot, and the pods' orange in bands
+    const down = (ny: number) => ny < -0.3;
+    this.hullBand(-10.1, aftEnd - 0.03, m.charred, 0.02, down);
+    this.hullBand(BREAK + 0.33, 10.2, m.charred, 0.02, down);
+    for (const [x0, x1] of [
+      [-9.1, -8.8],
+      [4.6, 4.95],
+      [7.4, 7.52],
     ]) {
-      const [parent, hx] = this.host(x + sgn * 0.01);
-      const r = radiusAt(x);
-      const ring = this.add(parent, new TorusGeometry(r * 0.98, 0.09, 4, 14), m.metal, hx, 0, 0);
-      ring.rotation.y = Math.PI / 2;
-      ring.scale.set(1, FLAT, 1);
-      const cap = this.add(parent, new CylinderGeometry(r * 0.95, r * 0.95, 0.04, 14), m.hole, hx - sgn * 0.12, 0, 0, false);
-      cap.rotation.z = Math.PI / 2;
-      cap.scale.set(FLAT, 1, 1);
+      this.hullBand(x0, x1, m.accent, 0.03);
+    }
+    // darker plates set into the top and the upper flanks
+    const up = (ny: number) => ny > 0.95;
+    for (const x of [-7.6, -5.4, 1.2, 3.4]) this.hullBand(x, x + 1.1, m.panel, 0.012, up);
+    const flank = (ny: number, nz: number) => ny > 0.3 && ny < 0.95 && nz * cs < 0;
+    for (const x of [-8.2, -2.6, 2.2]) this.hullBand(x, x + 1.4, m.panel, 0.012, flank);
+
+    // ---- chines: blade-like strakes running along both flanks at the shoulder
+    for (const side of [1, -1]) {
+      const strake = (x0: number, x1: number) =>
+        this.prism(
+          x0,
+          x1,
+          (x) => {
+            const st = stationAt(x);
+            const u = (x - x0) / (x1 - x0);
+            const out = 0.34 * Math.min(1, u * 4, (1 - u) * 3);
+            const yy = st.y + 0.5 * st.h;
+            return [
+              [side * (st.w - 0.06), yy + 0.07],
+              [side * (st.w + out), yy - 0.01],
+              [side * (st.w - 0.06), yy - 0.11],
+            ];
+          },
+          m.panel,
+          8,
+        );
+      strake(-9.3, aftEnd - 0.1);
+      strake(BREAK + 0.4, 6.8);
+    }
+
+    // ---- the dorsal spine along the top of the stern half, ending in a raised fin
+    this.prism(
+      -8.8,
+      aftEnd - 0.2,
+      (x) => {
+        const st = stationAt(x);
+        const u = (x + 8.8) / (aftEnd - 0.2 + 8.8);
+        const hgt = 0.42 * Math.min(1, u * 5, (1 - u) * 6);
+        const top = st.y + st.h;
+        return [
+          [0.62, top - 0.05],
+          [0.38, top + hgt],
+          [-0.38, top + hgt],
+          [-0.62, top - 0.05],
+        ];
+      },
+      m.hull,
+      8,
+    );
+    // vents along the spine
+    for (let k = 0; k < 6; k++) this.add(this.group, new BoxGeometry(0.32, 0.05, 0.5), m.metal, -7.4 + k * 0.85, 2.04, 0);
+    // radiator vanes stacked over the stern
+    for (let k = 0; k < 6; k++) {
+      const vane = this.add(this.group, new BoxGeometry(0.05, 0.7, 1.9), k % 2 ? m.panel : m.metal, -9.45 + k * 0.33, 1.95, 0);
+      vane.rotation.x = 0.06 * (k % 3 - 1);
+    }
+
+    // ---- the bridge: a raised, wedge-fronted tower on the bow half, its canopy dark
+    const towerX0 = 2.6;
+    const towerX1 = 6.6;
+    const tower = (x: number, inflate = 0): [number, number][] => {
+      const st = stationAt(x);
+      const u = (x - towerX0) / (towerX1 - towerX0);
+      const hgt = 0.72 * Math.min(1, u * 4) * (u > 0.6 ? 1 - (u - 0.6) / 0.4 * 0.75 : 1) + inflate;
+      const wide = 0.9 * (1 - 0.35 * u) + inflate;
+      const top = st.y + st.h;
+      return [
+        [wide, top - 0.06],
+        [wide * 0.72, top + hgt],
+        [-wide * 0.72, top + hgt],
+        [-wide, top - 0.06],
+      ];
+    };
+    this.prism(towerX0, towerX1, (x) => tower(x), m.hull, 10);
+    this.prism(5.0, towerX1 - 0.05, (x) => tower(x, 0.025), m.glass, 6);
+    // a sensor mast on the bridge, snapped and hanging, and a dish
+    const mast = this.add(this.bow, new CylinderGeometry(0.05, 0.05, 1.4, 4), m.metal, 3.6 - BREAK, 2.35, 0.3);
+    mast.rotation.set(0.2, 0, -1.1);
+    const dish = this.add(this.bow, new CylinderGeometry(0.4, 0.12, 0.12, 8), m.panel, 3.2 - BREAK, 2.4, -0.4 * cs);
+    dish.rotation.set(-0.5 * cs, 0, 0.3);
+
+    // portholes along the upper flanks of the bow half
+    for (let k = 0; k < 6; k++) {
+      for (const side of [1, -1]) this.onHull(new BoxGeometry(0.2, 0.05, 0.14), m.glass, 0.4 + k * 0.62, side * 1.0, 0.004);
+    }
+    // greebles: hatches, vents and conduits scattered over the top
+    const rand = rng(4242);
+    for (let k = 0; k < 26; k++) {
+      const x = -9 + rand() * 18;
+      if (Math.abs(x - BREAK) < 0.9 || (x > towerX0 - 0.3 && x < towerX1)) continue;
+      const g = new BoxGeometry(0.15 + rand() * 0.5, 0.04 + rand() * 0.08, 0.12 + rand() * 0.35);
+      this.onHull(g, rand() < 0.5 ? m.metal : m.panel, x, (rand() - 0.5) * 1.3, 0.02, rand() < 0.5 ? 0 : Math.PI / 2);
+    }
+
+    // the broken ends: a frame band, a dark inside, plates bent into the gap
+    for (const [x, sgn] of [
+      [aftEnd, -1],
+      [BREAK + 0.3, 1],
+    ]) {
+      this.hullBand(x + sgn * 0.02, x + sgn * 0.16, m.metal, 0.04);
+      const [parent] = this.host(x + sgn * 0.05);
+      const offset = parent === this.bow ? BREAK : 0;
+      const inner = loft(
+        [x + sgn * 0.14, x + sgn * 0.16].sort((p, q) => p - q),
+        (xx) => hullSection(xx, cs, -0.06).pts,
+        (xx) => [stationAt(xx).y, 0],
+        offset,
+        undefined,
+        [true, true],
+      );
+      this.add(parent, inner, m.hole, 0, 0, 0, false);
       for (let k = 0; k < 6; k++) {
         const phi = (k / 6) * Math.PI * 2 + 0.3 * sgn;
         const plate = this.onHull(new BoxGeometry(0.5, 0.05, 0.4), m.hull, x - sgn * 0.12, phi, -0.03);
@@ -396,22 +689,14 @@ export class Ship {
       c.rotation.set(0.4 * k, 0, 1.2 + 0.3 * k);
     }
 
-    // the bridge: a band of dark windows wrapping the nose
-    for (let k = -2; k <= 2; k++) this.onHull(new BoxGeometry(0.5, 0.06, 0.24), m.glass, 7.7, k * 0.32, 0.005, 0.25);
-    // portholes along both flanks
-    for (let k = 0; k < 7; k++) {
-      for (const side of [1, -1]) this.onHull(new BoxGeometry(0.16, 0.05, 0.16), m.glass, 1.2 + k * 0.85, side * 1.05, 0.004);
-    }
-
-    // the pod bays: four in a row on the flank. Two stand empty: the two pods were launched.
+    // the pod bays: four in a row on the upper flank. Two stand empty: the two pods were launched.
     for (let k = 0; k < 4; k++) {
-      const x = -8.4 + k * 1.15;
-      const phi = 0.98 * cs;
+      const x = -8.6 + k * 1.15;
+      const phi = 0.95 * cs;
       const ring = this.onHull(new TorusGeometry(0.42, 0.07, 4, 10), m.accent, x, phi, 0.02);
       ring.rotateX(Math.PI / 2);
       if (k === 1 || k === 2) {
         this.onHull(new CylinderGeometry(0.36, 0.36, 0.06, 10), m.hole, x, phi, 0.0);
-        // the launch rails inside
         this.onHull(new BoxGeometry(0.05, 0.07, 0.6), m.metal, x - 0.15, phi, 0.0);
         this.onHull(new BoxGeometry(0.05, 0.07, 0.6), m.metal, x + 0.15, phi, 0.0);
       } else {
@@ -420,48 +705,115 @@ export class Ship {
       }
     }
 
-    // engines: three great bells at the stern; the lower one on the near side was torn away
-    const block = this.add(this.group, new CylinderGeometry(1.45, 1.55, 0.5, 14), m.metal, -10.15, 0, 0);
-    block.rotation.z = Math.PI / 2;
-    block.scale.set(FLAT, 1, 1);
+    // ---- engines: a squared-off drive block and three hexagonal bells; the lower near one tore away
+    this.add(this.group, new BoxGeometry(0.6, 2.0, 3.3), m.metal, -10.45, 0, 0);
+    this.add(this.group, new BoxGeometry(0.64, 0.14, 3.34), m.accent, -10.45, 0.82, 0);
     for (const [y, z] of [
       [0.42, 0],
-      [-0.42, -0.75 * cs],
+      [-0.5, -0.92 * cs],
     ]) {
-      const g = new CylinderGeometry(0.78, 0.5, 1.4, 12, 1, true);
+      const g = new CylinderGeometry(0.66, 0.44, 1.2, 6, 1, true);
       g.rotateZ(Math.PI / 2);
-      this.add(this.group, g, m.charred, -11.05, y, z);
-      const inner = new CylinderGeometry(0.72, 0.48, 0.05, 12);
+      this.add(this.group, g, m.charred, -11.3, y, z);
+      const inner = new CylinderGeometry(0.6, 0.42, 0.05, 6);
       inner.rotateZ(Math.PI / 2);
-      this.add(this.group, inner, m.hole, -11.5, y, z, false);
+      this.add(this.group, inner, m.hole, -11.85, y, z, false);
     }
-    // a stump where the third one tore off
-    this.add(this.group, new CylinderGeometry(0.42, 0.5, 0.35, 10), m.charred, -10.5, -0.42, 0.75 * cs).rotation.z = Math.PI / 2;
+    this.add(this.group, new CylinderGeometry(0.4, 0.46, 0.35, 6), m.charred, -10.85, -0.5, 0.92 * cs).rotation.z = Math.PI / 2;
 
-    // wings: the far one intact, the near one sheared off near the root
-    const far = this.add(this.group, new BoxGeometry(4.6, 0.16, 2.6), m.hull, -5, -0.45, -cs * 3.2);
-    far.rotation.set(0.12 * -cs, 0.18 * cs, 0);
-    this.add(this.group, new BoxGeometry(4.4, 0.17, 0.3), m.accent, -5.1, -0.4, -cs * 4.3).rotation.y = 0.18 * cs;
-    const stub = this.add(this.group, new BoxGeometry(2.6, 0.18, 0.9), m.hull, -5.3, -0.55, cs * 2.4);
-    stub.rotation.y = -0.1 * cs;
-    this.add(this.group, new BoxGeometry(2.4, 0.2, 0.18), m.charred, -5.3, -0.55, cs * 2.85);
-    // the dorsal fin, bent over
-    const fin = this.add(this.group, new BoxGeometry(2.4, 1.5, 0.14), m.hull, -8, 2.3, 0);
-    fin.rotation.x = 0.38 * cs;
-    this.add(this.group, new BoxGeometry(2.4, 0.22, 0.16), m.accent, -8, 2.95, 0.25 * cs).rotation.x = 0.38 * cs;
-    // a sensor mast near the bow, snapped and hanging
-    const mast = this.add(this.bow, new CylinderGeometry(0.05, 0.05, 1.4, 4), m.metal, 6.2 - BREAK, 1.75, 0.3);
-    mast.rotation.set(0.2, 0, -1.1);
+    // ---- wings: swept deltas low on the flanks; the far one whole, the near one sheared off
+    const delta = (pts: [number, number][], thick: number) => {
+      const shape = new Shape(pts.map(([x, z]) => new Vector2(x, z)));
+      const g = new ExtrudeGeometry(shape, { depth: thick, bevelEnabled: false });
+      g.rotateX(Math.PI / 2);
+      return g;
+    };
+    const farWing = this.add(
+      this.group,
+      delta(
+        [
+          [-8.8, 0],
+          [-3.0, 0],
+          [-7.6, 3.4],
+          [-9.3, 3.6],
+        ],
+        0.16,
+      ),
+      m.hull,
+      0,
+      -0.35,
+      -cs * 2.3,
+    );
+    farWing.scale.z = -cs;
+    farWing.rotation.x = 0.1 * cs;
+    const farEdge = this.add(
+      this.group,
+      delta(
+        [
+          [-9.3, 3.35],
+          [-7.6, 3.15],
+          [-7.6, 3.42],
+          [-9.3, 3.62],
+        ],
+        0.18,
+      ),
+      m.accent,
+      0,
+      -0.34,
+      -cs * 2.3,
+    );
+    farEdge.scale.z = -cs;
+    farEdge.rotation.x = 0.1 * cs;
+    const stub = this.add(
+      this.group,
+      delta(
+        [
+          [-8.6, 0],
+          [-4.6, 0],
+          [-6.3, 0.9],
+          [-7.4, 0.6],
+          [-8.3, 1.1],
+        ],
+        0.17,
+      ),
+      m.hull,
+      0,
+      -0.42,
+      cs * 2.3,
+    );
+    stub.scale.z = cs;
+    this.add(this.group, new BoxGeometry(2.2, 0.2, 0.14), m.charred, -7.2, -0.42, cs * 3.25).rotation.y = 0.25 * cs;
 
-    // nav lights: red at the fin tip, white on the nose, one flickering on the wing
+    // the dorsal fin rising off the spine, swept and bent over
+    const fin = this.add(
+      this.group,
+      delta(
+        [
+          [-9.6, 0],
+          [-7.0, 0],
+          [-8.6, 1.5],
+          [-9.5, 1.55],
+        ],
+        0.14,
+      ),
+      m.hull,
+      0,
+      2.02,
+      0.07,
+    );
+    fin.rotation.x = -Math.PI / 2 + 0.38 * cs;
+    const finTip = this.add(this.group, new BoxGeometry(1.0, 0.18, 0.16), m.accent, -9.05, 3.35, 0.55 * cs);
+    finTip.rotation.x = 0.38 * cs;
+
+    // nav lights: red at the fin tip, white on the prow, green on the far wingtip
     const nav = (parent: Object3D, x: number, y: number, z: number, on: number, period: number) => {
       const mat = toonMaterial({ dark: on, mid: on, light: on, unlit: true, outline: 0 });
       this.add(parent, new BoxGeometry(0.12, 0.12, 0.12), mat, x, y, z, false);
       this.navLights.push({ mat, on: rgb(on), off: rgb(0x2a1a18), period, phase: Math.random() });
     };
-    nav(this.group, -8.9, 3.0, 0.4 * cs, 0xff3c2c, 1.9);
-    nav(this.bow, 9.9 - BREAK, 0.35, 0, 0xf4f0e8, 2.6);
-    nav(this.group, -5.2, -0.3, -cs * 4.5, 0x50ff80, 3.1);
+    nav(this.group, -9.4, 3.45, 0.6 * cs, 0xff3c2c, 1.9);
+    nav(this.bow, 10.3 - BREAK, -0.58, 0, 0xf4f0e8, 2.6);
+    nav(this.group, -8.4, -0.3, -cs * 5.8, 0x50ff80, 3.1);
   }
 
   /** Breaches, fires, blast scars. */
@@ -520,7 +872,7 @@ export class Ship {
 
     // blast scars where it scraped and burned
     for (const [x, phi, s] of [
-      [-2.8, 1.2, 1],
+      [-6.6, 1.25, 1],
       [0.4, 0.2, 0.8],
       [4.2, 1.35, 0.9],
       [-7.5, 0.55, 0.7],
@@ -617,68 +969,48 @@ export class Ship {
   private readonly groundFires: Object3D[] = [];
 
   /**
-   * The airlock: a boxy housing on the flank facing the viewer, down to the
-   * ground, its door buckled and jammed, a keypad beside it.
+   * The airlock, cut into the near flank: a doorway in the hull itself with a
+   * dark recess behind, a trim and hazard chevrons round it, a door that slides
+   * back into the hull, and the keypad set flush into the plating beside it.
    */
-  private buildAirlock(rocks: Rocks): Mesh {
+  private buildDoor(): Mesh {
     const m = this.hull;
     const cs = this.cs;
-    const station = -3.4;
-    const out = 2.0 + 0.9; // face, out from the hull's axis
-    // world frame of the housing: along the hull, out of the face, up
-    const outward = new Vector3(this.sinY, 0, this.cosY).multiplyScalar(cs);
-    this.localToGround(station, cs * (out + 0.55), this.tmp);
-    const g = this.tmp.y;
-    this.doorGround = g;
-    this.localToGround(station, cs * out, this.tmp2);
-    const H = this.housing;
-    H.position.set(this.tmp2.x, g, this.tmp2.z);
-    // its local x along the hull, z out of the face
-    H.rotation.y = Math.atan2(outward.x, outward.z);
-    this.debris.push(H);
-    const ax = new Vector3(1, 0, 0).applyAxisAngle(new Vector3(0, 1, 0), H.rotation.y);
+    const G = this.group;
+    const xc = (DOOR.x0 + DOOR.x1) / 2;
+    const yc = (DOOR.y0 + DOOR.y1) / 2;
+    const dw = DOOR.x1 - DOOR.x0;
+    const dh = DOOR.y1 - DOOR.y0;
+    const w = stationAt(xc).w;
+    const face = (d: number) => cs * (w + d);
+    const box = (sx: number, sy: number, sz: number, mat: Material, x: number, y: number, z: number, shadow = true) =>
+      this.add(G, new BoxGeometry(sx, sy, sz), mat, x, y, z, shadow);
+    // the recess: walls, floor and ceiling in shadow, a red emergency light at the back
+    const depth = 0.7;
+    box(dw, dh, 0.02, m.hole, xc, yc, face(-depth), false);
+    box(0.02, dh, depth, m.hole, DOOR.x0, yc, face(-depth / 2), false);
+    box(0.02, dh, depth, m.hole, DOOR.x1, yc, face(-depth / 2), false);
+    box(dw, 0.02, depth, m.hole, xc, DOOR.y1, face(-depth / 2), false);
+    box(dw, 0.02, depth, m.hole, xc, DOOR.y0, face(-depth / 2), false);
+    box(0.5, 0.06, 0.03, this.emergencyMat, xc, DOOR.y1 - 0.12, face(-depth + 0.03), false);
+    // a trim round the opening, flush with the hull, and chevrons down both sides
+    box(dw + 0.2, 0.08, 0.06, m.metal, xc, DOOR.y1 + 0.04, face(0.0));
+    box(dw + 0.2, 0.06, 0.06, m.metal, xc, DOOR.y0 - 0.02, face(0.0));
+    box(0.08, dh + 0.1, 0.06, m.metal, DOOR.x0 - 0.04, yc, face(0.0));
+    box(0.08, dh + 0.1, 0.06, m.metal, DOOR.x1 + 0.04, yc, face(0.0));
+    for (const x of [DOOR.x0 - 0.14, DOOR.x1 + 0.14]) {
+      for (let k = 0; k < 5; k++) box(0.1, 0.12, 0.03, k % 2 ? m.metal : m.accent, x, DOOR.y0 + 0.15 + k * 0.28, face(0.0));
+    }
+    // a hull band picks up the trim over the door and runs on along the flank
+    box(dw + 2.2, 0.06, 0.04, m.accent, xc + 0.6, DOOR.y1 + 0.16, face(0.005));
+    // status light set into the trim over the door: amber while locked
+    box(0.12, 0.05, 0.05, this.statusMat, xc, DOOR.y1 + 0.04, face(0.025), false);
 
-    const box = (w: number, h: number, d: number, mat: Material, x: number, y: number, z: number, shadow = true) =>
-      this.add(H, new BoxGeometry(w, h, d), mat, x, y, z, shadow);
-    // the housing, sunk into the sand, reaching back into the hull: a block behind, and
-    // a face built round the doorway, with a pocket on one side the door slides into
-    const dw = this.doorWidth;
-    const dh = this.doorHeight;
-    const dx = -0.3; // door centre across the face
-    const L = -1.0;
-    const R = 1.4;
-    const top = 2.2;
-    const recess = 0.62;
-    box(R - L, top + 0.4, 1.6 - recess, m.hull, (L + R) / 2, top / 2 - 0.2, -recess - (1.6 - recess) / 2);
-    const leftW = dx - dw / 2 - L;
-    const rightW = R - (dx + dw / 2);
-    box(leftW, top + 0.4, recess, m.hull, L + leftW / 2, top / 2 - 0.2, -recess / 2);
-    box(rightW, top + 0.4, recess, m.hull, R - rightW / 2, top / 2 - 0.2, -recess / 2);
-    box(dw, top - dh - 0.12, recess, m.hull, dx, (top + dh + 0.12) / 2, -recess / 2);
-    box(dw, 0.4, recess, m.hull, dx, -0.08, -recess / 2);
-    box(R - L + 0.04, 0.18, 1.62, m.accent, (L + R) / 2, top - 0.2, -0.8);
-    box(R - L + 0.1, 0.12, 1.7, m.metal, (L + R) / 2, top + 0.04, -0.82);
-    // hazard chevrons down the far edge
-    for (let k = 0; k < 4; k++) box(0.08, 0.16, 0.02, k % 2 ? m.metal : m.accent, R - 0.1, 0.35 + k * 0.32, 0.01);
-    // scorch over the top corner
-    const sc = this.add(H, new IcosahedronGeometry(0.6, 0), m.soot, L + 0.3, top - 0.3, -0.25);
-    sc.scale.set(1.4, 0.8, 0.5);
-
-    // the doorway: frame, a dark recess, a red emergency light deep in it
-    box(dw + 0.16, 0.1, 0.12, m.metal, dx, dh + 0.17, 0.02);
-    box(0.09, dh + 0.1, 0.12, m.metal, dx - dw / 2 - 0.045, dh / 2 + 0.12, 0.02);
-    box(0.09, dh + 0.1, 0.12, m.metal, dx + dw / 2 + 0.045, dh / 2 + 0.12, 0.02);
-    box(dw + 0.16, 0.08, 0.14, m.metal, dx, 0.08, 0.02);
-    box(dw, dh, 0.02, m.hole, dx, dh / 2 + 0.12, -recess + 0.01, false);
-    box(dw, 0.02, recess, m.hole, dx, dh + 0.11, -recess / 2, false);
-    box(0.02, dh, recess, m.hole, dx - dw / 2, dh / 2 + 0.12, -recess / 2, false);
-    box(0.02, dh, recess, m.hole, dx + dw / 2, dh / 2 + 0.12, -recess / 2, false);
-    box(dw, 0.02, recess, m.hole, dx, 0.12, -recess / 2, false);
-    box(0.5, 0.06, 0.03, this.emergencyMat, dx, dh - 0.05, -recess + 0.03, false);
-    // the door: buckled across the middle, set just inside the face so it slides into the pocket
+    // the door: buckled across the middle, just inside the hull so it slides back into it
     const D = this.doorPanel;
-    D.position.set(dx, dh / 2 + 0.12, -0.06);
-    H.add(D);
+    D.position.set(xc, yc, face(-0.05));
+    D.rotation.y = cs > 0 ? 0 : Math.PI;
+    G.add(D);
     const upper = this.add(D, new BoxGeometry(dw, dh * 0.52, 0.07), m.panel, 0, dh * 0.24, 0);
     upper.rotation.x = -0.05;
     const lower = this.add(D, new BoxGeometry(dw, dh * 0.5, 0.07), m.panel, 0, -dh * 0.25, 0.012);
@@ -687,29 +1019,31 @@ export class Ship {
     this.add(D, new BoxGeometry(0.06, dh * 0.35, 0.09), m.metal, -dw * 0.38, 0, 0.03);
     const dent = this.add(D, new IcosahedronGeometry(0.22, 0), m.charred, dw * 0.12, -0.05, 0.0);
     dent.scale.set(1.2, 0.8, 0.25);
-    // it slides toward the pocket side (the housing's +x)
-    this.slideDir.copy(ax);
-    this.slideSign = 1;
-    this.doorSparkFrom.position.set(dx - dw / 2 - 0.05, dh * 0.7, 0.06);
-    H.add(this.doorSparkFrom);
-    // status light over the door: amber while locked
-    box(0.1, 0.07, 0.05, this.statusMat, dx, dh + 0.3, 0.04, false);
+    this.doorLocal = { x: xc, y: yc };
+    this.slideSign = -1; // back toward the stern, into the hull
+    this.doorSparkFrom.position.set(DOOR.x1 + 0.02, yc + 0.3, face(0.05));
+    G.add(this.doorSparkFrom);
+    // scorch over the doorway where something burned through the seals
+    const sc = this.onHull(new IcosahedronGeometry(0.55, 0), m.soot, DOOR.x0 - 0.3, 1.22 * cs, -0.42);
+    sc.scale.set(1.4, 0.6, 1);
 
-    // the keypad, on a tilted panel beside the door
+    // the keypad, set into the plating beside the door: a recessed metal plate of buttons
     const pad = new Group();
-    pad.position.set(0.72, 0.98, 0.05);
-    pad.rotation.x = -0.42;
-    H.add(pad);
-    const panel = this.add(pad, new BoxGeometry(0.74, 0.74, 0.06), m.metal, 0, 0, 0);
-    this.add(pad, new BoxGeometry(0.78, 0.04, 0.08), m.accent, 0, 0.39, 0);
-    const mats: ShaderMaterial[] = [];
+    pad.position.set(DOOR.x1 + 0.62, -0.18, face(0.0));
+    pad.rotation.y = cs > 0 ? 0 : Math.PI;
+    G.add(pad);
+    const panel = this.add(pad, new BoxGeometry(0.74, 0.74, 0.04), m.metal, 0, 0, -0.005);
+    this.add(pad, new BoxGeometry(0.82, 0.05, 0.05), m.accent, 0, 0.42, 0);
+    this.add(pad, new BoxGeometry(0.82, 0.04, 0.05), m.metal, 0, -0.41, 0);
+    this.add(pad, new BoxGeometry(0.04, 0.82, 0.05), m.metal, -0.41, 0, 0);
+    this.add(pad, new BoxGeometry(0.04, 0.82, 0.05), m.metal, 0.41, 0, 0);
     for (let i = 0; i < 9; i++) {
       const row = Math.floor(i / 3);
       const col = i % 3;
       const b = new Group();
-      b.position.set((col - 1) * 0.22, (1 - row) * 0.22, 0.035);
+      b.position.set((col - 1) * 0.22, (1 - row) * 0.22, 0.02);
       pad.add(b);
-      this.add(b, new BoxGeometry(0.2, 0.2, 0.04), m.charred, 0, 0, 0, false);
+      this.add(b, new BoxGeometry(0.2, 0.2, 0.03), m.charred, 0, 0, 0, false);
       const mat = new ShaderMaterial({
         glslVersion: GLSL3,
         uniforms: {
@@ -722,36 +1056,34 @@ export class Ship {
         vertexShader: GLYPH_VERT,
         fragmentShader: GLYPH_FRAG,
       });
-      const face = new Mesh(new PlaneGeometry(0.18, 0.18), mat);
-      face.position.z = 0.021;
-      b.add(face);
-      mats.push(mat);
-      this.buttons.push({ group: b, face, mat, press: 0 });
+      const faceMesh = new Mesh(new PlaneGeometry(0.18, 0.18), mat);
+      faceMesh.position.z = 0.016;
+      b.add(faceMesh);
+      this.buttons.push({ group: b, face: faceMesh, mat, press: 0 });
     }
 
-    H.updateMatrixWorld(true);
-    const local = (x: number, y: number, z: number, o = new Vector3()) => H.localToWorld(o.set(x, y, z));
-    local(dx, dh / 2 + 0.12, 0, this.doorCenter);
+    G.updateMatrixWorld(true);
+    G.localToWorld(this.doorCenter.set(xc, yc, face(0)));
     pad.getWorldPosition(this.padCenter);
-    this.doorNormal.copy(outward);
-    this.doorLocal = { x: dx, y: dh / 2 + 0.12 };
-    // the housing blocks the way; the door stands in its face
-    const blocker = new Mesh(new BoxGeometry(2.4, 1, 1.6));
-    blocker.position.set(0.2, 0.5, -0.8);
-    H.add(blocker);
-    blocker.updateMatrixWorld(true);
-    rocks.addStatic(footprintOf(blocker, 2));
-    H.remove(blocker);
+    this.doorNormal.set(0, 0, cs).transformDirection(G.matrixWorld).setY(0).normalize();
+    this.slideDir.set(this.slideSign, 0, 0).transformDirection(G.matrixWorld).setY(0).normalize();
+    this.tmp.copy(this.doorCenter).addScaledVector(this.doorNormal, 0.6);
+    this.doorGround = terrainHeight(this.tmp.x, this.tmp.z);
+    const toDoor = this.tmp.copy(this.doorCenter).sub(this.padCenter).setY(0).normalize();
+    this.padStand.copy(this.padCenter).addScaledVector(this.doorNormal, 0.75).addScaledVector(toDoor, 0.95);
+    this.padStand.y = terrainHeight(this.padStand.x, this.padStand.z);
     return panel;
   }
 
-  private slideSign = 1;
+  private slideSign = -1;
   private doorLocal = { x: 0, y: 0 };
 
   /** Where a hand grips the door's open edge, at height `y` above the ground. */
   doorEdge(y: number, out: Vector3) {
-    const x = this.doorLocal.x + this.slideSign * (this.doorOpen * this.doorWidth * 0.98) - this.slideSign * this.doorWidth / 2;
-    return this.housing.localToWorld(out.set(x, y, 0.02));
+    const dw = DOOR.x1 - DOOR.x0;
+    const x = this.doorLocal.x + this.slideSign * (this.doorOpen * dw * 0.98) - (this.slideSign * dw) / 2;
+    const w = stationAt(this.doorLocal.x).w;
+    return this.group.localToWorld(out.set(x, DOOR.y0 + y - 0.04, this.cs * (w + 0.02)));
   }
 
   /** Add everything to the scene. */
@@ -1085,7 +1417,7 @@ export class Ship {
       }
       if (t > 2) this.state = 'cracked';
     }
-    this.doorPanel.position.x = this.doorLocal.x + this.slideSign * this.doorOpen * this.doorWidth * 0.98;
+    this.doorPanel.position.x = this.doorLocal.x + this.slideSign * this.doorOpen * (DOOR.x1 - DOOR.x0) * 0.98;
   }
 }
 
