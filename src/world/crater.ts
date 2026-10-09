@@ -51,6 +51,10 @@ export const SITE2 = { x: 0, z: 0, dx: 1, dz: 0, mx: 0, mz: 0, ex: 0, ez: 0, on:
 /** Length of the second pod's skid trench, and how far before it the pod first skipped off the sand. */
 export const SKID = 22;
 export const SKIP_REACH = 7.5;
+/** The second pod's bowl: centre along the skid from the pod, half-length, half-width, depth. */
+export const BOWL2 = { at: -0.5, along: 3.2, across: 2.3, depth: 0.9 };
+/** Beyond this distance from the second pod, its bowl and ejecta change nothing. */
+export const BOWL2_REACH = 9.5;
 
 /** Distance along the second pod's skid from the pod (negative behind it) and across it. */
 function skid(x: number, z: number) {
@@ -81,15 +85,15 @@ function trailDistance(x: number, z: number) {
  */
 function skidHeight(x: number, z: number): number {
   const { a, s } = skid(x, z);
-  if (a < -SKID - SKIP_REACH || a > 3.5 || Math.abs(s) > 3.5) return 0;
+  if (a < -SKID - SKIP_REACH || a > 9 || Math.abs(s) > 8) return 0;
   const t = (a + SKID) / SKID;
   let h = 0;
-  if (t > -0.05 && t < 1.12) {
+  if (t > -0.05 && t < 1.12 && Math.abs(s) < 3.5) {
     const w = 0.4 + 0.55 * t;
-    const ends = smooth(-0.04, 0.08, t) * (1 - smooth(1.0, 1.1, t));
+    const ends = smooth(-0.04, 0.08, t) * (1 - smooth(0.92, 1.0, t));
     h += (-(0.06 + 0.32 * t) * Math.exp(-sq(s / w)) + 0.1 * (0.4 + t) * Math.exp(-sq((Math.abs(s) - 1.5 * w) / 0.4))) * ends;
   }
-  h += 0.5 * Math.exp(-sq((a - 1.6) / 0.85) - sq(s / 1.1));
+  h += bowl2(a, s);
   for (const [c, dep] of [
     [-SKID - 5.4, 0.1],
     [-SKID - 2.3, 0.15],
@@ -98,6 +102,27 @@ function skidHeight(x: number, z: number): number {
     h += -dep * Math.exp(-q * 1.5) + dep * 0.4 * Math.exp(-sq((Math.sqrt(q) - 1.3) / 0.35));
   }
   return h;
+}
+
+/**
+ * Where the second pod finally hit and stopped: a bowl stretched along its
+ * path, as low-angle impacts make, with a rim and ejecta thrown out to the
+ * sides in two wings and little thrown up- or downrange (Gault and Wedekind
+ * 1978). `a`, `s` are along and across the skid, from the pod.
+ */
+function bowl2(a: number, s: number) {
+  const u = (a - BOWL2.at) / BOWL2.along;
+  const v = s / BOWL2.across;
+  const q = u * u + v * v;
+  const r = Math.sqrt(q);
+  const lat = (v * v) / (q + 1e-4);
+  const inner = Math.min(1, q);
+  const bowl = -BOWL2.depth * sq(1 - inner);
+  const rim = 0.27 * (0.5 + 0.7 * lat) * Math.exp(-sq((r - 0.95) / 0.3));
+  const wings = 0.12 * lat * lat * Math.exp(-Math.max(0, r - 1) / 0.9) * smooth(0.9, 1.15, r) * (1 - smooth(2.2, 3.4, r));
+  // sand shoved up in front of the nose as it stopped
+  const bank = 0.3 * Math.exp(-sq((a - 2.3) / 0.8) - sq(s / 1.2));
+  return bowl + rim + wings + bank;
 }
 
 /** 1 near the crash, 0 away from it: keeps dunes and rocks out of the way. */
@@ -112,7 +137,8 @@ export function siteMask(x: number, z: number): number {
     const k = skid(x, z);
     const along = smooth(-SKID - SKIP_REACH - 1, -SKID - SKIP_REACH + 0.5, k.a) * (1 - smooth(3, 5, k.a));
     const sk = along * (1 - smooth(2.5, 5, Math.abs(k.s)));
-    m = Math.max(m, sk, 1 - smooth(3, 6.5, trailDistance(x, z)));
+    const near2 = 1 - smooth(6.5, BOWL2_REACH, Math.hypot(x - SITE2.x, z - SITE2.z));
+    m = Math.max(m, sk, near2, 1 - smooth(3, 6.5, trailDistance(x, z)));
   }
   return m;
 }
@@ -181,25 +207,39 @@ float siteMask(vec2 p) {
   if (uSite2On > 0.5) {
     vec2 k = skidCoords(p);
     float ka = smoothstep(${f(-SKID - SKIP_REACH - 1)}, ${f(-SKID - SKIP_REACH + 0.5)}, k.x) * (1.0 - smoothstep(3.0, 5.0, k.x));
-    m = max(m, max(ka * (1.0 - smoothstep(2.5, 5.0, abs(k.y))), 1.0 - smoothstep(3.0, 6.5, trailDistance(p))));
+    float near2 = 1.0 - smoothstep(6.5, ${f(BOWL2_REACH)}, length(p - uSite2.xy));
+    m = max(m, max(max(ka * (1.0 - smoothstep(2.5, 5.0, abs(k.y))), near2), 1.0 - smoothstep(3.0, 6.5, trailDistance(p))));
   }
   return m;
 }
+float bowl2(vec2 k) {
+  float u = (k.x - ${f(BOWL2.at)}) / ${f(BOWL2.along)};
+  float v = k.y / ${f(BOWL2.across)};
+  float q = u * u + v * v;
+  float r = sqrt(q);
+  float lat = (v * v) / (q + 1e-4);
+  float inner = min(1.0, q);
+  float bowl = -${f(BOWL2.depth)} * (1.0 - inner) * (1.0 - inner);
+  float rq = (r - 0.95) / 0.3;
+  float rim = 0.27 * (0.5 + 0.7 * lat) * exp(-rq * rq);
+  float wings = 0.12 * lat * lat * exp(-max(0.0, r - 1.0) / 0.9) * smoothstep(0.9, 1.15, r) * (1.0 - smoothstep(2.2, 3.4, r));
+  float ba = (k.x - 2.3) / 0.8;
+  float bs = k.y / 1.2;
+  return bowl + rim + wings + 0.3 * exp(-ba * ba - bs * bs);
+}
 float skidHeight(vec2 p) {
   vec2 k = skidCoords(p);
-  if (k.x < ${f(-SKID - SKIP_REACH)} || k.x > 3.5 || abs(k.y) > 3.5) return 0.0;
+  if (k.x < ${f(-SKID - SKIP_REACH)} || k.x > 9.0 || abs(k.y) > 8.0) return 0.0;
   float t = (k.x + ${f(SKID)}) / ${f(SKID)};
   float h = 0.0;
-  if (t > -0.05 && t < 1.12) {
+  if (t > -0.05 && t < 1.12 && abs(k.y) < 3.5) {
     float w = 0.4 + 0.55 * t;
-    float ends = smoothstep(-0.04, 0.08, t) * (1.0 - smoothstep(1.0, 1.1, t));
+    float ends = smoothstep(-0.04, 0.08, t) * (1.0 - smoothstep(0.92, 1.0, t));
     float sw = k.y / w;
     float bq = (abs(k.y) - 1.5 * w) / 0.4;
     h += (-(0.06 + 0.32 * t) * exp(-sw * sw) + 0.1 * (0.4 + t) * exp(-bq * bq)) * ends;
   }
-  float ba = (k.x - 1.6) / 0.85;
-  float bs = k.y / 1.1;
-  h += 0.5 * exp(-ba * ba - bs * bs);
+  h += bowl2(k);
   for (int i = 0; i < 2; i++) {
     float c = i == 0 ? ${f(-SKID - 5.4)} : ${f(-SKID - 2.3)};
     float dep = i == 0 ? 0.1 : 0.15;
@@ -244,11 +284,15 @@ float scorchAt(vec2 p) {
   float tr = ts.x > 0.0 && ts.x < 1.05 ? exp(-(ts.y * ts.y) / (w * w * 1.4)) * smoothstep(0.15, 0.95, ts.x) : 0.0;
   float sc = max(c, tr * 0.85);
   if (uSite2On > 0.5) {
-    // the second pod came in low and fast: friction singed the last stretch of its skid
+    // the second pod: its bowl burnt black and crisp like the first crater, and the
+    // skid singed more and more toward it
     vec2 k = skidCoords(p);
     float t = (k.x + ${f(SKID)}) / ${f(SKID)};
     float kw = 0.4 + 0.55 * t;
-    if (t > 0.0 && t < 1.05) sc = max(sc, 0.7 * exp(-(k.y * k.y) / (kw * kw)) * smoothstep(0.5, 1.0, t));
+    vec2 bq = vec2((k.x - ${f(BOWL2.at)}) / ${f(BOWL2.along)}, k.y / ${f(BOWL2.across)});
+    float c2 = 1.0 - smoothstep(0.35, 1.75, length(bq));
+    float tr2 = t > 0.0 && t < 1.05 ? 0.85 * exp(-(k.y * k.y) / (kw * kw * 1.4)) * smoothstep(0.3, 0.95, t) : 0.0;
+    sc = max(sc, max(c2, tr2));
   }
   return clamp(sc * (0.75 + 0.6 * gnoise(p * 0.9)), 0.0, 1.0);
 }

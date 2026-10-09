@@ -12,7 +12,7 @@ import { Input } from './core/input';
 import { clamp, DynVec3, saturate } from './core/math';
 import { WakeUp } from './story/WakeUp';
 import { CrashSite } from './world/crashSite';
-import { CRATER_REACH, craterHeight, POD_DIR, SITE, SITE2, siteMask, SKID, SKIP_REACH, TRENCH_LENGTH } from './world/crater';
+import { BOWL2_REACH, CRATER_REACH, craterHeight, POD_DIR, SITE, SITE2, siteMask, SKID, SKIP_REACH, TRENCH_LENGTH } from './world/crater';
 import { SiteSpawner } from './story/SiteSpawner';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
@@ -87,7 +87,8 @@ function planSecondPod(h: Vector2) {
     const tw = rot(...(u.clone().multiplyScalar(0.5).add(h).normalize().toArray() as [number, number]), bend);
     const end = pod.clone().addScaledVector(tw, TRAIL_LENGTH);
     const mid = pod.clone().addScaledVector(tw, TRAIL_LENGTH / 2);
-    for (const p of [pod, mid, end, pod.clone().addScaledVector(tw, TRAIL_LENGTH / 4), pod.clone().addScaledVector(tw, (TRAIL_LENGTH * 3) / 4)]) {
+    if (!clear(pod.x, pod.y, BOWL2_REACH + 1) || pod.length() < CRATER_REACH + BOWL2_REACH) return null;
+    for (const p of [mid, end, pod.clone().addScaledVector(tw, TRAIL_LENGTH / 4), pod.clone().addScaledVector(tw, (TRAIL_LENGTH * 3) / 4)]) {
       if (!clear(p.x, p.y, 7)) return null;
     }
     const slide = rot(slideSign, 0, slideAngle);
@@ -155,7 +156,7 @@ function spawnSite() {
   }
   const plan = planSecondPod(h);
   if (plan) {
-    for (const [p, r] of [[plan.pod, 6.5], [plan.mid, 6.5], [plan.end, 6.5], ...plan.skid.map((k) => [k, 5] as const)] as const) {
+    for (const [p, r] of [[plan.pod, BOWL2_REACH + 0.5], [plan.mid, 6.5], [plan.end, 6.5], ...plan.skid.map((k) => [k, 5] as const)] as const) {
       need = Math.max(need, -(p.x * h.x + p.y * h.y) + r);
     }
   }

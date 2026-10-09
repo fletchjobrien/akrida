@@ -79,9 +79,13 @@ down differently:
 
 - **Impact:** it came in at a low angle and skidded. Two skip marks show where
   it first touched the sand. A long, shallow trench (22 units) deepens toward
-  the pod, and the friction singed its last stretch. The pod lies almost flat,
-  with its nose rammed into a bank of sand it ploughed up. The first pod went
-  in steeply and lies nose-down in a crater.
+  the pod and is singed more and more toward its end. The trench ends in a
+  charred, glass-flecked bowl. Low-angle impacts make this shape: the bowl is
+  stretched along the path, and the ejecta is thrown out to the sides in two
+  wings, with little thrown up- or downrange (Gault and Wedekind 1978). The pod
+  lies almost flat in the bowl, its nose rammed into sand it ploughed up. Thin
+  smoke and the odd ember still rise off the black sand. The first pod went in
+  steeply and lies nose-down in a round crater.
 - **Damage:** the nose is crumpled and caved in on one side. The hatch door is
   blown off. A gash is ripped along its flank, a third of the heat shield is
   gone, and one thruster bell is torn away. It lost the other fin, the window
@@ -275,6 +279,10 @@ src/
   [Babylon.js forum](https://forum.babylonjs.com/t/how-prevent-default-of-c-w-t-n/44117),
   [HTML5 Game Devs forum](https://html5gamedevs.com/topic/24499-overwrite-button-combinations-like-ctrls)
 - t3ssel8r: [Giving Personality to Procedural Animations using Math](https://www.youtube.com/watch?v=KPoeNZZ6H4s)
+- D. E. Gault and J. A. Wedekind (1978), "Experimental studies of oblique impact",
+  Proc. Lunar Planet. Sci. Conf. 9th, 3843–3875, as summarised in
+  [Bottke et al. 2000, "Elliptical craters"](https://www.boulder.swri.edu/~bottke/Reprints/Bottke-etal_2000_Icarus_Elliptical_Craters.pdf)
+  and [arXiv:2404.16677](https://arxiv.org/abs/2404.16677) (the shape of the second pod's crater)
 - Paul Kellet's pink noise filter: [firstpr.com.au/dsp/pink-noise](https://www.firstpr.com.au/dsp/pink-noise/)
 - D. H. Klatt (1980), "Software for a cascade/parallel formant synthesizer",
   JASA 67(3), 971–995: [doi:10.1121/1.383940](https://doi.org/10.1121/1.383940),

@@ -19,7 +19,7 @@ import { clamp, noise1, rng, smoothstep } from '../core/math';
 import { toonMaterial } from '../render/shared';
 import { rgb } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
-import { SITE, SITE2, SKID } from './crater';
+import { BOWL2, SITE, SITE2, SKID } from './crater';
 import { terrainHeight } from './terrain';
 import { footprintOf, type Rocks } from './rocks';
 import type { Dust } from './particles';
@@ -43,6 +43,9 @@ const SMOKE_LIGHT = C(0xb8aea2);
 const VAPOUR = C(0xf4f7f8);
 const VAPOUR_THIN = C(0xc9d4da);
 const SAND = [C(0xe4c987), C(0xbca872)];
+const SMOULDER = C(0x6a605a);
+const EMBER = C(0xffa040);
+const EMBER_DEAD = C(0x5a2a18);
 
 const BEACON_ON = rgb(0xff5a3c);
 const BEACON_OFF = rgb(0x5a2420);
@@ -117,6 +120,8 @@ export class CrashSite {
   private arcTimer = 4;
   private sandBeacon!: ShaderMaterial;
   private sandBeaconPos = new Vector3();
+  private smoulderDebt = 0;
+  private emberTimer = 1;
   private warbleCycle = -1;
 
   constructor(
@@ -360,7 +365,7 @@ export class CrashSite {
   private buildSecond(m: Mats) {
     const P = this.pod;
     // it skidded in low: almost flat, the crumpled nose shoved into the sand it ploughed up
-    this.place(new Vector3(SITE2.dx, -0.07, SITE2.dz), SITE2.x, SITE2.z, 0.36);
+    this.place(new Vector3(SITE2.dx, -0.07, SITE2.dz), SITE2.x, SITE2.z, 0.42);
     // which of its sides (local ±Z) faces the viewer, so the gash shows
     const facing = new Vector3(0, 0, 1).applyQuaternion(P.quaternion).z >= 0 ? 1 : -1;
     // it lost the other fin
@@ -462,6 +467,17 @@ export class CrashSite {
     const b = this.add(this.group, new BoxGeometry(0.11, 0.09, 0.11), this.sandBeacon, 0, 0, 0);
     b.position.copy(this.sandBeaconPos);
     b.rotation.set(0.4, 0.3, 0.5);
+  }
+
+  /** A random point on the floor of the second pod's bowl (within `r` of its half-size). */
+  private bowlPoint(r: number, out: Vector3) {
+    const a = Math.random() * Math.PI * 2;
+    const k = Math.sqrt(Math.random()) * r;
+    const al = BOWL2.at + Math.cos(a) * k * BOWL2.along;
+    const ac = Math.sin(a) * k * BOWL2.across;
+    const x = SITE2.x + SITE2.dx * al - SITE2.dz * ac;
+    const z = SITE2.z + SITE2.dz * al + SITE2.dx * ac;
+    return out.set(x, terrainHeight(x, z), z);
   }
 
   /** Where the creature looks when it notices the wreck. */
@@ -682,6 +698,32 @@ export class CrashSite {
       this.lightMode = 'stutter';
       this.lightTimer = 0.4;
       if (Math.random() < 0.35) this.arcTimer = 0.1 + Math.random() * 0.15;
+    }
+
+    // ---- the scorched bowl still smoulders: thin wisps rising off the black sand, and now
+    // and then an ember lifting off and dying
+    this.smoulderDebt += dt * 5;
+    while (this.smoulderDebt >= 1) {
+      this.smoulderDebt -= 1;
+      this.bowlPoint(0.75, this.tmp);
+      this.dust.spawn(this.tmp.x, this.tmp.y + 0.02, this.tmp.z, 0, 0.18 + Math.random() * 0.2, 0, 3 + Math.random() * 2.5, SMOULDER, 1, {
+        g: -0.12,
+        drag: 0.6,
+        windK: 1.1,
+        c2: SMOKE_LIGHT,
+      });
+    }
+    this.emberTimer -= dt;
+    if (this.emberTimer <= 0) {
+      this.emberTimer = 0.25 + Math.random() * 1.4;
+      this.bowlPoint(0.6, this.tmp);
+      this.dust.spawn(this.tmp.x, this.tmp.y + 0.02, this.tmp.z, (Math.random() - 0.5) * 0.3, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 0.3, 0.6 + Math.random() * 0.8, EMBER, 1, {
+        g: -0.3,
+        drag: 1,
+        windK: 0.8,
+        c2: EMBER_DEAD,
+      });
+      if (Math.random() < 0.3) this.audio.siteTick(this.sound, 0.08 + Math.random() * 0.08);
     }
 
     // ---- the split coolant line: bursts of white vapour that sink and roll along the sand
