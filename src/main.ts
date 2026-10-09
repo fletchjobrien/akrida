@@ -88,8 +88,11 @@ interface SecondPodLayout {
 /** How far the second pod lies from the crater, and its survivor's trail from the pod. */
 const POD2_DISTANCE = 26;
 const TRAIL_LENGTH = 22;
-/** How far the ship's centre lies beyond the stranger: its bow is just in sight from there. */
-const SHIP_GAP = 22;
+/**
+ * Where the ship's centre lies from the stranger: further right and a little up the
+ * screen, so its tail is just in sight from there and its trench runs past the trail.
+ */
+const SHIP_OFFSET = new Vector2(20, -11);
 
 /**
  * Lay out the second pod and its survivor around the crater (crater at 0, 0),
@@ -129,19 +132,19 @@ function planSecondPod(h: Vector2) {
     const score = -Math.abs(start.length() - (CRATER_REACH + 6)) * 0.3 + Math.abs(slide.x) * 2 - deg * 0.02;
     const sx = Math.abs(tw.x) > 0.15 ? Math.sign(tw.x) : side;
     const axis = tw.clone().multiplyScalar(0.7).add(new Vector2(sx * 0.6, 0)).normalize();
-    // the ship lies beyond the stranger, further right, across the view, bow
-    // toward it; its trench runs away behind, clear of everything else
-    const center = end.clone().add(new Vector2(SHIP_GAP, -3));
-    const dir = new Vector2(-1, 0);
+    // the ship lies beyond the stranger, further right, across the view
+    const center = end.clone().add(SHIP_OFFSET);
+    // nose-right, like the pods, its trench running back left beside the trail
+    const dir = new Vector2(1, 0);
     const samples: Vector2[] = [];
     for (let a = SHIP_REACH.bow - 4; a >= -SHIP_LENGTH / 2 - SHIP_TRENCH; a -= 4) samples.push(center.clone().addScaledVector(dir, a));
     const trailPts = [pod, mid, pod.clone().addScaledVector(tw, TRAIL_LENGTH / 4), pod.clone().addScaledVector(tw, (TRAIL_LENGTH * 3) / 4)];
     let ok = withShip;
     for (const p of samples) {
       if (!ok) break;
-      if (!clear(p.x, p.y, 12) || p.length() < CRATER_REACH + 10 || p.distanceTo(pod) < BOWL2_REACH + 10) ok = false;
+      if (!clear(p.x, p.y, 12) || p.length() < CRATER_REACH + 10 || p.distanceTo(pod) < BOWL2_REACH + 2) ok = false;
       // its bow and the sand it ploughed up may come close to the stranger, not over the trail
-      else if (skid.some((k) => k.distanceTo(p) < 10) || trailPts.some((k) => k.distanceTo(p) < 9.5) || p.distanceTo(end) < 6) ok = false;
+      else if (skid.some((k) => k.distanceTo(p) < 8) || trailPts.some((k) => k.distanceTo(p) < 9.5) || p.distanceTo(end) < 9.5) ok = false;
     }
     if (withShip && !ok) return null;
     return { pod, slide, end, mid, axis, skid, score, ship: ok ? { center, dir, samples } : null };

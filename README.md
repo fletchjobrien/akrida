@@ -54,7 +54,7 @@ wakes. Walk right:
 | Its crater | 38 |
 | The second pod | 64 |
 | The dying stranger | 86 |
-| The ship (centre) | 108 |
+| The ship (centre, a little up the screen) | 106 |
 
 The first pod lies nose-down in its crater. Its skid trench runs off to the
 left, back toward the start, with wreckage along it and past the rim, so you
@@ -156,11 +156,14 @@ down differently:
 
 ## The ship
 
-The ship you escaped from lies about 22 units further right than the stranger. From where the stranger lies, only the tip of the ship's bow shows
-at the edge of the screen. As you come closer, a low swell plays and the
+The ship you escaped from lies about 20 units further right than the stranger and
+a little up the screen. Like the pods, it points nose-right. From where the
+stranger lies, only the ship's tail shows, in the top-right corner of the
+screen, with its trench and wreckage running back past the stranger. As you
+come closer, a low swell plays and the
 creature turns to look.
 
-- **The crash:** it came in long and low. It ploughed a 50-unit trench, banked
+- **The crash:** it came in long and low. It ploughed a 28-unit trench, banked
   and flat-floored, scorched black toward the wreck. It shoved up a great bank
   of sand in front of its bow, and its back broke on landing.
 - **The ship:** about 20 units long, eight times a pod's length. It has the

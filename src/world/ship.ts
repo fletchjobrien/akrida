@@ -24,7 +24,7 @@ import { clamp, noise1, rng, smoothstep } from '../core/math';
 import { toonMaterial } from '../render/shared';
 import { rgb } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
-import { SHIP_LENGTH, SITE3 } from './crater';
+import { SHIP_LENGTH, SHIP_TRENCH, SITE3 } from './crater';
 import { terrainHeight } from './terrain';
 import { footprintOf, type Rocks } from './rocks';
 import type { Dust } from './particles';
@@ -569,7 +569,7 @@ export class Ship {
     // along the trench: plates, beams, frame, glass, burnt lumps; heavier and denser toward the wreck
     for (let i = 0; i < 70; i++) {
       const t = Math.pow(rand(), 0.7);
-      const x = -half - 50 * (1 - t) - 1;
+      const x = -half - SHIP_TRENCH * (1 - t) - 1;
       const z = (rand() - 0.5) * 2 * (2 + 4 * t) * (rand() < 0.2 ? 1.6 : 1);
       const k = rand();
       const sc = 0.8 + rand() * 1.4;
@@ -580,9 +580,9 @@ export class Ship {
       else lay(new BoxGeometry(0.14 * sc, 0.03, 0.1 * sc), m.glass, x, z, 0.0);
     }
     // the sheared wing, lying in the trench where it tore off
-    const wing = lay(new BoxGeometry(4.2, 0.16, 2.2), m.hull, -half - 17, cs * 3.4, 0.05, true);
+    const wing = lay(new BoxGeometry(4.2, 0.16, 2.2), m.hull, -half - 12, cs * 3.4, 0.05, true);
     wing.rotation.set(0.12, 0.6, -0.08);
-    const edge = lay(new BoxGeometry(4, 0.18, 0.28), m.accent, -half - 17.2, cs * 4.3, 0.04);
+    const edge = lay(new BoxGeometry(4, 0.18, 0.28), m.accent, -half - 12.2, cs * 4.3, 0.04);
     edge.rotation.set(0.12, 0.6, -0.08);
     // the lost engine bell, on its side
     const bell = lay(new CylinderGeometry(0.78, 0.5, 1.4, 12, 1, true), m.charred, -half - 6.5, cs * 2.6, 0.25, true);

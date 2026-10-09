@@ -133,7 +133,7 @@ function bowl2(a: number, s: number) {
 export const SITE3 = { x: 0, z: 0, dx: 1, dz: 0, on: false };
 /** Ship length, and the trench it ploughed before it stopped. */
 export const SHIP_LENGTH = 20;
-export const SHIP_TRENCH = 50;
+export const SHIP_TRENCH = 28;
 /** How far beyond the bow, behind the trench and to the sides the ship changes the ground. */
 export const SHIP_REACH = { bow: 19, side: 11 };
 
