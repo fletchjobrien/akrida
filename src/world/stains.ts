@@ -36,7 +36,7 @@ export class StainMap {
     readonly minX: number,
     readonly minZ: number,
     readonly size: number,
-    perUnit = 16,
+    perUnit = 24,
   ) {
     this.res = Math.min(1024, Math.ceil(size * perUnit));
     const n = this.res * this.res;
@@ -94,6 +94,18 @@ export class StainMap {
 
   /** A blot of blood with a ragged edge. */
   splat(x: number, z: number, r: number, amount: number, fresh: number) {
+    // a drop smaller than a texel still marks the one it fell on
+    const k = this.res / this.size;
+    if (r * k < 0.7) {
+      const i = Math.floor((x - this.minX) * k);
+      const j = Math.floor((z - this.minZ) * k);
+      if (i < 0 || j < 0 || i >= this.res || j >= this.res) return;
+      const n = j * this.res + i;
+      const a = amount * Math.min(1, 0.55 + r * k);
+      this.blood[n] = Math.max(this.blood[n], a);
+      this.dark[n] = Math.max(this.dark[n], a * fresh);
+      return;
+    }
     this.each(x, z, r * 1.6, (i, wx, wz, d) => {
       const edge = 1 - d / (r * (1 + 0.45 * gnoise(wx * 9 + 3.1, wz * 9 - 1.7)));
       if (edge <= 0) return;

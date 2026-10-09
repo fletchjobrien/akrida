@@ -12,9 +12,8 @@ import { Input } from './core/input';
 import { clamp, DynVec3, saturate } from './core/math';
 import { WakeUp } from './story/WakeUp';
 import { CrashSite } from './world/crashSite';
-import { CRATER_REACH, craterHeight, FURROW, POD_DIR, SITE, SITE2, siteMask, TRENCH_LENGTH } from './world/crater';
+import { CRATER_REACH, craterHeight, POD_DIR, SITE, SITE2, siteMask, SKID, SKIP_REACH, TRENCH_LENGTH } from './world/crater';
 import { SiteSpawner } from './story/SiteSpawner';
-import { LostPod } from './world/lostPod';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
 
@@ -47,12 +46,28 @@ const audio = new AudioEngine();
 let site: CrashSite | null = null;
 const spawner = new SiteSpawner();
 // a second pod lands near the first, and its survivor lies at the end of a trail
-let lostPod: LostPod | null = null;
+let site2: CrashSite | null = null;
 let stranger: Stranger | null = null;
+
+interface SecondPodLayout {
+  pod: Vector2;
+  slide: Vector2;
+  end: Vector2;
+  mid: Vector2;
+  axis: Vector2;
+  skid: Vector2[];
+  score: number;
+}
+
+/** How far the second pod lies from the crater, and its survivor's trail from the pod. */
+const POD2_DISTANCE = 26;
+const TRAIL_LENGTH = 22;
 
 /**
  * Lay out the second pod and its survivor around the crater (crater at 0, 0),
- * clear of the skid trench and further along the heading `h`.
+ * further along the heading `h`: the pod's long skid comes in from near the
+ * crater (so it leads the eye out to the pod), clear of the first trench, and
+ * the survivor's trail heads on out into the desert.
  */
 function planSecondPod(h: Vector2) {
   const D = POD_DIR;
@@ -64,39 +79,44 @@ function planSecondPod(h: Vector2) {
   };
   const rot = (x: number, z: number, a: number) => new Vector2(x * Math.cos(a) - z * Math.sin(a), x * Math.sin(a) + z * Math.cos(a));
   const side = Math.random() < 0.5 ? -1 : 1;
-  for (const deg of [0, 20, -20, 40, -40, 60, -60, 80, -80, 100, -100]) {
+  let best: SecondPodLayout | null = null;
+  let bestScore = -Infinity;
+  function layout(deg: number, slideAngle: number, slideSign: number, bend: number): SecondPodLayout | null {
     const u = rot(h.x, h.y, side * deg * (Math.PI / 180));
-    const pod = u.clone().multiplyScalar(12.5);
-    // the trail heads on out into the desert, away from the crater
-    const w = u.clone().multiplyScalar(0.5).add(h).normalize();
-    const tw = rot(w.x, w.y, (Math.random() - 0.5) * 0.7);
-    const end = pod.clone().addScaledVector(tw, 13);
-    const mid = pod.clone().addScaledVector(tw, 6.5);
-    if (!clear(pod.x, pod.y, 7) || !clear(end.x, end.y, 7) || !clear(mid.x, mid.y, 7)) continue;
-    // it slid in lying across the view (so its length shows), its furrow clear of the
-    // crater and not under the trail
-    const startOf = (g: Vector2) => pod.clone().addScaledVector(g, -FURROW);
-    let slide: Vector2 | null = null;
-    let best = -Infinity;
-    for (const a of [0, 0.35, -0.35, 0.7, -0.7]) {
-      for (const sgn of [1, -1]) {
-        const g = rot(sgn, 0, a);
-        const fs = startOf(g);
-        if (!clear(fs.x, fs.y, 5.5) || -g.dot(tw) > 0.5) continue;
-        const score = Math.abs(g.x) * 2 + fs.length() * 0.05 - Math.abs(a) * 0.5;
-        if (score > best) {
-          best = score;
-          slide = g;
+    const pod = u.clone().multiplyScalar(POD2_DISTANCE);
+    const tw = rot(...(u.clone().multiplyScalar(0.5).add(h).normalize().toArray() as [number, number]), bend);
+    const end = pod.clone().addScaledVector(tw, TRAIL_LENGTH);
+    const mid = pod.clone().addScaledVector(tw, TRAIL_LENGTH / 2);
+    for (const p of [pod, mid, end, pod.clone().addScaledVector(tw, TRAIL_LENGTH / 4), pod.clone().addScaledVector(tw, (TRAIL_LENGTH * 3) / 4)]) {
+      if (!clear(p.x, p.y, 7)) return null;
+    }
+    const slide = rot(slideSign, 0, slideAngle);
+    // the trail must not run back down the skid
+    if (-slide.dot(tw) > 0.35) return null;
+    const skid: Vector2[] = [];
+    for (let a = 2; a <= SKID + SKIP_REACH; a += 3) skid.push(pod.clone().addScaledVector(slide, -a));
+    for (const p of skid) if (!clear(p.x, p.y, 5.5)) return null;
+    const start = skid[skid.length - 1];
+    const score = -Math.abs(start.length() - (CRATER_REACH + 6)) * 0.3 + Math.abs(slide.x) * 2 - deg * 0.02;
+    const sx = Math.abs(tw.x) > 0.15 ? Math.sign(tw.x) : side;
+    const axis = tw.clone().multiplyScalar(0.7).add(new Vector2(sx * 0.6, 0)).normalize();
+    return { pod, slide, end, mid, axis, skid, score };
+  }
+  for (const deg of [0, 20, -20, 40, -40, 60, -60, 80, -80]) {
+    for (const bend of [0, 0.3, -0.3]) {
+      for (const a of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]) {
+        for (const sgn of [1, -1]) {
+          const l = layout(deg, a, sgn, bend);
+          if (l && l.score > bestScore) {
+            bestScore = l.score;
+            best = l;
+          }
         }
       }
     }
-    if (!slide) continue;
-    // it lies across the view, head first along the trail, so its whole length shows
-    const sx = Math.abs(tw.x) > 0.15 ? Math.sign(tw.x) : side;
-    const axis = tw.clone().multiplyScalar(0.6).add(new Vector2(sx * 0.8, 0)).normalize();
-    return { pod, slide, end, mid, axis };
+    if (best) break;
   }
-  return null;
+  return best as SecondPodLayout | null;
 }
 
 /** Put the crash site just out of sight in the direction of travel. */
@@ -135,12 +155,7 @@ function spawnSite() {
   }
   const plan = planSecondPod(h);
   if (plan) {
-    for (const [p, r] of [
-      [plan.pod, 6.5],
-      [plan.mid, 6.5],
-      [plan.end, 6.5],
-      [plan.pod.clone().addScaledVector(plan.slide, -FURROW), 4.5],
-    ] as const) {
+    for (const [p, r] of [[plan.pod, 6.5], [plan.mid, 6.5], [plan.end, 6.5], ...plan.skid.map((k) => [k, 5] as const)] as const) {
       need = Math.max(need, -(p.x * h.x + p.y * h.y) + r);
     }
   }
@@ -161,32 +176,41 @@ function spawnSite() {
     SITE2.dz = plan.slide.y;
     SITE2.ex = cx + plan.end.x;
     SITE2.ez = cz + plan.end.y;
+    SITE2.mx = cx + plan.mid.x;
+    SITE2.mz = cz + plan.mid.y;
     SITE2.on = true;
     shared.uSite2.value.set(SITE2.x, SITE2.z, SITE2.dx, SITE2.dz);
-    shared.uSite2End.value.set(SITE2.ex, SITE2.ez, 1);
+    shared.uSite2Trail.value.set(SITE2.mx, SITE2.mz, SITE2.ex, SITE2.ez);
+    shared.uSite2On.value = 1;
   }
   rocks.refresh();
-  site = new CrashSite(rocks, dust, audio);
+  site = new CrashSite(rocks, dust, audio, 'first');
   scene.add(site.group);
   if (plan) {
-    lostPod = new LostPod(rocks);
-    scene.add(lostPod.group);
+    site2 = new CrashSite(rocks, dust, audio, 'second');
+    scene.add(site2.group);
     const axis = { x: plan.axis.x, z: plan.axis.y };
     stranger = new Stranger(world, SITE2.ex, SITE2.ez, axis, rocks, dust, audio, (p, o) => pr.snapDelta(p, o));
     scene.add(stranger.creature.rig.root);
-    // the map of blood and churned sand covers the pod, the trail and the body
-    const xs = [SITE2.x, SITE2.ex, SITE2.ex - axis.x * 6, lostPod.hatchGround.x];
-    const zs = [SITE2.z, SITE2.ez, SITE2.ez - axis.z * 6, lostPod.hatchGround.z];
+    // keep the dunes and rocks off the trail where it actually bends
+    const path = stranger.trailPath(site2.hatchGround);
+    SITE2.mx = path.mid.x;
+    SITE2.mz = path.mid.z;
+    shared.uSite2Trail.value.set(SITE2.mx, SITE2.mz, SITE2.ex, SITE2.ez);
+    rocks.refresh();
+    // the map of blood and marks covers the trail and the body
+    const xs = [site2.hatchGround.x, path.control.x, path.end.x, SITE2.ex];
+    const zs = [site2.hatchGround.z, path.control.z, path.end.z, SITE2.ez];
     const minX = Math.min(...xs) - 3;
     const minZ = Math.min(...zs) - 3;
     const size = Math.max(Math.max(...xs) + 3 - minX, Math.max(...zs) + 3 - minZ);
     const stains = new StainMap(minX, minZ, size);
-    stranger.paint(stains, lostPod.hatchGround);
+    stranger.paint(stains, site2.hatchGround);
   }
 }
 /** Seconds left of the creature staring at something it has just noticed. */
 let noticeTime = 0;
-let noticeStranger = false;
+let noticeWhat: CrashSite | 'stranger' | null = null;
 /** The cursor is over the stranger, close enough to reach. */
 let strangerHover = false;
 const input = new Input(canvas);
@@ -279,11 +303,13 @@ function update(dt: number, now: number) {
   } else if (noticeTime > 0) {
     // the first sight of the wreck (or of the stranger) turns the head, whatever the mouse is doing
     noticeTime -= dt;
-    look = noticeStranger ? stranger!.headPosition(lookPoint) : lookPoint.copy(site!.lookPoint);
+    look = noticeWhat === 'stranger' ? stranger!.headPosition(lookPoint) : lookPoint.copy(noticeWhat!.lookPoint);
   } else if (input.hasMouse && mouseIdle < 7000) {
     look = lookPoint.copy(mouseGround);
   } else if (stranger && stranger.distance < 7) {
     look = stranger.headPosition(lookPoint);
+  } else if (site2 && site2.distance < 12) {
+    look = lookPoint.copy(site2.lookPoint);
   } else if (site && site.distance < 16) {
     look = lookPoint.copy(site.lookPoint);
   } else if (creature.speed < 0.2) {
@@ -360,14 +386,19 @@ function finishFrame(dt: number, target: Vector3) {
   if (site?.justDiscovered && !wake.active) {
     audio.stinger();
     noticeTime = 2.8;
-    noticeStranger = false;
+    noticeWhat = site;
+  }
+  site2?.update(dt, elapsed, wind, creature.pos);
+  if (site2?.justDiscovered && !wake.active) {
+    noticeTime = 2.2;
+    noticeWhat = site2;
   }
   if (stranger) {
     stranger.update(dt, creature.pos);
     if (stranger.justSeen && !wake.active) {
       audio.sorrow();
       noticeTime = 3;
-      noticeStranger = true;
+      noticeWhat = 'stranger';
     }
     // close in a little and quieten the world while it sings
     const w = stranger.weight;
@@ -430,8 +461,8 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     get stranger() {
       return stranger;
     },
-    get lostPod() {
-      return lostPod;
+    get site2() {
+      return site2;
     },
     SITE2,
     spawner,

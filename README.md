@@ -72,16 +72,46 @@ swells and it turns its head to look.
 
 ## The second pod and the stranger
 
-A second escape pod comes down with the first, about 12 units from the crater
-and further along your heading. The site spawner places it off screen together
-with the first pod. It is a different craft: angular, gunmetal with blue bands.
-It lies on its side at the end of a short furrow, with sand heaped against its
-nose. Its hatch is torn off and lies nearby. It is cold: no smoke, no beacon.
+A second escape pod comes down with the first. It lies about 26 units from the
+crater, further along your heading. The site spawner places it off screen
+together with the first pod. It is the same model as the first, but it came
+down differently:
 
-- **The trail.** Grey-blue dried blood leads from the hatch about 13 units out
-  into the sand. Beside it are the trough of a body dragged along, the furrow
-  of a broken leg, claw marks where hands pulled it forward, and two places
-  where it stopped and bled more. These marks do not fade.
+- **Impact:** it came in at a low angle and skidded. Two skip marks show where
+  it first touched the sand. A long, shallow trench (22 units) deepens toward
+  the pod, and the friction singed its last stretch. The pod lies almost flat,
+  with its nose rammed into a bank of sand it ploughed up. The first pod went
+  in steeply and lies nose-down in a crater.
+- **Damage:** the nose is crumpled and caved in on one side. The hatch door is
+  blown off. A gash is ripped along its flank, a third of the heat shield is
+  gone, and one thruster bell is torn away. It lost the other fin, the window
+  is cracked, and the antenna is snapped off at the root.
+- **Debris:** two sprays of small bits at the skip marks, then heat-shield
+  shards and window glass along the trench, with heavier wreckage near the
+  end. Further out lie the hatch door, the torn-off fin, a coolant canister
+  that rolled away, and the antenna mast.
+- **Effects and sound:** the first pod smokes, sparks, beeps red and swings
+  its door. The second pod has its own set:
+  - a split coolant line vents in hissing bursts of white vapour that sinks
+    and rolls out over the sand;
+  - a severed cable sways in the wind and arcs blue-white to the hull with a
+    crack and a buzz;
+  - a cabin light stutters in the hatchway with the buzz of a failing ballast,
+    and gutters with every arc;
+  - the snapped-off beacon lies in the sand, pulsing a slow, faltering amber
+    with a sagging warble.
+- **The trail.** The stranger got 22 units from its pod, and the sand shows
+  how:
+  - it fell out of the hatch, then tried to walk: good-hoof prints with the
+    broken leg dragging beside them;
+  - it went down, then crawled the rest of the way, leaving a body trough
+    (deep where it sagged), the broken leg's thin furrow, claw marks with sand
+    heaped behind them, and gouges where its good hoof shoved;
+  - its pulls get shorter and its rests more frequent toward the end.
+
+  The blood is sparse: single drips with small spatter, a few smudges where
+  its belly pressed, and ragged blotches darker at the rim where it lay. The
+  oldest marks, near the pod, are softer and half dusted over with sand.
 - **The stranger.** At the end lies a creature of your own kind, with husky
   blue skin. It lies on its back:
   - it has a dark wound in its belly, with a faint glow deep inside, and holds
@@ -107,13 +137,15 @@ nose. Its hatch is torn off and lies nearby. It is cold: no smoke, no beacon.
   (D, G, C). Under the rasp there is a thin pure tone, so you can tell each
   pitch apart.
 - **Code:**
-  - The furrow is part of the terrain height. It is in `src/world/crater.ts`,
-    with uniforms `uSite2` and `uSite2End`.
+  - The skid and skip marks are part of the terrain height, on the CPU and the
+    GPU (`src/world/crater.ts`, uniforms `uSite2`, `uSite2Trail`, `uSite2On`).
   - The blood, troughs and churned sand are a small texture that the sand
     shader reads (`src/world/stains.ts`). It changes the colour and the shading
     normal, not the geometry.
-  - The pod is in `src/world/lostPod.ts`. The stranger, its animation, the
-    encounter and the painting of the trail are in `src/story/Stranger.ts`.
+  - Both pods are in `src/world/crashSite.ts` (`variant` `'first'` or
+    `'second'`); each has its own positional sound bus. The stranger, its
+    animation, the encounter and the painting of the trail are in
+    `src/story/Stranger.ts`.
 
 ## Stamina
 

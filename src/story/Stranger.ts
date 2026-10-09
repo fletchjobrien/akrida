@@ -502,39 +502,47 @@ export class Stranger {
   }
 
   /**
-   * Paint what it left on the sand: the drag trail from the pod's hatch (blood,
-   * the trough of its body, the broken leg's furrow, claw marks), the places it
-   * stopped to rest, and the churned sand where it lies.
+   * The way it came: a curve from the pod's hatch to under its hips, arriving
+   * head first along its body. `mid` is the curve's halfway point.
+   */
+  trailPath(from: Vector3) {
+    this.bodyToWorld(0, 0.25, _w);
+    const end = { x: _w.x, z: _w.z };
+    const L = Math.hypot(end.x - from.x, end.z - from.z);
+    const control = { x: end.x - this.axis.x * L * 0.42, z: end.z - this.axis.z * L * 0.42 };
+    const mid = { x: (from.x + 2 * control.x + end.x) / 4, z: (from.z + 2 * control.z + end.z) / 4 };
+    return { end, control, mid, length: L };
+  }
+
+  /**
+   * Paint what it left on the sand on its way here. It fell out of the hatch,
+   * tried to limp on its good leg, collapsed, and crawled the rest: dragging
+   * its body and its broken leg, clawing forward with its hands and shoving
+   * with its good hoof, stopping more and more often. Blood fell from the
+   * wound in sparse drips and pooled where it rested. The oldest marks, near
+   * the pod, are half filled in by blown sand.
    */
   paint(stains: StainMap, from: Vector3) {
     const rand = rng(7731);
-    const ax = this.axis.x;
-    const az = this.axis.z;
-    // the trail ends under its hips; it crawled in head first
-    this.bodyToWorld(0, 0.25, _w);
-    const ex = _w.x;
-    const ez = _w.z;
-    const L = Math.hypot(ex - from.x, ez - from.z);
-    const cx = ex - ax * L * 0.42;
-    const cz = ez - az * L * 0.42;
-    // sample the curve evenly
+    const path = this.trailPath(from);
+    const { end, control } = path;
     const pts: { x: number; z: number; tx: number; tz: number; s: number }[] = [];
     let prevX = from.x;
     let prevZ = from.z;
     let s = 0;
-    const N = 400;
+    const N = 800;
     for (let i = 0; i <= N; i++) {
       const u = i / N;
       const a = (1 - u) * (1 - u);
       const b = 2 * u * (1 - u);
       const c = u * u;
-      let x = a * from.x + b * cx + c * ex;
-      let z = a * from.z + b * cz + c * ez;
-      const tx = 2 * (1 - u) * (cx - from.x) + 2 * u * (ex - cx);
-      const tz = 2 * (1 - u) * (cz - from.z) + 2 * u * (ez - cz);
+      let x = a * from.x + b * control.x + c * end.x;
+      let z = a * from.z + b * control.z + c * end.z;
+      const tx = 2 * (1 - u) * (control.x - from.x) + 2 * u * (end.x - control.x);
+      const tz = 2 * (1 - u) * (control.z - from.z) + 2 * u * (end.z - control.z);
       const tl = Math.hypot(tx, tz) || 1;
-      // a wandering line: it could not crawl straight
-      const wob = noise1(u * L * 0.32, 61) * 0.35 * Math.sin(Math.PI * u);
+      // it could not keep a straight line
+      const wob = (noise1(u * path.length * 0.22, 61) * 0.6 + noise1(u * path.length * 0.9, 62) * 0.15) * Math.sin(Math.PI * u);
       x += (-tz / tl) * wob;
       z += (tx / tl) * wob;
       s += Math.hypot(x - prevX, z - prevZ);
@@ -553,59 +561,141 @@ export class Stranger {
       }
       return pts[hi];
     };
-    const off = (p: { x: number; z: number; tx: number; tz: number }, side: number, along: number) => ({
+    type P = { x: number; z: number; tx: number; tz: number };
+    const off = (p: P, side: number, along: number) => ({
       x: p.x - p.tz * side + p.tx * along,
       z: p.z + p.tx * side + p.tz * along,
     });
+    const yawOf = (p: P) => Math.atan2(p.tx, p.tz);
+    // older marks, near the pod, are softer and part buried
+    const age = (q: number) => 0.5 + 0.5 * (q / total);
+    const fresh = (q: number) => 0.1 + 0.8 * (q / total);
 
-    // where it fell out of the hatch
-    stains.churn(from.x, from.z, 0.75, 0.8, 3);
-    stains.dent(from.x, from.z, 0.35, 0.5, Math.atan2(pts[3].tx, pts[3].tz), 0.06);
-    stains.splat(from.x + 0.1, from.z + 0.05, 0.2, 1, 0.3);
+    /** One falling drop, with a satellite or two flung off where it hit. */
+    const drop = (x: number, z: number, r: number, f: number) => {
+      stains.splat(x, z, r, 0.95, f);
+      if (rand() < 0.55) {
+        const n = 1 + Math.floor(rand() * 3);
+        for (let i = 0; i < n; i++) {
+          const a = rand() * Math.PI * 2;
+          const d = r * (1.6 + rand() * 1.6);
+          stains.splat(x + Math.cos(a) * d, z + Math.sin(a) * d, r * (0.25 + rand() * 0.2), 0.9, f);
+        }
+      }
+    };
+    /** A pool where it lay and bled: a few overlapping, ragged blots and spatter round them. */
+    const blotch = (x: number, z: number, size: number, f: number) => {
+      const n = 2 + Math.floor(rand() * 3);
+      for (let i = 0; i < n; i++) {
+        const a = rand() * Math.PI * 2;
+        const d = size * rand() * 0.8;
+        stains.splat(x + Math.cos(a) * d, z + Math.sin(a) * d, size * (0.45 + rand() * 0.5), 1, f);
+      }
+      for (let i = 0; i < 4; i++) {
+        const a = rand() * Math.PI * 2;
+        const d = size * (1.4 + rand() * 1.5);
+        drop(x + Math.cos(a) * d, z + Math.sin(a) * d, 0.012 + rand() * 0.02, f);
+      }
+    };
+    /** Where it lay: a body-shaped hollow and sand pushed about by its struggling. */
+    const rest = (p: P, q: number, size: number) => {
+      const k = age(q);
+      stains.dent(p.x, p.z, 0.3 * size, 0.6 * size, yawOf(p), 0.055 * k);
+      stains.churn(p.x, p.z, 0.65 * size, 0.7 * k, q);
+      const b = off(p, -0.1, 0.12);
+      blotch(b.x, b.z, 0.1 * size, fresh(q));
+      // a hand pressed to the wound, then to the sand
+      if (rand() < 0.7) {
+        const hp = off(p, (rand() < 0.5 ? -1 : 1) * 0.32, 0.3);
+        stains.splat(hp.x, hp.z, 0.035, 0.75, fresh(q));
+        stains.dent(hp.x, hp.z, 0.05, 0.06, 0, 0.03 * k);
+      }
+    };
 
-    // the drag: the trough of its body, the broken leg's furrow, claws, blood
-    const rests = [total * (0.3 + rand() * 0.08), total * (0.62 + rand() * 0.08)];
-    let side = 1;
-    for (let q = 0; q < total - 0.1; q += 0.12) {
+    // ---- it fell out of the hatch onto the sand
+    const p0 = at(0.05);
+    stains.dent(from.x, from.z, 0.4, 0.75, yawOf(p0) + 1.2, 0.05 * age(0));
+    stains.churn(from.x, from.z, 0.85, 0.6, 3);
+    blotch(from.x + p0.tx * 0.1, from.z + p0.tz * 0.1, 0.12, fresh(0));
+    for (const sd of [-1, 1]) {
+      const h = off(p0, sd * 0.35, 0.45);
+      stains.dent(h.x, h.z, 0.05, 0.07, 0, 0.035 * age(0));
+    }
+
+    // ---- it tried to walk: hoof prints of the good leg, the broken one dragging, drops falling
+    const limpEnd = 3.6 + rand() * 1.2;
+    for (let q = 0.9; q < limpEnd; q += 0.5 + rand() * 0.12) {
       const p = at(q);
-      const n = at(Math.min(total, q + 0.25));
-      const u = q / total;
-      const fresh = 0.15 + 0.7 * u;
-      stains.groove(p.x, p.z, n.x, n.z, 0.14, 0.05 + 0.012 * noise1(q * 2, 71));
-      const lp = off(p, 0.17, 0);
-      const ln = off(n, 0.17, 0);
-      stains.groove(lp.x, lp.z, ln.x, ln.z, 0.045, 0.04);
-      // blood: heavy at first, thinning, then heavier again as it weakened
-      const flow = 0.55 + 0.45 * Math.max(1 - u * 3, smoothstep(0.6, 1, u)) + 0.35 * noise1(q * 0.9, 72);
-      if (flow > 0.3) {
-        const b0 = off(p, -0.05 + noise1(q * 1.7, 73) * 0.06, 0);
-        const b1 = off(n, -0.05 + noise1(q * 1.7 + 0.4, 73) * 0.06, 0);
-        stains.smear(b0.x, b0.z, b1.x, b1.z, 0.07 + 0.08 * flow, Math.min(1, flow + 0.2), fresh);
-      }
-      if (rand() < 0.45) {
-        const dp = off(p, (rand() - 0.5) * 0.6, 0);
-        stains.splat(dp.x, dp.z, 0.025 + rand() * 0.03, 0.9, fresh);
-      }
-      // hands dug in ahead and pulled the body forward, side by side
-      if (Math.floor((q + 0.12) / 0.42) > Math.floor(q / 0.42)) {
-        side = -side;
-        const h0 = off(p, side * 0.3, 0.42);
-        const h1 = off(p, side * 0.3, 0.18);
-        stains.groove(h0.x, h0.z, h1.x, h1.z, 0.045, 0.06);
-        stains.dent(h0.x, h0.z, 0.07, 0.06, 0, -0.04);
-        if (rand() < 0.45) stains.smear(h0.x, h0.z, h1.x, h1.z, 0.03, 0.85, fresh);
+      const k = age(q);
+      const hoof = off(p, -0.1, 0);
+      stains.dent(hoof.x, hoof.z, 0.05, 0.07, yawOf(p), 0.04 * k);
+      const a = off(p, 0.12, -0.25);
+      const b = off(at(q + 0.5), 0.12, -0.25);
+      stains.groove(a.x, a.z, b.x, b.z, 0.03, 0.03 * k);
+      if (rand() < 0.65) {
+        const d = off(p, (rand() - 0.5) * 0.25, rand() * 0.4);
+        drop(d.x, d.z, 0.018 + rand() * 0.022, fresh(q));
       }
     }
-    // where it stopped to rest, and bled
-    for (const r of rests) {
-      const p = at(r);
-      stains.dent(p.x, p.z, 0.3, 0.55, Math.atan2(p.tx, p.tz), 0.06);
-      stains.churn(p.x, p.z, 0.6, 0.6, r);
-      const b = off(p, -0.12, 0.1);
-      stains.splat(b.x, b.z, 0.13 + rand() * 0.06, 1, 0.3 + 0.6 * (r / total));
+    // ---- and went down
+    rest(at(limpEnd + 0.3), limpEnd, 1.3);
+
+    // ---- then it crawled
+    const crawlStart = limpEnd + 0.9;
+    const crawlLen = total - 1.2 - crawlStart;
+    const stops = [0.28, 0.52, 0.68, 0.8, 0.9].map((f) => crawlStart + crawlLen * (f + (rand() - 0.5) * 0.05));
+    let stop = 0;
+    let stride = 0;
+    let hand = 1;
+    for (let q = crawlStart; q < total - 1.2; ) {
+      const u = (q - crawlStart) / crawlLen;
+      // weaker and weaker: the pulls get shorter
+      const step = (0.58 - 0.26 * u) * (0.85 + rand() * 0.3);
+      const p = at(q);
+      const n = at(Math.min(total, q + step));
+      const k = age(q);
+      // its body pressed a trough, deeper where it sagged, barely touching where it heaved itself up
+      const press = 0.5 + 0.5 * noise1(q * 1.3, 81);
+      stains.groove(p.x, p.z, n.x, n.z, 0.13, (0.012 + 0.035 * press) * k);
+      // the broken leg dragged behind, a thin wavering line
+      const l0 = off(p, 0.14 + noise1(q * 2, 82) * 0.03, -0.55);
+      const l1 = off(n, 0.14 + noise1((q + step) * 2, 82) * 0.03, -0.55);
+      stains.groove(l0.x, l0.z, l1.x, l1.z, 0.03, 0.03 * k);
+      // a hand reached ahead, dug in and pulled, heaping sand behind its claws
+      hand = -hand;
+      const h0 = off(p, hand * (0.27 + rand() * 0.05), 0.42);
+      const h1 = off(p, hand * 0.27, 0.22);
+      stains.groove(h0.x, h0.z, h1.x, h1.z, 0.035, 0.05 * k);
+      stains.dent(h1.x, h1.z, 0.05, 0.05, 0, -0.035 * k);
+      if (rand() < 0.1 + 0.15 * u) stains.splat(h0.x, h0.z, 0.025, 0.7, fresh(q));
+      // every other pull, the good hoof shoved at the sand
+      if (stride++ % 2 === 1) {
+        const g0 = off(p, -0.12, -0.6);
+        const g1 = off(p, -0.12, -0.82);
+        stains.groove(g0.x, g0.z, g1.x, g1.z, 0.04, 0.05 * k);
+        stains.dent(g1.x, g1.z, 0.06, 0.05, 0, -0.04 * k);
+      }
+      // blood: a drip now and then, more as it weakened, and a short smear where its belly pressed
+      const drips = rand() < 0.3 + 0.45 * u ? 1 + Math.floor(rand() * 2) : 0;
+      for (let i = 0; i < drips; i++) {
+        const d = off(p, -0.04 + (rand() - 0.5) * 0.2, rand() * step);
+        drop(d.x, d.z, 0.014 + rand() * 0.024, fresh(q));
+      }
+      if (press > 0.75 && rand() < 0.22) {
+        const a = off(p, -0.05, 0);
+        const b = off(p, -0.05, 0.12 + rand() * 0.12);
+        stains.smear(a.x, a.z, b.x, b.z, 0.035, 0.6, fresh(q));
+      }
+      if (stop < stops.length && q + step >= stops[stop]) {
+        rest(at(stops[stop]), stops[stop], 0.9 + 0.35 * u);
+        stop++;
+      }
+      q += step;
     }
 
-    // where it lies now: a hollow, churned sand all round, gouges from kicking hooves and flailing arms
+    // ---- where it lies now: a hollow, sand churned all round, gouges from kicking hooves and flailing arms
+    const ax = this.axis.x;
+    const az = this.axis.z;
     this.bodyToWorld(0, -0.2, _w);
     stains.dent(_w.x, _w.z, 0.36, 0.95, Math.atan2(ax, az), 0.06);
     stains.churn(_w.x, _w.z, 1.35, 1, 9);
@@ -631,18 +721,15 @@ export class Stranger {
         stains.groove(_v.x, _v.z, _w.x, _w.z, 0.045, 0.05);
       }
     }
-    // blood ran off its side onto the sand, and its hand smeared it
+    // blood ran off its side into the sand, and its hand left smudges
     this.bodyToWorld(-0.3, -0.25, _v);
-    stains.splat(_v.x, _v.z, 0.24, 1, 0.9);
-    this.bodyToWorld(-0.45, -0.1, _v);
-    this.bodyToWorld(-0.62, 0.15, _w);
-    stains.smear(_v.x, _v.z, _w.x, _w.z, 0.06, 0.9, 0.8);
-    this.bodyToWorld(-0.5, -0.4, _v);
-    this.bodyToWorld(-0.7, -0.55, _w);
-    stains.smear(_v.x, _v.z, _w.x, _w.z, 0.05, 0.8, 0.8);
-    for (let i = 0; i < 14; i++) {
-      this.bodyToWorld((rand() - 0.6) * 1.4, (rand() - 0.5) * 1.6, _v);
-      stains.splat(_v.x, _v.z, 0.02 + rand() * 0.035, 0.9, 0.7);
+    blotch(_v.x, _v.z, 0.17, 0.95);
+    this.bodyToWorld(-0.5, -0.05, _v);
+    this.bodyToWorld(-0.6, 0.1, _w);
+    stains.smear(_v.x, _v.z, _w.x, _w.z, 0.04, 0.7, 0.85);
+    for (let i = 0; i < 10; i++) {
+      this.bodyToWorld((rand() - 0.6) * 1.5, (rand() - 0.5) * 1.7, _v);
+      drop(_v.x, _v.z, 0.012 + rand() * 0.022, 0.75);
     }
     stains.commit();
   }

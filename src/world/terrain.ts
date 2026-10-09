@@ -224,11 +224,13 @@ void main() {
     if (sc > 0.9 && gh < 0.018) col = gh < 0.004 && band <= 2 ? SAND_HI : SOOT_GLASS;
   }
 
-  // Dried blood, cracked and flaking at the edges.
+  // Dried blood: darker at the rim where it dried first, darker still where it is fresher,
+  // and the older stains half dusted over by blowing sand.
   if (st.r > 0.3 + d * 0.4) {
     float fl = hash01(floor(cell) + vec2(-13.0, 87.0));
-    if (fl > 0.14 * (1.0 - st.g) * (1.0 - st.r * 0.5)) {
-      int bb = clamp(band + (st.g > 0.35 + d * 0.4 ? 1 : 0), 1, 4);
+    if (fl > 0.32 * (1.0 - st.g) * (1.0 - st.r * 0.4)) {
+      bool rim = st.r < 0.62 + (d - 0.5) * 0.1;
+      int bb = clamp(band + (rim ? 1 : 0) + (st.g > 0.45 + d * 0.3 ? 1 : 0), 1, 4);
       col = bb == 1 ? BLOOD_LIT : (bb == 2 ? BLOOD_MID : (bb == 3 ? BLOOD_SHADE : BLOOD_DEEP));
     }
   }

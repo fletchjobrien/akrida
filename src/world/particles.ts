@@ -180,6 +180,7 @@ interface Mote {
   windK?: number;
   /** Colour at the end of its life. */
   c2?: number[];
+  soft?: boolean;
 }
 
 /** Sand kicked up by hooves, sand sliding off a body, smoke and sparks. */
@@ -260,7 +261,7 @@ export class Dust {
     life: number,
     c: number[],
     size: number,
-    opts: { g?: number; drag?: number; windK?: number; c2?: number[] } = {},
+    opts: { g?: number; drag?: number; windK?: number; c2?: number[]; soft?: boolean } = {},
   ) {
     if (this.list.length >= this.capacity) this.list.shift();
     this.list.push({ x, y, z, vx, vy, vz, life: 0, max: life, c, size, ...opts });
@@ -282,7 +283,8 @@ export class Dust {
       const wk = ws * (p.windK ?? 1);
       p.vx = p.vx * drag + wind.dir.x * wk * dt;
       p.vz = p.vz * drag + wind.dir.y * wk * dt;
-      if (grav < 0) p.vy *= drag;
+      // smoke and vapour (soft) are slowed in every direction, not just across
+      if (grav < 0 || p.soft) p.vy *= drag;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
@@ -290,9 +292,12 @@ export class Dust {
         const g = height(p.x, p.z);
         if (p.y < g) {
           p.y = g;
-          p.vy *= -0.2;
-          p.vx *= 0.5;
-          p.vz *= 0.5;
+          // vapour rolls on along the sand; grit and sparks bounce and stop
+          p.vy *= p.soft ? 0 : -0.2;
+          if (!p.soft) {
+            p.vx *= 0.5;
+            p.vz *= 0.5;
+          }
         }
       }
       const k = n * 3;
@@ -305,8 +310,9 @@ export class Dust {
       this.col[k + 1] = p.c[1] + (c2[1] - p.c[1]) * u;
       this.col[k + 2] = p.c[2] + (c2[2] - p.c[2]) * u;
       // smoke swells in gently; everything else pops in
-      const fadeIn = grav < 0 ? Math.min(1, p.life * 2.5) : 1;
-      this.fade[n] = Math.min(fadeIn, (p.max - p.life) * (grav < 0 ? 1.2 : 4));
+      const soft = grav < 0 || p.soft;
+      const fadeIn = soft ? Math.min(1, p.life * 2.5) : 1;
+      this.fade[n] = Math.min(fadeIn, (p.max - p.life) * (soft ? 1.2 : 4));
       this.size[n] = p.size;
       n++;
     }
