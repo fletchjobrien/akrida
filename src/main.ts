@@ -11,6 +11,7 @@ import { AudioEngine } from './audio/AudioEngine';
 import { Input } from './core/input';
 import { clamp, DynVec3, saturate } from './core/math';
 import { WakeUp } from './story/WakeUp';
+import { CrashSite } from './world/crashSite';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const pr = new PixelRenderer(canvas);
@@ -37,6 +38,11 @@ scene.add(creature.rig.root);
 
 const wind = new Wind();
 const audio = new AudioEngine();
+// the wreck at the end of the skid trench that starts near where the creature wakes
+const site = new CrashSite(rocks, dust, audio);
+scene.add(site.group);
+/** Seconds left of the creature staring at the wreck when it first sees it. */
+let noticeTime = 0;
 const input = new Input(canvas);
 const params = new URLSearchParams(location.search);
 
@@ -109,8 +115,14 @@ function update(dt: number, now: number) {
   if (input.hasMouse) {
     pr.screenToGround(input.mouse.x, input.mouse.y, terrainHeight, mouseGround);
   }
-  if (input.hasMouse && mouseIdle < 7000) {
+  if (noticeTime > 0) {
+    // the first sight of the wreck turns the head, whatever the mouse is doing
+    noticeTime -= dt;
+    look = lookPoint.copy(site.lookPoint);
+  } else if (input.hasMouse && mouseIdle < 7000) {
     look = lookPoint.copy(mouseGround);
+  } else if (site.distance < 16) {
+    look = lookPoint.copy(site.lookPoint);
   } else if (creature.speed < 0.2) {
     // nobody is steering the gaze: glance around the desert now and then
     wanderTimer -= dt;
@@ -169,6 +181,11 @@ function update(dt: number, now: number) {
 
 /** Camera, streamed world, particles and sound: shared by play and the opening. */
 function finishFrame(dt: number, target: Vector3) {
+  site.update(dt, elapsed, wind, creature.pos);
+  if (site.justDiscovered && !wake.active) {
+    audio.stinger();
+    noticeTime = 2.8;
+  }
   const focus = camDyn.update(dt, target);
   pr.setFocus(focus);
   terrain.follow(focus.x, focus.z);
@@ -217,6 +234,7 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     input,
     audio,
     wake,
+    site,
     dustCount: () => dust.count,
     fx(on: boolean) {
       fxOff = !on;

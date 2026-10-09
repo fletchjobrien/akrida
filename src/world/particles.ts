@@ -174,9 +174,15 @@ interface Mote {
   max: number;
   c: number[];
   size: number;
+  /** Gravity (negative rises, like smoke), air drag, and how much the wind carries it. */
+  g?: number;
+  drag?: number;
+  windK?: number;
+  /** Colour at the end of its life. */
+  c2?: number[];
 }
 
-/** Sand kicked up by hooves. */
+/** Sand kicked up by hooves, sand sliding off a body, smoke and sparks. */
 export class Dust {
   readonly mesh: Points;
   private readonly list: Mote[] = [];
@@ -186,7 +192,7 @@ export class Dust {
   private readonly size: Float32Array;
   private readonly geo: BufferGeometry;
 
-  constructor(private readonly capacity = 400) {
+  constructor(private readonly capacity = 700) {
     this.geo = new BufferGeometry();
     this.pos = new Float32Array(capacity * 3);
     this.col = new Float32Array(capacity * 3);
@@ -243,6 +249,23 @@ export class Dust {
     });
   }
 
+  /** Any particle: smoke (g < 0, slow drag, carried by wind), sparks (bright, fast). */
+  spawn(
+    x: number,
+    y: number,
+    z: number,
+    vx: number,
+    vy: number,
+    vz: number,
+    life: number,
+    c: number[],
+    size: number,
+    opts: { g?: number; drag?: number; windK?: number; c2?: number[] } = {},
+  ) {
+    if (this.list.length >= this.capacity) this.list.shift();
+    this.list.push({ x, y, z, vx, vy, vz, life: 0, max: life, c, size, ...opts });
+  }
+
   update(dt: number, wind: Wind, height: (x: number, z: number) => number) {
     let n = 0;
     const ws = wind.strength * 2.5;
@@ -253,28 +276,37 @@ export class Dust {
         this.list.splice(i, 1);
         continue;
       }
-      p.vy -= 9.0 * dt;
-      const drag = Math.exp(-2.2 * dt);
-      p.vx = p.vx * drag + wind.dir.x * ws * dt;
-      p.vz = p.vz * drag + wind.dir.y * ws * dt;
+      const grav = p.g ?? 9;
+      p.vy -= grav * dt;
+      const drag = Math.exp(-(p.drag ?? 2.2) * dt);
+      const wk = ws * (p.windK ?? 1);
+      p.vx = p.vx * drag + wind.dir.x * wk * dt;
+      p.vz = p.vz * drag + wind.dir.y * wk * dt;
+      if (grav < 0) p.vy *= drag;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
-      const g = height(p.x, p.z);
-      if (p.y < g) {
-        p.y = g;
-        p.vy *= -0.2;
-        p.vx *= 0.5;
-        p.vz *= 0.5;
+      if (grav > 0) {
+        const g = height(p.x, p.z);
+        if (p.y < g) {
+          p.y = g;
+          p.vy *= -0.2;
+          p.vx *= 0.5;
+          p.vz *= 0.5;
+        }
       }
       const k = n * 3;
       this.pos[k] = p.x;
       this.pos[k + 1] = p.y;
       this.pos[k + 2] = p.z;
-      this.col[k] = p.c[0];
-      this.col[k + 1] = p.c[1];
-      this.col[k + 2] = p.c[2];
-      this.fade[n] = Math.min(1, (p.max - p.life) * 4);
+      const u = p.c2 ? p.life / p.max : 0;
+      const c2 = p.c2 ?? p.c;
+      this.col[k] = p.c[0] + (c2[0] - p.c[0]) * u;
+      this.col[k + 1] = p.c[1] + (c2[1] - p.c[1]) * u;
+      this.col[k + 2] = p.c[2] + (c2[2] - p.c[2]) * u;
+      // smoke swells in gently; everything else pops in
+      const fadeIn = grav < 0 ? Math.min(1, p.life * 2.5) : 1;
+      this.fade[n] = Math.min(fadeIn, (p.max - p.life) * (grav < 0 ? 1.2 : 4));
       this.size[n] = p.size;
       n++;
     }

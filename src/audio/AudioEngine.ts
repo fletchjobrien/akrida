@@ -241,6 +241,122 @@ function pourBuffer(ctx: BaseAudioContext, seed: number): Buf {
   return buf;
 }
 
+/** Hot metal cooling: a tiny bright tick with a short metallic ring. */
+function tickBuffer(ctx: BaseAudioContext, seed: number): Buf {
+  const sr = ctx.sampleRate;
+  const len = Math.floor(sr * 0.08);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const r = rng(seed * 37 + 3);
+  const f1 = 2300 + r() * 2600;
+  const f2 = f1 * (1.47 + r() * 0.2);
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const click = i < sr * 0.0015 ? (r() * 2 - 1) * (1 - i / (sr * 0.0015)) : 0;
+    d[i] = click * 0.8 + (Math.sin(2 * Math.PI * f1 * t) * 0.6 + Math.sin(2 * Math.PI * f2 * t) * 0.3) * Math.exp(-t / 0.012);
+  }
+  return buf;
+}
+
+/** Electrical sparks: sharp, sparse snaps over a fizz. */
+function crackleBuffer(ctx: BaseAudioContext, seed: number): Buf {
+  const sr = ctx.sampleRate;
+  const dur = 0.55;
+  const len = Math.floor(sr * dur);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const r = rng(seed * 811 + 7);
+  let t = 0;
+  while (t < dur) {
+    t += -Math.log(1 - r() * 0.999) / (180 * Math.exp(-t / 0.18) + 8);
+    const start = Math.floor(t * sr);
+    const glen = Math.floor(sr * (0.0002 + r() * 0.0012));
+    const amp = (0.3 + r() * 0.7) * Math.exp(-t / 0.25);
+    for (let i = 0; i < glen && start + i < len; i++) d[start + i] += (r() * 2 - 1) * amp;
+  }
+  let hp = 0;
+  let prev = 0;
+  const hpA = Math.exp((-2 * Math.PI * 1800) / sr);
+  let peak = 0;
+  for (let i = 0; i < len; i++) {
+    const fizz = (r() * 2 - 1) * 0.06 * Math.exp(-(i / sr) / 0.15);
+    const x = d[i] + fizz;
+    hp = hpA * (hp + x - prev);
+    prev = x;
+    d[i] = hp;
+    peak = Math.max(peak, Math.abs(hp));
+  }
+  for (let i = 0; i < len; i++) d[i] *= 0.9 / (peak || 1);
+  return buf;
+}
+
+/** A hinge creaking: a stick-slip train of pulses ringing two resonances. */
+function creakBuffer(ctx: BaseAudioContext, seed: number): Buf {
+  const sr = ctx.sampleRate;
+  const dur = 0.7 + seed * 0.15;
+  const len = Math.floor(sr * dur);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const r = rng(seed * 97 + 41);
+  const src = new Float32Array(len);
+  let next = 0;
+  for (let i = 0; i < len; i++) {
+    const u = i / len;
+    if (i >= next) {
+      src[i] = 0.6 + r() * 0.4;
+      const rate = 35 + 55 * Math.sin(Math.PI * u) + (r() - 0.5) * 18;
+      next = i + Math.floor(sr / rate);
+    }
+  }
+  const res = (fc: number, q: number, g: number) => {
+    let lo = 0;
+    let band = 0;
+    const f = 2 * Math.sin((Math.PI * fc) / sr);
+    for (let i = 0; i < len; i++) {
+      lo += f * band;
+      band += f * (src[i] - lo - q * band);
+      d[i] += band * g;
+    }
+  };
+  res(620 + r() * 120, 0.08, 1);
+  res(1450 + r() * 300, 0.1, 0.6);
+  res(3100 + r() * 400, 0.15, 0.25);
+  let peak = 0;
+  for (let i = 0; i < len; i++) {
+    const u = i / len;
+    d[i] *= Math.sin(Math.PI * Math.min(1, u * 1.2)) ** 0.7;
+    peak = Math.max(peak, Math.abs(d[i]));
+  }
+  for (let i = 0; i < len; i++) d[i] *= 0.9 / (peak || 1);
+  return buf;
+}
+
+/** A hollow metal panel knocking against its frame: inharmonic partials. */
+function clankBuffer(ctx: BaseAudioContext, seed: number): Buf {
+  const sr = ctx.sampleRate;
+  const dur = 1.3;
+  const len = Math.floor(sr * dur);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const r = rng(seed * 59 + 13);
+  const base = 260 + r() * 120;
+  const partials = [1, 2.32, 4.25, 6.63, 9.38].map((m, k) => ({
+    f: base * m * (1 + (r() - 0.5) * 0.02),
+    a: 1 / (1 + k * 0.9),
+    tau: 0.5 / (1 + k * 0.7),
+  }));
+  let peak = 0;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    let v = i < sr * 0.004 ? (r() * 2 - 1) * (1 - t / 0.004) * 0.7 : 0;
+    for (const p of partials) v += Math.sin(2 * Math.PI * p.f * t) * p.a * Math.exp(-t / p.tau);
+    d[i] = v;
+    peak = Math.max(peak, Math.abs(v));
+  }
+  for (let i = 0; i < len; i++) d[i] *= 0.9 / peak;
+  return buf;
+}
+
 function impulseResponse(ctx: BaseAudioContext, seconds: number): Buf {
   const sr = ctx.sampleRate;
   const len = Math.floor(sr * seconds);
@@ -269,6 +385,15 @@ export class AudioEngine {
   private gasps: Buf[] = [];
   private pours: Buf[] = [];
   private heart: Buf | null = null;
+  // crash site
+  private ticks: Buf[] = [];
+  private crackles: Buf[] = [];
+  private creaks: Buf[] = [];
+  private clanks: Buf[] = [];
+  private siteBus: GainNode | null = null;
+  private sitePan!: StereoPannerNode;
+  private siteLow!: BiquadFilterNode;
+  private humGain!: GainNode;
   private out!: AudioNode;
   private muffle!: BiquadFilterNode;
   private deepGasps: Buf[] = [];
@@ -342,6 +467,11 @@ export class AudioEngine {
     for (let i = 0; i < 3; i++) this.deepGasps.push(gaspBuffer(ctx, 50 + i, 1));
     for (let i = 0; i < 3; i++) this.pours.push(pourBuffer(ctx, i));
     this.heart = heartBuffer(ctx);
+    for (let i = 0; i < 6; i++) this.ticks.push(tickBuffer(ctx, i));
+    for (let i = 0; i < 3; i++) this.crackles.push(crackleBuffer(ctx, i));
+    for (let i = 0; i < 3; i++) this.creaks.push(creakBuffer(ctx, i));
+    for (let i = 0; i < 2; i++) this.clanks.push(clankBuffer(ctx, i));
+    this.buildSite(ctx);
 
     document.addEventListener('visibilitychange', () => {
       if (!this.ctx) return;
@@ -529,6 +659,143 @@ export class AudioEngine {
     g.gain.value = level;
     src.connect(lp).connect(g).connect(this.master);
     src.start();
+  }
+
+  // ------------------------------------------------------------ crash site
+
+  private buildSite(ctx: AudioContext) {
+    // everything at the wreck goes through one bus that fades, pans and dulls with distance
+    this.siteBus = ctx.createGain();
+    this.siteBus.gain.value = 0;
+    this.sitePan = ctx.createStereoPanner();
+    this.siteLow = ctx.createBiquadFilter();
+    this.siteLow.type = 'lowpass';
+    this.siteLow.frequency.value = 800;
+    this.siteBus.connect(this.sitePan).connect(this.siteLow).connect(this.master);
+    const send = ctx.createGain();
+    send.gain.value = 0.5;
+    this.siteLow.connect(send).connect(this.reverbSend);
+
+    // a damaged power unit hums and flutters
+    this.humGain = ctx.createGain();
+    this.humGain.gain.value = 0;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 340;
+    for (const [f, type, g] of [
+      [50, 'sawtooth', 0.5],
+      [100.6, 'square', 0.12],
+      [151, 'sine', 0.2],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(lp);
+      o.start();
+    }
+    lp.connect(this.humGain).connect(this.siteBus);
+  }
+
+  /** Place the listener relative to the wreck: 0..1 loudness, -1..1 pan, 0..1 clarity. */
+  setSite(level: number, pan: number, clarity: number, hum: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.siteBus) return;
+    const now = ctx.currentTime;
+    this.siteBus.gain.setTargetAtTime(level, now, 0.15);
+    this.sitePan.pan.setTargetAtTime(pan, now, 0.15);
+    this.siteLow.frequency.setTargetAtTime(500 * Math.pow(30, clarity), now, 0.15);
+    this.humGain.gain.setTargetAtTime(hum * 0.05, now, 0.08);
+  }
+
+  private playSite(buf: Buf, level: number, rate = 1) {
+    const ctx = this.ctx;
+    if (!ctx || !this.siteBus) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(g).connect(this.siteBus);
+    src.start();
+  }
+
+  /** The emergency beacon: a thin, slightly broken electronic beep. */
+  siteBeep(level: number, pitch = 1) {
+    const ctx = this.ctx;
+    if (!ctx || !this.siteBus) return;
+    const now = ctx.currentTime;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, now);
+    g.gain.linearRampToValueAtTime(level, now + 0.006);
+    g.gain.setTargetAtTime(0, now + 0.09, 0.02);
+    g.connect(this.siteBus);
+    for (const [f, a] of [
+      [1975 * pitch, 1],
+      [3950 * pitch, 0.25],
+    ]) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(f, now);
+      o.frequency.linearRampToValueAtTime(f * 0.985, now + 0.12);
+      const og = ctx.createGain();
+      og.gain.value = a * 0.25;
+      o.connect(og).connect(g);
+      o.start(now);
+      o.stop(now + 0.25);
+    }
+  }
+
+  siteTick(level: number) {
+    this.playSite(this.ticks[Math.floor(Math.random() * this.ticks.length)], level, 0.85 + Math.random() * 0.3);
+  }
+
+  siteSpark(level: number) {
+    this.playSite(this.crackles[Math.floor(Math.random() * this.crackles.length)], level, 0.9 + Math.random() * 0.25);
+  }
+
+  siteCreak(level: number, rate: number) {
+    this.playSite(this.creaks[Math.floor(Math.random() * this.creaks.length)], level, rate);
+  }
+
+  siteClank(level: number) {
+    this.playSite(this.clanks[Math.floor(Math.random() * this.clanks.length)], level, 0.92 + Math.random() * 0.16);
+  }
+
+  /** A low swell when the wreck first comes into view. */
+  stinger() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.linearRampToValueAtTime(0.22, now + 2.6);
+    out.gain.setValueAtTime(0.22, now + 4.2);
+    out.gain.linearRampToValueAtTime(0.0001, now + 8.5);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(260, now);
+    lp.frequency.linearRampToValueAtTime(900, now + 3);
+    lp.frequency.linearRampToValueAtTime(300, now + 8.5);
+    lp.connect(out).connect(this.master);
+    out.connect(this.reverbSend);
+    // a hollow fifth with a slow beating third partial
+    for (const [f, type, g] of [
+      [55, 'triangle', 0.6],
+      [82.4, 'sine', 0.45],
+      [110.7, 'triangle', 0.25],
+      [164.2, 'sine', 0.12],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(lp);
+      o.start(now);
+      o.stop(now + 9);
+    }
   }
 
   /** Stamina sounds: faint wheezes before running out, a deep gasp when it does. */

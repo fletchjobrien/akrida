@@ -7,6 +7,7 @@ import {
   Vector3,
 } from 'three';
 import { fbm, gnoise, NOISE_GLSL } from './noise';
+import { CRATER_GLSL, craterHeight, siteMask } from './crater';
 import { LIGHTING_GLSL, shared } from '../render/shared';
 import { glslRgb, PALETTE } from '../render/palette';
 
@@ -35,7 +36,7 @@ function duneProfile(u: number): number {
 }
 
 export function duneField(x: number, z: number): number {
-  return smooth(-0.06, 0.16, fbm(x * 0.0065 - 7.1, z * 0.0065 + 3.3, 2));
+  return smooth(-0.06, 0.16, fbm(x * 0.0065 - 7.1, z * 0.0065 + 3.3, 2)) * (1 - siteMask(x, z));
 }
 
 export function terrainHeight(x: number, z: number): number {
@@ -46,7 +47,7 @@ export function terrainHeight(x: number, z: number): number {
   const t = (x * DUNE_DX + z * DUNE_DZ) / DUNE_WAVELENGTH + warp;
   const amp = Math.min(1.4, Math.max(0.2, 0.75 + 0.9 * gnoise(x * 0.03 + 1.3, z * 0.03 + 7.7))) * 1.9 * field;
   const dune = duneProfile(t - Math.floor(t)) * amp;
-  return swell + hummock + dune;
+  return swell + hummock + dune + craterHeight(x, z);
 }
 
 const _n = new Vector3();
@@ -58,6 +59,7 @@ export function terrainNormal(x: number, z: number, out = _n): Vector3 {
 }
 
 export const TERRAIN_GLSL = /* glsl */ `
+${CRATER_GLSL}
 const vec2 DUNE_DIR = vec2(${DUNE_DX}, ${DUNE_DZ});
 float duneProfile(float u) {
   if (u < ${DUNE_CREST.toFixed(4)}) {
@@ -68,7 +70,7 @@ float duneProfile(float u) {
   return (1.0 - s) * (1.0 - s);
 }
 float duneField(vec2 p) {
-  return smoothstep(-0.06, 0.16, fbm(p * 0.0065 + vec2(-7.1, 3.3), 2));
+  return smoothstep(-0.06, 0.16, fbm(p * 0.0065 + vec2(-7.1, 3.3), 2)) * (1.0 - siteMask(p));
 }
 float terrainHeight(vec2 p) {
   float swell = fbm(p * 0.011 + vec2(31.7, -12.3), 3) * 7.0;
@@ -78,7 +80,7 @@ float terrainHeight(vec2 p) {
   float t = dot(p, DUNE_DIR) / ${DUNE_WAVELENGTH.toFixed(4)} + warp;
   float amp = clamp(0.75 + 0.9 * gnoise(p * 0.03 + vec2(1.3, 7.7)), 0.2, 1.4) * 1.9 * field;
   float dune = duneProfile(fract(t)) * amp;
-  return swell + hummock + dune;
+  return swell + hummock + dune + craterHeight(p);
 }
 `;
 
@@ -106,6 +108,11 @@ const vec3 SAND_LIT = ${glslRgb(PALETTE.sandLit)};
 const vec3 SAND_MID = ${glslRgb(PALETTE.sandMid)};
 const vec3 SAND_SHADE = ${glslRgb(PALETTE.sandShade)};
 const vec3 SAND_DEEP = ${glslRgb(PALETTE.sandDeep)};
+const vec3 SOOT_LIT = ${glslRgb(0xc9b07c)};
+const vec3 SOOT_MID = ${glslRgb(0xa48d61)};
+const vec3 SOOT_SHADE = ${glslRgb(0x7c684a)};
+const vec3 SOOT_DEEP = ${glslRgb(0x5c4c38)};
+const vec3 SOOT_GLASS = ${glslRgb(0x3e3532)};
 
 vec3 sandBand(int i) {
   if (i <= 0) return SAND_HI;
@@ -190,7 +197,17 @@ void main() {
     else if (band == 1 && d < clamp(over * 3.0, 0.0, 0.3)) band = 0;
   }
 
-  outColor = vec4(sandBand(band), 1.0);
+  vec3 col = sandBand(band);
+  // Burnt sand and fused glass where the pod came down.
+  float sc = smoothstep(0.3, 0.55, scorchAt(p));
+  if (sc > d) {
+    int sb = clamp(band, 1, 4);
+    col = sb == 1 ? SOOT_LIT : (sb == 2 ? SOOT_MID : (sb == 3 ? SOOT_SHADE : SOOT_DEEP));
+    float gh = hash01(floor(cell) + vec2(401.0, -97.0));
+    if (sc > 0.9 && gh < 0.018) col = gh < 0.004 && band <= 2 ? SAND_HI : SOOT_GLASS;
+  }
+
+  outColor = vec4(col, 1.0);
   outInfo = vec4(0.5, 1.0, 0.0, 0.0);
 }
 `;

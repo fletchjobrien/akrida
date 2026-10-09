@@ -43,6 +43,26 @@ wake it:
 
 Add `?skipintro` to the URL to start standing.
 
+## The crash site
+
+A skid trench starts a short walk from where the creature wakes, in the
+direction it faces when it stands. Follow it and it ends at an impact crater
+with a raised rim and burnt, glassy sand. An escape pod lies nose-down in the
+crater with its hatch hanging open, and wreckage lies along the trench and past
+the rim. The first time the creature comes near, a low sound swells and it
+turns its head to look.
+
+- **Animated:** the emergency beacon blinks (sometimes twice, sometimes not at
+  all). The hatch door swings in the gusts and knocks against the hull. Sparks
+  spit from a torn panel, smoke drifts off with the wind, and sand slips down
+  the crater walls.
+- **Sound:** a thin broken beep, an electrical hum, hot metal ticking as it
+  cools, spark crackles, hinge creaks and metal clanks. All of it gets louder
+  and clearer as you walk closer, and pans with the pod's position.
+- **Code:** the trench and crater are part of the terrain height (CPU and GPU,
+  `src/world/crater.ts`). The pod, wreckage, animation and sound are in
+  `src/world/crashSite.ts`. The pod blocks the creature; flat scraps do not.
+
 ## Stamina
 
 There is no stamina bar. You hear and see it instead:

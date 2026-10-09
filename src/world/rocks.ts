@@ -7,12 +7,15 @@ import {
   IcosahedronGeometry,
   InstancedMesh,
   Matrix4,
+  Mesh,
+  Object3D,
   Quaternion,
   Vector3,
   type Material,
 } from 'three';
 import { hash01, hashU } from './noise';
 import { duneField, terrainHeight } from './terrain';
+import { siteMask } from './crater';
 import { toonMaterial } from '../render/shared';
 import { PALETTE } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
@@ -30,7 +33,7 @@ export interface RockInfo {
 }
 
 /** Convex hull (Andrew's monotone chain) of x, z pairs. */
-function convexHull(pts: number[]): Float32Array {
+export function convexHull(pts: number[]): Float32Array {
   const n = pts.length / 2;
   const idx = Array.from({ length: n }, (_, i) => i);
   idx.sort((a, b) => pts[a * 2] - pts[b * 2] || pts[a * 2 + 1] - pts[b * 2 + 1]);
@@ -202,6 +205,14 @@ export class Rocks {
     }
   }
 
+  /** Fixed obstacles (the pod, big wreckage) that always collide. */
+  private readonly statics: RockInfo[] = [];
+
+  addStatic(info: RockInfo) {
+    this.statics.push(info);
+    this.nearby.push(info);
+  }
+
   update(x: number, z: number) {
     const cx = Math.floor(x / this.cellSize);
     const cz = Math.floor(z / this.cellSize);
@@ -214,6 +225,7 @@ export class Rocks {
   private rebuild(cx: number, cz: number) {
     const counts = new Array(VARIANTS).fill(0);
     this.nearby.length = 0;
+    for (const st of this.statics) this.nearby.push(st);
     const m = new Matrix4();
     const q = new Quaternion();
     const e = new Euler();
@@ -222,6 +234,7 @@ export class Rocks {
     const tmp = new Vector3();
 
     const place = (wx: number, wz: number, size: number, seed: number) => {
+      if (siteMask(wx, wz) > 0.05) return; // the crash site is swept clear
       const rand = rng(seed);
       const variant = Math.floor(rand() * VARIANTS);
       if (counts[variant] >= this.capacity) return;
@@ -298,4 +311,31 @@ export class Rocks {
       this.meshes[i].instanceMatrix.needsUpdate = true;
     }
   }
+}
+
+/** The ground footprint of an object (all its meshes, in world space) as a collider. */
+export function footprintOf(obj: Object3D, height: number): RockInfo {
+  obj.updateMatrixWorld(true);
+  const pts: number[] = [];
+  const v = new Vector3();
+  obj.traverse((o) => {
+    if (!(o instanceof Mesh)) return;
+    const pos = o.geometry.getAttribute('position') as BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      pts.push(v.x, v.z);
+    }
+  });
+  const hull = convexHull(pts);
+  let cx = 0;
+  let cz = 0;
+  for (let i = 0; i < hull.length; i += 2) {
+    cx += hull[i];
+    cz += hull[i + 1];
+  }
+  cx /= hull.length / 2;
+  cz /= hull.length / 2;
+  let radius = 0;
+  for (let i = 0; i < hull.length; i += 2) radius = Math.max(radius, Math.hypot(hull[i] - cx, hull[i + 1] - cz));
+  return { x: cx, z: cz, radius, height, hull };
 }
