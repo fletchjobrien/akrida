@@ -12,7 +12,7 @@ import {
   unwrapNear,
   wrapAngle,
 } from '../core/math';
-import { CreatureRig, LEG, orient } from './rig';
+import { CreatureRig, LEG, orient, type Skin } from './rig';
 import { pushOutOfRock, type RockInfo } from '../world/rocks';
 import type { ScriptPose } from './scriptPose';
 
@@ -106,7 +106,7 @@ const _e = new Euler();
 const _n2 = new Vector2();
 
 export class Creature {
-  readonly rig = new CreatureRig();
+  readonly rig: CreatureRig;
   /** Logical ground position (x, z) and ground height (y). */
   readonly pos = new Vector3();
   readonly vel = new Vector3();
@@ -168,7 +168,11 @@ export class Creature {
   breath = 0;
   breathRate = 0.3;
 
-  constructor(world: World, x = 0, z = 0) {
+  /** Set to drive the breathing from a script: the -1..1 breath and its size. */
+  scriptBreath: { value: number; amp: number } | null = null;
+
+  constructor(world: World, x = 0, z = 0, skin?: Skin) {
+    this.rig = new CreatureRig(skin);
     this.crouchDyn.reset(0);
     this.teleport(x, z, world);
   }
@@ -750,7 +754,8 @@ export class Creature {
       _pole.x += Math.cos(this.yaw) * f.side * 0.25;
       _pole.z -= Math.sin(this.yaw) * f.side * 0.25;
       _pole.y = 0.1;
-      if (f.poleDown > 0) _pole.lerp(_down, f.poleDown);
+      // (a negative poleDown points the knee up, for lying on the back)
+      if (f.poleDown !== 0) _pole.lerp(_down, f.poleDown);
 
       const reached = solveTwoBone(_hip, _hock, LEG.thigh, LEG.shin, _pole, _knee);
       if (!reached) {
@@ -791,9 +796,9 @@ export class Creature {
     this.exertion = Math.max(P.exertion, this.exertion - dt * 0.05);
     this.breathRate = lerp(0.2, 1.25, this.exertion);
     this.breathPhase = (this.breathPhase + dt * this.breathRate) % 1;
-    const breath = Math.sin(this.breathPhase * TAU);
+    const breath = this.scriptBreath ? this.scriptBreath.value : Math.sin(this.breathPhase * TAU);
     this.breath = breath;
-    const amp = lerp(0.3, 1.8, this.exertion);
+    const amp = this.scriptBreath ? this.scriptBreath.amp : lerp(0.3, 1.8, this.exertion);
 
     // exhausted muscles shake: two octaves of noise per joint
     const tr = P.tremble;

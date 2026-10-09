@@ -12,8 +12,11 @@ import { Input } from './core/input';
 import { clamp, DynVec3, saturate } from './core/math';
 import { WakeUp } from './story/WakeUp';
 import { CrashSite } from './world/crashSite';
-import { CRATER_REACH, craterHeight, POD_DIR, SITE, siteMask, TRENCH_LENGTH } from './world/crater';
+import { CRATER_REACH, craterHeight, FURROW, POD_DIR, SITE, SITE2, siteMask, TRENCH_LENGTH } from './world/crater';
 import { SiteSpawner } from './story/SiteSpawner';
+import { LostPod } from './world/lostPod';
+import { StainMap } from './world/stains';
+import { Stranger } from './story/Stranger';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const pr = new PixelRenderer(canvas);
@@ -43,6 +46,58 @@ const audio = new AudioEngine();
 // the wreck turns up ahead of the player once they have wandered and held a heading
 let site: CrashSite | null = null;
 const spawner = new SiteSpawner();
+// a second pod lands near the first, and its survivor lies at the end of a trail
+let lostPod: LostPod | null = null;
+let stranger: Stranger | null = null;
+
+/**
+ * Lay out the second pod and its survivor around the crater (crater at 0, 0),
+ * clear of the skid trench and further along the heading `h`.
+ */
+function planSecondPod(h: Vector2) {
+  const D = POD_DIR;
+  const clear = (x: number, z: number, margin: number) => {
+    const t = 1 + (x * D.x + z * D.y) / TRENCH_LENGTH;
+    const s = x * -D.y + z * D.x;
+    const inTrench = t > -0.2 && t < 1.1 && Math.abs(s) < margin;
+    return !inTrench && Math.hypot(x, z) > CRATER_REACH + 1;
+  };
+  const rot = (x: number, z: number, a: number) => new Vector2(x * Math.cos(a) - z * Math.sin(a), x * Math.sin(a) + z * Math.cos(a));
+  const side = Math.random() < 0.5 ? -1 : 1;
+  for (const deg of [0, 20, -20, 40, -40, 60, -60, 80, -80, 100, -100]) {
+    const u = rot(h.x, h.y, side * deg * (Math.PI / 180));
+    const pod = u.clone().multiplyScalar(12.5);
+    // the trail heads on out into the desert, away from the crater
+    const w = u.clone().multiplyScalar(0.5).add(h).normalize();
+    const tw = rot(w.x, w.y, (Math.random() - 0.5) * 0.7);
+    const end = pod.clone().addScaledVector(tw, 13);
+    const mid = pod.clone().addScaledVector(tw, 6.5);
+    if (!clear(pod.x, pod.y, 7) || !clear(end.x, end.y, 7) || !clear(mid.x, mid.y, 7)) continue;
+    // it slid in lying across the view (so its length shows), its furrow clear of the
+    // crater and not under the trail
+    const startOf = (g: Vector2) => pod.clone().addScaledVector(g, -FURROW);
+    let slide: Vector2 | null = null;
+    let best = -Infinity;
+    for (const a of [0, 0.35, -0.35, 0.7, -0.7]) {
+      for (const sgn of [1, -1]) {
+        const g = rot(sgn, 0, a);
+        const fs = startOf(g);
+        if (!clear(fs.x, fs.y, 5.5) || -g.dot(tw) > 0.5) continue;
+        const score = Math.abs(g.x) * 2 + fs.length() * 0.05 - Math.abs(a) * 0.5;
+        if (score > best) {
+          best = score;
+          slide = g;
+        }
+      }
+    }
+    if (!slide) continue;
+    // it lies across the view, head first along the trail, so its whole length shows
+    const sx = Math.abs(tw.x) > 0.15 ? Math.sign(tw.x) : side;
+    const axis = tw.clone().multiplyScalar(0.6).add(new Vector2(sx * 0.8, 0)).normalize();
+    return { pod, slide, end, mid, axis };
+  }
+  return null;
+}
 
 /** Put the crash site just out of sight in the direction of travel. */
 function spawnSite() {
@@ -78,6 +133,17 @@ function spawnSite() {
       need = Math.max(need, -(ox * h.x + oz * h.y));
     }
   }
+  const plan = planSecondPod(h);
+  if (plan) {
+    for (const [p, r] of [
+      [plan.pod, 6.5],
+      [plan.mid, 6.5],
+      [plan.end, 6.5],
+      [plan.pod.clone().addScaledVector(plan.slide, -FURROW), 4.5],
+    ] as const) {
+      need = Math.max(need, -(p.x * h.x + p.y * h.y) + r);
+    }
+  }
   const d = reach + need + 0.8;
   const cx = creature.pos.x + h.x * d;
   const cz = creature.pos.z + h.y * d;
@@ -88,19 +154,55 @@ function spawnSite() {
   SITE.on = true;
   shared.uSite.value.set(SITE.x, SITE.z, dx, dz);
   shared.uSiteOn.value = 1;
+  if (plan) {
+    SITE2.x = cx + plan.pod.x;
+    SITE2.z = cz + plan.pod.y;
+    SITE2.dx = plan.slide.x;
+    SITE2.dz = plan.slide.y;
+    SITE2.ex = cx + plan.end.x;
+    SITE2.ez = cz + plan.end.y;
+    SITE2.on = true;
+    shared.uSite2.value.set(SITE2.x, SITE2.z, SITE2.dx, SITE2.dz);
+    shared.uSite2End.value.set(SITE2.ex, SITE2.ez, 1);
+  }
   rocks.refresh();
   site = new CrashSite(rocks, dust, audio);
   scene.add(site.group);
+  if (plan) {
+    lostPod = new LostPod(rocks);
+    scene.add(lostPod.group);
+    const axis = { x: plan.axis.x, z: plan.axis.y };
+    stranger = new Stranger(world, SITE2.ex, SITE2.ez, axis, rocks, dust, audio, (p, o) => pr.snapDelta(p, o));
+    scene.add(stranger.creature.rig.root);
+    // the map of blood and churned sand covers the pod, the trail and the body
+    const xs = [SITE2.x, SITE2.ex, SITE2.ex - axis.x * 6, lostPod.hatchGround.x];
+    const zs = [SITE2.z, SITE2.ez, SITE2.ez - axis.z * 6, lostPod.hatchGround.z];
+    const minX = Math.min(...xs) - 3;
+    const minZ = Math.min(...zs) - 3;
+    const size = Math.max(Math.max(...xs) + 3 - minX, Math.max(...zs) + 3 - minZ);
+    const stains = new StainMap(minX, minZ, size);
+    stranger.paint(stains, lostPod.hatchGround);
+  }
 }
-/** Seconds left of the creature staring at the wreck when it first sees it. */
+/** Seconds left of the creature staring at something it has just noticed. */
 let noticeTime = 0;
+let noticeStranger = false;
+/** The cursor is over the stranger, close enough to reach. */
+let strangerHover = false;
 const input = new Input(canvas);
 const params = new URLSearchParams(location.search);
 
 // The opening: lying limp in the sand until the player clicks.
 const wake = new WakeUp(creature, world, pr, audio, dust, footprints, () => elapsed);
 if (params.has('skipintro')) wake.skip();
-window.addEventListener('pointerdown', () => wake.begin());
+const clickGround = new Vector3();
+window.addEventListener('pointerdown', (e) => {
+  wake.begin();
+  // kneel by the stranger: judged where the click lands, not where the cursor was last frame
+  if (e.button !== 0 || !stranger || wake.active || stranger.busy) return;
+  pr.screenToGround(e.clientX, e.clientY, terrainHeight, clickGround);
+  if (stranger.canInteract(creature.pos, clickGround)) stranger.interact();
+});
 // sound waits for the click that wakes the creature, so it can swell in
 input.onGesture(() => {
   if (!wake.active) audio.start();
@@ -113,6 +215,7 @@ const focusTarget = new Vector3();
 const camDyn = new DynVec3(0.9, 1, 0, new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
 if (wake.active) camDyn.reset(wake.focus(new Vector3()));
 const mouseGround = new Vector3();
+const encounterFocus = new Vector3();
 const lookPoint = new Vector3();
 const wanderPoint = new Vector3();
 let wanderTimer = 0;
@@ -124,6 +227,9 @@ let last = bootTime;
 let wokeAt = -1;
 /** Debug: hide the opening's darkness and blur to inspect the animation. */
 let fxOff = false;
+/** Debug: extra camera zoom, to inspect animation up close. */
+let debugZoom = 1;
+let debugFocus: Vector3 | null = null;
 let elapsed = 0;
 
 let paused = false;
@@ -166,12 +272,18 @@ function update(dt: number, now: number) {
   if (input.hasMouse) {
     pr.screenToGround(input.mouse.x, input.mouse.y, terrainHeight, mouseGround);
   }
-  if (noticeTime > 0) {
-    // the first sight of the wreck turns the head, whatever the mouse is doing
+  const holding = stranger?.busy ?? false;
+  if (holding) {
+    // kneeling by the stranger: eyes on it, whatever the mouse is doing
+    look = stranger!.headPosition(lookPoint);
+  } else if (noticeTime > 0) {
+    // the first sight of the wreck (or of the stranger) turns the head, whatever the mouse is doing
     noticeTime -= dt;
-    look = lookPoint.copy(site!.lookPoint);
+    look = noticeStranger ? stranger!.headPosition(lookPoint) : lookPoint.copy(site!.lookPoint);
   } else if (input.hasMouse && mouseIdle < 7000) {
     look = lookPoint.copy(mouseGround);
+  } else if (stranger && stranger.distance < 7) {
+    look = stranger.headPosition(lookPoint);
   } else if (site && site.distance < 16) {
     look = lookPoint.copy(site.lookPoint);
   } else if (creature.speed < 0.2) {
@@ -193,6 +305,12 @@ function update(dt: number, now: number) {
   if (input.crouch && input.sprint && control.move.lengthSq() > 0) input.crouch = false;
   control.crouch = input.crouch;
   control.look = look;
+  if (holding) {
+    control.move.set(0, 0);
+    control.sprint = false;
+    control.crouch = true;
+  }
+  strangerHover = !!stranger && input.hasMouse && !holding && stranger.canInteract(creature.pos, mouseGround);
   creature.update(dt, control, world);
 
   for (const ev of creature.events) {
@@ -227,6 +345,11 @@ function update(dt: number, now: number) {
     focusTarget.x += bx;
     focusTarget.z += bz;
   }
+  if (stranger && stranger.weight > 0) {
+    // the encounter draws the camera in between the two of them
+    const w = stranger.weight;
+    focusTarget.lerp(stranger.focus(creature.pos, encounterFocus), w);
+  }
   finishFrame(dt, focusTarget);
 }
 
@@ -237,8 +360,22 @@ function finishFrame(dt: number, target: Vector3) {
   if (site?.justDiscovered && !wake.active) {
     audio.stinger();
     noticeTime = 2.8;
+    noticeStranger = false;
   }
-  const focus = camDyn.update(dt, target);
+  if (stranger) {
+    stranger.update(dt, creature.pos);
+    if (stranger.justSeen && !wake.active) {
+      audio.sorrow();
+      noticeTime = 3;
+      noticeStranger = true;
+    }
+    // close in a little and quieten the world while it sings
+    const w = stranger.weight;
+    const e = w * w * (3 - 2 * w);
+    if (!wake.active) pr.zoomMul = (1 + 0.32 * e) * debugZoom;
+    audio.duck(1 - 0.45 * e);
+  }
+  const focus = camDyn.update(dt, debugFocus ?? target);
   pr.setFocus(focus);
   terrain.follow(focus.x, focus.z);
   pr.updateShadow(creature.pos);
@@ -264,6 +401,7 @@ function draw(now: number) {
     pr.cursorAlpha = input.hasMouse ? wake.cursorAlpha : 0;
   } else {
     pr.cursorAlpha = idleAlpha;
+    pr.cursorGlow = strangerHover ? 1 : 0;
     if (wokeAt < 0) {
       // skipped the opening: a short fade in from black
       pr.dark = 1 - saturate((now - bootTime) / 1400);
@@ -289,11 +427,24 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     get site() {
       return site;
     },
+    get stranger() {
+      return stranger;
+    },
+    get lostPod() {
+      return lostPod;
+    },
+    SITE2,
     spawner,
     spawnSite,
     crater: { craterHeight, siteMask },
     shared,
     dustCount: () => dust.count,
+    closeUp(m: number) {
+      debugZoom = m;
+    },
+    focusOn(x: number | null, z = 0) {
+      debugFocus = x === null ? null : new Vector3(x, world.height(x, z) + 0.3, z);
+    },
     fx(on: boolean) {
       fxOff = !on;
     },

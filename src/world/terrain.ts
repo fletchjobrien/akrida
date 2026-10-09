@@ -7,6 +7,7 @@ import {
   Vector3,
 } from 'three';
 import { fbm, gnoise, NOISE_GLSL } from './noise';
+import { STAIN_GLSL } from './stains';
 import { CRATER_GLSL, craterHeight, siteMask } from './crater';
 import { LIGHTING_GLSL, shared } from '../render/shared';
 import { glslRgb, PALETTE } from '../render/palette';
@@ -102,6 +103,7 @@ void main() {
 /** Shared sand shading used by the ground and by footprints. */
 export const SAND_GLSL = /* glsl */ `
 ${TERRAIN_GLSL}
+${STAIN_GLSL}
 
 const vec3 SAND_HI = ${glslRgb(PALETTE.sandHi)};
 const vec3 SAND_LIT = ${glslRgb(PALETTE.sandLit)};
@@ -133,7 +135,9 @@ float rippleHeight(vec2 p) {
 }
 
 float detailHeight(vec2 p) {
-  return terrainHeight(p) + rippleHeight(p);
+  // dragged, clawed and churned sand (shading only), which also wipes out the ripples
+  vec4 st = stainAt(p);
+  return terrainHeight(p) + rippleHeight(p) * (1.0 - st.a) + stainHeight(st);
 }
 
 vec3 sandNormal(vec2 p) {
@@ -197,6 +201,19 @@ void main() {
     else if (band == 1 && d < clamp(over * 3.0, 0.0, 0.3)) band = 0;
   }
 
+  // Churned sand: clods catch the light unevenly and lie darker in their hollows.
+  vec4 st = stainAt(p);
+  if (st.a > 0.02) {
+    float ch = hash01(floor(cell) + vec2(55.0, -21.0));
+    if (ch < st.a * 0.2) band = min(band + 1, 4);
+    else if (ch > 1.0 - st.a * 0.08 && band >= 2) band -= 1;
+  }
+  // Troughs, gouges and hollows hold a little shade even under a high sun; heaped lips catch it.
+  float sh = stainHeight(st);
+  if (sh < -0.012 + (d - 0.5) * 0.012) band = min(max(band, 1) + 1, 4);
+  if (sh < -0.045 + (d - 0.5) * 0.02) band = min(band + 1, 4);
+  if (sh > 0.022 + (d - 0.5) * 0.012 && band >= 2) band -= 1;
+
   vec3 col = sandBand(band);
   // Burnt sand and fused glass where the pod came down.
   float sc = smoothstep(0.3, 0.55, scorchAt(p));
@@ -205,6 +222,15 @@ void main() {
     col = sb == 1 ? SOOT_LIT : (sb == 2 ? SOOT_MID : (sb == 3 ? SOOT_SHADE : SOOT_DEEP));
     float gh = hash01(floor(cell) + vec2(401.0, -97.0));
     if (sc > 0.9 && gh < 0.018) col = gh < 0.004 && band <= 2 ? SAND_HI : SOOT_GLASS;
+  }
+
+  // Dried blood, cracked and flaking at the edges.
+  if (st.r > 0.3 + d * 0.4) {
+    float fl = hash01(floor(cell) + vec2(-13.0, 87.0));
+    if (fl > 0.14 * (1.0 - st.g) * (1.0 - st.r * 0.5)) {
+      int bb = clamp(band + (st.g > 0.35 + d * 0.4 ? 1 : 0), 1, 4);
+      col = bb == 1 ? BLOOD_LIT : (bb == 2 ? BLOOD_MID : (bb == 3 ? BLOOD_SHADE : BLOOD_DEEP));
+    }
   }
 
   outColor = vec4(col, 1.0);

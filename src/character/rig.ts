@@ -60,6 +60,22 @@ export interface ArmParts {
   hand: Mesh;
 }
 
+/** Colours of one creature's body. */
+export interface Skin {
+  fur: [number, number, number];
+  belly: [number, number, number];
+  hoof: [number, number];
+  eye: number;
+}
+
+/** The player's colours, sampled from the reference art. */
+export const DEFAULT_SKIN: Skin = {
+  fur: [PALETTE.furDark, PALETTE.furMid, PALETTE.furLight],
+  belly: [PALETTE.bellyDark, PALETTE.bellyMid, PALETTE.bellyLight],
+  hoof: [PALETTE.hoofDark, PALETTE.hoofMid],
+  eye: PALETTE.eye,
+};
+
 /**
  * The horned, hoofed creature from the reference art, built from boxes. The
  * upper body is a bone hierarchy (FK); the legs live in world space (IK).
@@ -86,11 +102,11 @@ export class CreatureRig {
   readonly arms: [ArmParts, ArmParts];
   readonly legs: [LegParts, LegParts];
 
-  constructor() {
+  constructor(skin: Skin = DEFAULT_SKIN) {
     const fur = toonMaterial({
-      dark: PALETTE.furDark,
-      mid: PALETTE.furMid,
-      light: PALETTE.furLight,
+      dark: skin.fur[0],
+      mid: skin.fur[1],
+      light: skin.fur[2],
       litAt: 0.6,
       midAt: 0.03,
       outline: 0,
@@ -98,9 +114,9 @@ export class CreatureRig {
       dust: this.dust,
     });
     const belly = toonMaterial({
-      dark: PALETTE.bellyDark,
-      mid: PALETTE.bellyMid,
-      light: PALETTE.bellyLight,
+      dark: skin.belly[0],
+      mid: skin.belly[1],
+      light: skin.belly[2],
       litAt: 0.62,
       midAt: -0.2,
       outline: 0,
@@ -108,9 +124,9 @@ export class CreatureRig {
       dust: this.dust,
     });
     const hoof = toonMaterial({
-      dark: PALETTE.hoofDark,
-      mid: PALETTE.hoofMid,
-      light: PALETTE.furMid,
+      dark: skin.hoof[0],
+      mid: skin.hoof[1],
+      light: skin.fur[1],
       litAt: 0.68,
       midAt: 0.03,
       outline: 0,
@@ -118,9 +134,9 @@ export class CreatureRig {
       dust: this.dust,
     });
     const eye = toonMaterial({
-      dark: PALETTE.eye,
-      mid: PALETTE.eye,
-      light: PALETTE.eye,
+      dark: skin.eye,
+      mid: skin.eye,
+      light: skin.eye,
       unlit: true,
       outline: 0,
       highlight: 0,

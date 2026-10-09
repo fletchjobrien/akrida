@@ -81,6 +81,7 @@ uniform sampler2D tDepth;
 uniform float uDepthRange;
 uniform vec2 uCursor;
 uniform float uCursorAlpha;
+uniform float uCursorGlow;
 uniform float uDark;
 uniform float uBlur;
 uniform float uGhost;
@@ -168,7 +169,9 @@ void main() {
     int ad = abs(dd.x) + abs(dd.y);
     bool arm = (dd.x == 0 || dd.y == 0) && ad <= 2;
     if (arm) {
-      vec3 cc = ad == 0 ? ${glslRgb(PALETTE.sandHi)} : ${glslRgb(PALETTE.furDark)};
+      // over something that can be used, the cursor takes on a faint blue glow
+      vec3 cc = ad == 0 ? mix(${glslRgb(PALETTE.sandHi)}, ${glslRgb(0xbfe4ff)}, uCursorGlow)
+                        : mix(${glslRgb(PALETTE.furDark)}, ${glslRgb(0x2f3e52)}, uCursorGlow);
       col = mix(col, cc, uCursorAlpha);
     }
   }
@@ -235,6 +238,8 @@ export class PixelRenderer {
 
   cursorScreen = new Vector2(-100, -100);
   cursorAlpha = 0;
+  /** 0..1: the cursor is over something that can be clicked. */
+  cursorGlow = 0;
   /** Screen effects, 0 = none. `dark` 1 is black; `blur` is a radius in low-res pixels. */
   dark = 1;
   blur = 0;
@@ -288,6 +293,7 @@ export class PixelRenderer {
         uDepthRange: { value: 1 },
         uCursor: { value: new Vector2() },
         uCursorAlpha: { value: 0 },
+        uCursorGlow: { value: 0 },
         uDark: { value: 1 },
         uBlur: { value: 0 },
         uGhost: { value: 0 },
@@ -524,6 +530,7 @@ export class PixelRenderer {
     pu.uDepthRange.value = this.camera.far - this.camera.near;
     this.screenToLow(this.cursorScreen.x, this.cursorScreen.y, pu.uCursor.value);
     pu.uCursorAlpha.value = this.cursorAlpha;
+    pu.uCursorGlow.value = this.cursorGlow;
     pu.uDark.value = this.dark;
     pu.uBlur.value = this.blur;
     pu.uGhost.value = this.ghost;

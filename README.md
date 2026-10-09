@@ -70,6 +70,51 @@ swells and it turns its head to look.
   creature; flat scraps do not. With `?debug`, `__akrida.spawnSite()` places it
   ahead at once.
 
+## The second pod and the stranger
+
+A second escape pod comes down with the first, about 12 units from the crater
+and further along your heading. The site spawner places it off screen together
+with the first pod. It is a different craft: angular, gunmetal with blue bands.
+It lies on its side at the end of a short furrow, with sand heaped against its
+nose. Its hatch is torn off and lies nearby. It is cold: no smoke, no beacon.
+
+- **The trail.** Grey-blue dried blood leads from the hatch about 13 units out
+  into the sand. Beside it are the trough of a body dragged along, the furrow
+  of a broken leg, claw marks where hands pulled it forward, and two places
+  where it stopped and bled more. These marks do not fade.
+- **The stranger.** At the end lies a creature of your own kind, with husky
+  blue skin. It lies on its back:
+  - it has a dark wound in its belly, with a faint glow deep inside, and holds
+    one hand pressed to the wound;
+  - one leg is broken below the knee, and the shin juts out sideways;
+  - the sand around it is churned and gouged where it struggled;
+  - its chest heaves in ragged gasps with a wet rattle, and its eye glow
+    flickers dimly and sometimes goes out.
+- **First sight.** When you come near, it turns its head toward you and weakly
+  reaches out a trembling arm, then lets it fall. A low, sad chord swells, and
+  your creature turns to look at it. Its head follows you after that.
+- **Click it.** Walk up close: the centre of the cursor glows faint blue over
+  it. Click, and these things happen:
+  1. Your creature kneels beside it, and the camera closes in a little between
+     the two of them. The wind and the wreck get about 5 dB quieter.
+  2. It lifts its head and makes a gargled, static-laced cry of pain.
+  3. It draws a rattling breath and rasps out a three-note tune. Its eye flares
+     on each note.
+  4. Then everything eases back and you have control again. Click again to hear
+     the tune again.
+- **The tune** is data for the puzzle that comes next: `src/story/tune.ts` has
+  five tones (an A minor pentatonic: A3 C4 D4 E4 G4) and the stranger's three
+  (D, G, C). Under the rasp there is a thin pure tone, so you can tell each
+  pitch apart.
+- **Code:**
+  - The furrow is part of the terrain height. It is in `src/world/crater.ts`,
+    with uniforms `uSite2` and `uSite2End`.
+  - The blood, troughs and churned sand are a small texture that the sand
+    shader reads (`src/world/stains.ts`). It changes the colour and the shading
+    normal, not the geometry.
+  - The pod is in `src/world/lostPod.ts`. The stranger, its animation, the
+    encounter and the painting of the trail are in `src/story/Stranger.ts`.
+
 ## Stamina
 
 There is no stamina bar. You hear and see it instead:
@@ -166,6 +211,13 @@ There are no audio files. The Web Audio API makes all sound at start-up:
   formant that opens up, with a thin whistling resonance. While tired, the
   panting has a faint wheeze on each inhale.
 
+- **The stranger's voice** is made sample by sample (`src/audio/voice.ts`).
+  A glottal pulse (Rosenberg's shape) with jitter, shimmer and period
+  doubling goes through a cascade of formant resonators (Klatt's design).
+  Bubbling fluid chops the sound and moves the lowest formant, and bursts of
+  sample-and-hold crushing add static. A pitch check measures the five tones
+  within 1.5 Hz of their targets.
+
 ## Project layout
 
 ```
@@ -173,9 +225,11 @@ src/
   main.ts                 game loop
   core/                   maths helpers, input
   render/                 pixel renderer, palette, shared lighting
-  world/                  terrain, noise, rocks, wind, particles, footprints
+  world/                  terrain, noise, rocks, wind, particles, footprints,
+                          crater and pods, stain map (blood, drag marks)
   character/              creature rig and procedural animation
-  audio/                  synthesised sound
+  audio/                  synthesised sound, the stranger's voice
+  story/                  the opening, when the wreck appears, the stranger, the tune
 ```
 
 ## Sources
@@ -190,3 +244,8 @@ src/
   [HTML5 Game Devs forum](https://html5gamedevs.com/topic/24499-overwrite-button-combinations-like-ctrls)
 - t3ssel8r: [Giving Personality to Procedural Animations using Math](https://www.youtube.com/watch?v=KPoeNZZ6H4s)
 - Paul Kellet's pink noise filter: [firstpr.com.au/dsp/pink-noise](https://www.firstpr.com.au/dsp/pink-noise/)
+- D. H. Klatt (1980), "Software for a cascade/parallel formant synthesizer",
+  JASA 67(3), 971–995: [doi:10.1121/1.383940](https://doi.org/10.1121/1.383940),
+  [PDF](https://www.fon.hum.uva.nl/david/ba_shs/2009/klatt-1980.pdf) (the resonator used for the formants)
+- A. E. Rosenberg (1971), "Effect of glottal pulse shape on the quality of natural vowels",
+  JASA 49, 583–590: [Praat manual reference](https://www.fon.hum.uva.nl/praat/manual/Rosenberg__1971_.html) (the glottal pulse)

@@ -1,6 +1,8 @@
 import { clamp, lerp, noise1, rng } from '../core/math';
 import type { StaminaCue, StepEvent } from '../character/Creature';
 import type { Wind } from '../world/wind';
+import { breathSamples, gargleSamples, noteSamples } from './voice';
+import { TONES } from '../story/tune';
 
 /**
  * All sound is synthesised at start-up with the Web Audio API: no samples.
@@ -398,6 +400,17 @@ export class AudioEngine {
   private muffle!: BiquadFilterNode;
   private deepGasps: Buf[] = [];
   private time = 0;
+  // the dying stranger
+  private strangerBus: GainNode | null = null;
+  private strangerPan!: StereoPannerNode;
+  private strangerLow!: BiquadFilterNode;
+  private gargles: Buf[] = [];
+  private inhales: Buf[] = [];
+  private exhales: Buf[] = [];
+  private notes: Buf[][] = [];
+  /** 0..1 multiplier on the surroundings (wind, the wreck), lowered for close moments. */
+  private envLevel = 1;
+  private siteLevel = 0;
 
   private windGain!: GainNode;
   private whoosh!: BiquadFilterNode;
@@ -472,6 +485,7 @@ export class AudioEngine {
     for (let i = 0; i < 3; i++) this.creaks.push(creakBuffer(ctx, i));
     for (let i = 0; i < 2; i++) this.clanks.push(clankBuffer(ctx, i));
     this.buildSite(ctx);
+    this.buildStranger(ctx);
 
     document.addEventListener('visibilitychange', () => {
       if (!this.ctx) return;
@@ -703,7 +717,8 @@ export class AudioEngine {
     const ctx = this.ctx;
     if (!ctx || !this.siteBus) return;
     const now = ctx.currentTime;
-    this.siteBus.gain.setTargetAtTime(level, now, 0.15);
+    this.siteLevel = level;
+    this.siteBus.gain.setTargetAtTime(level * this.envLevel, now, 0.15);
     this.sitePan.pan.setTargetAtTime(pan, now, 0.15);
     this.siteLow.frequency.setTargetAtTime(500 * Math.pow(30, clarity), now, 0.15);
     this.humGain.gain.setTargetAtTime(hum * 0.05, now, 0.08);
@@ -798,6 +813,116 @@ export class AudioEngine {
     }
   }
 
+  // ------------------------------------------------------- dying stranger
+
+  private buildStranger(ctx: AudioContext) {
+    const sr = ctx.sampleRate;
+    const mono = (d: Float32Array) => {
+      const b = ctx.createBuffer(1, d.length, sr);
+      b.getChannelData(0).set(d);
+      return b;
+    };
+    for (let i = 0; i < 3; i++) this.gargles.push(mono(gargleSamples(sr, 300 + i)));
+    for (let i = 0; i < 4; i++) this.inhales.push(mono(breathSamples(sr, 400 + i, true)));
+    for (let i = 0; i < 5; i++) this.exhales.push(mono(breathSamples(sr, 500 + i, false)));
+    this.notes = TONES.map((f, k) => [0, 1].map((v) => mono(noteSamples(sr, f, 600 + k * 10 + v))));
+
+    this.strangerBus = ctx.createGain();
+    this.strangerBus.gain.value = 0;
+    this.strangerPan = ctx.createStereoPanner();
+    this.strangerLow = ctx.createBiquadFilter();
+    this.strangerLow.type = 'lowpass';
+    this.strangerLow.frequency.value = 800;
+    this.strangerBus.connect(this.strangerPan).connect(this.strangerLow).connect(this.master);
+    const send = ctx.createGain();
+    send.gain.value = 0.7;
+    this.strangerLow.connect(send).connect(this.reverbSend);
+  }
+
+  /** Place the listener relative to the stranger: 0..1 loudness, -1..1 pan, 0..1 clarity. */
+  setStranger(level: number, pan: number, clarity: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.strangerBus) return;
+    const now = ctx.currentTime;
+    this.strangerBus.gain.setTargetAtTime(level, now, 0.15);
+    this.strangerPan.pan.setTargetAtTime(pan, now, 0.15);
+    this.strangerLow.frequency.setTargetAtTime(600 * Math.pow(30, clarity), now, 0.15);
+  }
+
+  /** Lower (or restore) the wind and the wreck, so a close moment can be heard. */
+  duck(level: number) {
+    this.envLevel = level;
+    const ctx = this.ctx;
+    if (!ctx || !this.siteBus) return;
+    this.siteBus.gain.setTargetAtTime(this.siteLevel * level, ctx.currentTime, 0.4);
+  }
+
+  private playStranger(buf: Buf | undefined, level: number, rate = 1, delay = 0) {
+    const ctx = this.ctx;
+    if (!ctx || !this.strangerBus || !buf) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(g).connect(this.strangerBus);
+    src.start(ctx.currentTime + delay);
+  }
+
+  /** One laboured breath: a wet rattling inhale, or a weak exhale. */
+  strangerBreath(level: number, inhale: boolean) {
+    const bank = inhale ? this.inhales : this.exhales;
+    this.playStranger(bank[Math.floor(Math.random() * bank.length)], level, 0.94 + Math.random() * 0.12);
+  }
+
+  /** A gargled, static-laced cry of pain. */
+  strangerGargle(level: number) {
+    this.playStranger(this.gargles[Math.floor(Math.random() * this.gargles.length)], level);
+  }
+
+  /** One raspy note: `tone` indexes TONES (see story/tune.ts). */
+  strangerNote(tone: number, level: number) {
+    const v = this.notes[tone];
+    if (!v) return;
+    this.playStranger(v[Math.floor(Math.random() * v.length)], level);
+  }
+
+  /** A low, sad swell when the stranger is first seen. */
+  sorrow() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.linearRampToValueAtTime(0.16, now + 2.2);
+    out.gain.setValueAtTime(0.16, now + 3.5);
+    out.gain.linearRampToValueAtTime(0.0001, now + 8);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(240, now);
+    lp.frequency.linearRampToValueAtTime(760, now + 2.6);
+    lp.frequency.linearRampToValueAtTime(260, now + 8);
+    lp.connect(out).connect(this.master);
+    out.connect(this.reverbSend);
+    // a minor triad, low, its third slowly beating against a detuned twin
+    for (const [f, type, g] of [
+      [55, 'triangle', 0.55],
+      [65.4, 'sine', 0.4],
+      [65.9, 'sine', 0.25],
+      [82.4, 'triangle', 0.3],
+      [130.8, 'sine', 0.1],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(lp);
+      o.start(now);
+      o.stop(now + 8.5);
+    }
+  }
+
   /** Stamina sounds: faint wheezes before running out, a deep gasp when it does. */
   cue(kind: StaminaCue) {
     if (!this.ctx) return;
@@ -839,6 +964,7 @@ export class AudioEngine {
     const s = wind.strength;
     const f = wind.flutter;
     const tc = 0.08;
+    this.windGain.gain.setTargetAtTime(this.envLevel, now, 0.25);
 
     this.whooshGain.gain.setTargetAtTime(0.17 + s * s * 0.6 + f * 0.04, now, tc);
     this.whoosh.frequency.setTargetAtTime(260 + s * 900 + f * 120, now, tc);

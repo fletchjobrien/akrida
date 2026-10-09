@@ -26,6 +26,14 @@ export const shared = {
   /** The crash site (see world/crater.ts): centre x, z and travel direction x, z. */
   uSite: { value: new Vector4(0, 0, 1, 0) },
   uSiteOn: { value: 0 },
+  /** The second pod (see world/crater.ts): position x, z and slide direction x, z. */
+  uSite2: { value: new Vector4(0, 0, 1, 0) },
+  /** End of the survivor's trail x, z, and 1 once the second pod exists. */
+  uSite2End: { value: new Vector3(0, 0, 0) },
+  /** Blood, churned sand and drag marks painted on the ground (see world/stains.ts). */
+  uStainTex: { value: null as Texture | null },
+  /** Area the stain map covers: min x, min z, 1 / size, and 1 when it is in use. */
+  uStainRect: { value: new Vector4(0, 0, 1, 0) },
   uPixelWorld: { value: new Vector2(1 / 18, 1 / 18) },
 };
 
