@@ -13,7 +13,7 @@ import {
   wrapAngle,
 } from '../core/math';
 import { CreatureRig, LEG, orient } from './rig';
-import type { RockInfo } from '../world/rocks';
+import { pushOutOfRock, type RockInfo } from '../world/rocks';
 
 export interface CreatureInput {
   /** Screen-space move intent: x right, y up. Length 0..1. */
@@ -47,7 +47,10 @@ const CROUCH_SPEED = 1.05;
 const HIP_HEIGHT = 0.7;
 const WALK_HIP = 0.645;
 const CROUCH_HIP = 0.45;
-const BODY_RADIUS = 0.22;
+const BODY_RADIUS = 0.27;
+/** Rocks smaller than this (footprint radius) are stepped over. */
+const PEBBLE_RADIUS = 0.2;
+const HOOF_RADIUS = 0.07;
 const LEG_REACH = LEG.thigh + LEG.shin + LEG.cannon * 0.92;
 
 class Foot {
@@ -86,6 +89,7 @@ const _dir = new Vector3();
 const _pole = new Vector3();
 const _fwd = new Vector3();
 const _e = new Euler();
+const _n2 = new Vector2();
 
 export class Creature {
   readonly rig = new CreatureRig();
@@ -135,27 +139,28 @@ export class Creature {
   breathRate = 0.3;
 
   constructor(world: World, x = 0, z = 0) {
-    this.pos.set(x, world.height(x, z), z);
-    this.groundDyn.reset(this.pos.y);
-    this.pelvisDyn.reset(this.pos.y + HIP_HEIGHT);
     this.crouchDyn.reset(0);
-    for (const f of this.feet) {
-      this.restPosition(f, this.yaw, f.pos);
-      f.pos.y = world.height(f.pos.x, f.pos.z);
-      f.yaw = this.yaw;
-    }
+    this.teleport(x, z, world);
   }
 
   /** Move instantly (used for story beats and debugging). */
   teleport(x: number, z: number, world: World) {
-    this.pos.set(x, world.height(x, z), z);
+    this.pos.set(x, 0, z);
     this.vel.set(0, 0, 0);
+    this.gaitActive = false;
+    // never start inside a rock
+    for (let pass = 0; pass < 4; pass++) {
+      for (const r of world.rocks) {
+        if (r.radius >= PEBBLE_RADIUS) pushOutOfRock(r, this.pos, BODY_RADIUS, _n2);
+      }
+    }
+    this.pos.y = world.height(this.pos.x, this.pos.z);
     this.groundDyn.reset(this.pos.y);
     this.pelvisDyn.reset(this.pos.y + HIP_HEIGHT);
-    this.gaitActive = false;
     for (const f of this.feet) {
       f.swing = false;
       this.restPosition(f, this.yaw, f.pos);
+      for (const r of world.rocks) pushOutOfRock(r, f.pos, HOOF_RADIUS, _n2);
       f.pos.y = world.height(f.pos.x, f.pos.z);
       f.yaw = this.yaw;
     }
@@ -229,24 +234,20 @@ export class Creature {
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
 
-    // rocks push us out
-    for (const r of world.rocks) {
-      const ox = this.pos.x - r.x;
-      const oz = this.pos.z - r.z;
-      const min = r.radius + BODY_RADIUS;
-      const d2 = ox * ox + oz * oz;
-      if (d2 < min * min && d2 > 1e-8) {
-        const d = Math.sqrt(d2);
-        const nx = ox / d;
-        const nz = oz / d;
-        this.pos.x = r.x + nx * min;
-        this.pos.z = r.z + nz * min;
-        const vn = this.vel.x * nx + this.vel.z * nz;
+    // rocks push us out; a few passes settle corners between rocks
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (const r of world.rocks) {
+        if (r.radius < PEBBLE_RADIUS) continue; // small stones are stepped over
+        if (!pushOutOfRock(r, this.pos, BODY_RADIUS, _n2)) continue;
+        moved = true;
+        const vn = this.vel.x * _n2.x + this.vel.z * _n2.y;
         if (vn < 0) {
-          this.vel.x -= vn * nx;
-          this.vel.z -= vn * nz;
+          this.vel.x -= vn * _n2.x;
+          this.vel.z -= vn * _n2.y;
         }
       }
+      if (!moved) break;
     }
 
     this.pos.y = this.groundDyn.update(dt, world.height(this.pos.x, this.pos.z));
@@ -386,6 +387,10 @@ export class Creature {
       _v2.copy(this.pos).addScaledVector(this.vel, remain + stance * 0.5);
       this.restPosition(f, landYaw, f.target, _v2);
       f.targetYaw = landYaw;
+    }
+    // never plant a hoof inside a rock
+    for (let pass = 0; pass < 2; pass++) {
+      for (const r of world.rocks) pushOutOfRock(r, f.target, HOOF_RADIUS, _n2);
     }
     f.target.y = world.height(f.target.x, f.target.z);
   }

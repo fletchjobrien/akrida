@@ -160,6 +160,7 @@ requestAnimationFrame(frame);
 if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
   (window as unknown as Record<string, unknown>).__akrida = {
     creature,
+    world,
     pr,
     wind,
     input,

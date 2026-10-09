@@ -1,6 +1,7 @@
 import {
   BufferAttribute,
   BufferGeometry,
+  Vector2,
   DynamicDrawUsage,
   Euler,
   IcosahedronGeometry,
@@ -17,12 +18,109 @@ import { PALETTE } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
 import { rng } from '../core/math';
 
-/** A rock the creature can collide with. Radius is on the ground plane. */
+/** A rock the creature can collide with, as seen from above. */
 export interface RockInfo {
   x: number;
   z: number;
+  /** Bounding radius of the footprint around (x, z), for quick rejection. */
   radius: number;
   height: number;
+  /** Convex outline of the rock on the ground plane: x, z pairs, counter-clockwise. */
+  hull: Float32Array;
+}
+
+/** Convex hull (Andrew's monotone chain) of x, z pairs. */
+function convexHull(pts: number[]): Float32Array {
+  const n = pts.length / 2;
+  const idx = Array.from({ length: n }, (_, i) => i);
+  idx.sort((a, b) => pts[a * 2] - pts[b * 2] || pts[a * 2 + 1] - pts[b * 2 + 1]);
+  const cross = (o: number, a: number, b: number) =>
+    (pts[a * 2] - pts[o * 2]) * (pts[b * 2 + 1] - pts[o * 2 + 1]) -
+    (pts[a * 2 + 1] - pts[o * 2 + 1]) * (pts[b * 2] - pts[o * 2]);
+  const lower: number[] = [];
+  for (const i of idx) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], i) <= 0) lower.pop();
+    lower.push(i);
+  }
+  const upper: number[] = [];
+  for (let k = idx.length - 1; k >= 0; k--) {
+    const i = idx[k];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], i) <= 0) upper.pop();
+    upper.push(i);
+  }
+  const ring = lower.slice(0, -1).concat(upper.slice(0, -1));
+  const out = new Float32Array(ring.length * 2);
+  ring.forEach((i, k) => {
+    out[k * 2] = pts[i * 2];
+    out[k * 2 + 1] = pts[i * 2 + 1];
+  });
+  return out;
+}
+
+/**
+ * Push a circle (centre `p`, radius `r`) out of a rock's footprint. Returns
+ * true if it moved, with the push direction written to `n` (x, z).
+ */
+export function pushOutOfRock(rock: RockInfo, p: { x: number; z: number }, r: number, n: Vector2): boolean {
+  const dx = p.x - rock.x;
+  const dz = p.z - rock.z;
+  const reach = rock.radius + r;
+  if (dx * dx + dz * dz > reach * reach) return false;
+  const h = rock.hull;
+  const count = h.length / 2;
+  let inside = true;
+  let maxDist = -Infinity;
+  let enx = 0;
+  let enz = 0;
+  let best = Infinity;
+  let qx = 0;
+  let qz = 0;
+  for (let i = 0; i < count; i++) {
+    const ax = h[i * 2];
+    const az = h[i * 2 + 1];
+    const j = (i + 1) % count;
+    const ex = h[j * 2] - ax;
+    const ez = h[j * 2 + 1] - az;
+    const len2 = ex * ex + ez * ez;
+    if (len2 < 1e-12) continue;
+    const len = Math.sqrt(len2);
+    // outward normal of a counter-clockwise edge
+    const nx = ez / len;
+    const nz = -ex / len;
+    const sd = (p.x - ax) * nx + (p.z - az) * nz;
+    if (sd > 0) inside = false;
+    if (sd > maxDist) {
+      maxDist = sd;
+      enx = nx;
+      enz = nz;
+    }
+    let t = ((p.x - ax) * ex + (p.z - az) * ez) / len2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const cx = ax + ex * t;
+    const cz = az + ez * t;
+    const d2 = (p.x - cx) * (p.x - cx) + (p.z - cz) * (p.z - cz);
+    if (d2 < best) {
+      best = d2;
+      qx = cx;
+      qz = cz;
+    }
+  }
+  if (inside) {
+    // centre is inside: leave through the nearest edge
+    const push = r - maxDist;
+    p.x += enx * push;
+    p.z += enz * push;
+    n.set(enx, enz);
+    return true;
+  }
+  if (best >= r * r) return false;
+  const d = Math.sqrt(best);
+  const nx = (p.x - qx) / d;
+  const nz = (p.z - qz) / d;
+  p.x = qx + nx * r;
+  p.z = qz + nz * r;
+  n.set(nx, nz);
+  return true;
 }
 
 const VARIANTS = 6;
@@ -56,6 +154,17 @@ function makeRockGeometry(seed: number): BufferGeometry {
   return geo;
 }
 
+/** The distinct corner points of a rock geometry, for building its footprint. */
+function cornerPoints(geo: BufferGeometry): Vector3[] {
+  const pos = geo.getAttribute('position') as BufferAttribute;
+  const seen = new Map<string, Vector3>();
+  for (let i = 0; i < pos.count; i++) {
+    const v = new Vector3().fromBufferAttribute(pos, i);
+    seen.set(`${v.x.toFixed(4)},${v.y.toFixed(4)},${v.z.toFixed(4)}`, v);
+  }
+  return [...seen.values()];
+}
+
 /**
  * Rocks are streamed around the player from a deterministic hash of world
  * cells, so the same rocks are always in the same place.
@@ -69,6 +178,7 @@ export class Rocks {
   private lastCz = Number.NaN;
   private readonly capacity = 160;
   private readonly material: Material;
+  private readonly corners: Vector3[][] = [];
 
   constructor() {
     this.material = toonMaterial({
@@ -81,7 +191,9 @@ export class Rocks {
       highlight: 1,
     });
     for (let i = 0; i < VARIANTS; i++) {
-      const mesh = new InstancedMesh(makeRockGeometry(i), this.material, this.capacity);
+      const geo = makeRockGeometry(i);
+      this.corners.push(cornerPoints(geo));
+      const mesh = new InstancedMesh(geo, this.material, this.capacity);
       mesh.instanceMatrix.setUsage(DynamicDrawUsage);
       mesh.frustumCulled = false;
       mesh.count = 0;
@@ -107,6 +219,7 @@ export class Rocks {
     const e = new Euler();
     const p = new Vector3();
     const s = new Vector3();
+    const tmp = new Vector3();
 
     const place = (wx: number, wz: number, size: number, seed: number) => {
       const rand = rng(seed);
@@ -122,7 +235,15 @@ export class Rocks {
       s.set(sx, sy, sz);
       m.compose(p, q, s);
       this.meshes[variant].setMatrixAt(counts[variant]++, m);
-      this.nearby.push({ x: wx, z: wz, radius: Math.max(sx, sz) * 0.85, height: sy * 0.6 });
+      // footprint: the placed rock's corners seen from above
+      const pts: number[] = [];
+      let radius = 0;
+      for (const c of this.corners[variant]) {
+        tmp.copy(c).applyMatrix4(m);
+        pts.push(tmp.x, tmp.z);
+        radius = Math.max(radius, Math.hypot(tmp.x - wx, tmp.z - wz));
+      }
+      this.nearby.push({ x: wx, z: wz, radius, height: sy * 0.6, hull: convexHull(pts) });
     };
 
     for (let gz = cz - this.range; gz <= cz + this.range; gz++) {
