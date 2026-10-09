@@ -8,7 +8,7 @@ import {
   type IUniform,
 } from 'three';
 import { NOISE_GLSL } from '../world/noise';
-import { rgb } from './palette';
+import { glslRgb, PALETTE, rgb } from './palette';
 
 /** Uniforms shared by every material in the main pass (passed by reference). */
 export const shared = {
@@ -73,7 +73,9 @@ export const TOON_VERT = /* glsl */ `
 out vec3 vWorldPos;
 out vec3 vWorldNormal;
 out vec3 vViewNormal;
+out vec3 vLocalPos;
 void main() {
+  vLocalPos = position;
   mat4 m = modelMatrix;
 #ifdef USE_INSTANCING
   m = m * instanceMatrix;
@@ -102,6 +104,8 @@ uniform float uMidAt;
 uniform float uOutline;
 uniform float uHighlight;
 uniform float uUnlit;
+uniform float uDust;
+in vec3 vLocalPos;
 in vec3 vWorldPos;
 in vec3 vWorldNormal;
 in vec3 vViewNormal;
@@ -115,6 +119,15 @@ void main() {
   float l = ndl * sh * (1.0 - 0.5 * cl);
   vec3 col = l > uLitAt ? uLight : (l > uMidAt ? uMid : uDark);
   col = mix(col, uLight, uUnlit);
+  // a coat of sand, thickest on surfaces that face up; it thins out as uDust falls
+  if (uDust > 0.0) {
+    vec3 c = floor(vLocalPos * 18.0);
+    float h = hash01(ivec2(int(c.x) + int(c.y) * 131, int(c.z) * 7 + int(c.y)));
+    float cover = uDust * mix(0.05, 0.62, smoothstep(-0.2, 0.9, n.y));
+    if (h < cover) {
+      col = l > uLitAt ? ${glslRgb(PALETTE.sandLit)} : (l > uMidAt ? ${glslRgb(PALETTE.sandMid)} : ${glslRgb(PALETTE.sandShade)});
+    }
+  }
   outColor = vec4(col, 1.0);
   vec3 vn = normalize(vViewNormal);
   outInfo = vec4(vn.xy * 0.5 + 0.5, uOutline, uHighlight);
@@ -130,6 +143,8 @@ export interface ToonOptions {
   outline?: number;
   highlight?: number;
   unlit?: boolean;
+  /** Shared sand-coat amount (0..1), for the creature waking up half buried. */
+  dust?: { value: number };
 }
 
 export function toonMaterial(o: ToonOptions): ShaderMaterial {
@@ -143,6 +158,7 @@ export function toonMaterial(o: ToonOptions): ShaderMaterial {
     uOutline: { value: o.outline ?? 1 },
     uHighlight: { value: o.highlight ?? 0 },
     uUnlit: { value: o.unlit ? 1 : 0 },
+    uDust: o.dust ?? { value: 0 },
   };
   return new ShaderMaterial({
     glslVersion: GLSL3,

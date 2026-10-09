@@ -222,6 +222,27 @@ export class Dust {
     }
   }
 
+  get count() {
+    return this.list.length;
+  }
+
+  /** One grain of sand with its own velocity, such as sand sliding off a body. */
+  emit(x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, light: boolean) {
+    if (this.list.length >= this.capacity) this.list.shift();
+    this.list.push({
+      x,
+      y,
+      z,
+      vx,
+      vy,
+      vz,
+      life: 0,
+      max: life,
+      c: light ? C_HI : Math.random() < 0.6 ? C_MID : C_SHADE,
+      size: 1,
+    });
+  }
+
   update(dt: number, wind: Wind, height: (x: number, z: number) => number) {
     let n = 0;
     const ws = wind.strength * 2.5;

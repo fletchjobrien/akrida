@@ -15,14 +15,33 @@ low resolution so that it looks like hand-made 2D pixel art.
 | Double-click | Fullscreen |
 
 The game shows no UI. A small pixel cursor shows when you move the mouse and
-hides when the mouse stops. Sound starts at your first key press or click,
-because browsers block audio until the page gets a user gesture.
+hides when the mouse stops. Sound starts with the click that wakes the
+creature (see below), because browsers block audio until the page gets a user
+gesture.
 
 **Ctrl and Chrome:** Crouch is a tap, so you do not hold Ctrl while you walk.
 If you press Ctrl+W by accident, Chrome closes the tab, because a web page
 cannot cancel that shortcut. While Ctrl is down, the game asks the browser to
 confirm before the tab closes. In fullscreen (double-click), the game uses the
 Keyboard Lock API, which lets the page receive Ctrl+W.
+
+## The opening
+
+The game starts with the creature lying limp, half buried in the sand. The
+screen is dark, blurred and drained of colour, and there is no sound. Click to
+wake it:
+
+- The darkness lifts in dithered steps and the view comes into focus. The
+  camera starts close and draws back to your zoom.
+- The sound fades in, muffled at first, with a slow heartbeat, then clears.
+- The creature's eye flutters open. It lifts its head and drops it again,
+  drags its hands in, and pushes up on shaking arms. The arms give way once,
+  then it gets onto hands and knees, onto one knee, and up onto its hooves.
+- Sand slides off it as it rises, and a hollow stays in the sand where it lay.
+- The cursor fades in, and you get control. For a few seconds it is still
+  groggy.
+
+Add `?skipintro` to the URL to start standing.
 
 ## Stamina
 
@@ -47,7 +66,8 @@ npm run build      # type-check and build into dist/
 npm run preview    # serve the built game
 ```
 
-Add `?debug` to the URL to get `window.__akrida` (pause, step, teleport).
+Add `?debug` to the URL to get `window.__akrida` (pause, step, teleport), and
+`?skipintro` to skip the opening.
 
 ## Deploy to Cloudflare
 

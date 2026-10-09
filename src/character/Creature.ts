@@ -1,4 +1,4 @@
-import { Euler, Vector2, Vector3 } from 'three';
+import { Euler, Matrix4, Vector2, Vector3 } from 'three';
 import {
   clamp,
   damp,
@@ -14,6 +14,7 @@ import {
 } from '../core/math';
 import { CreatureRig, LEG, orient } from './rig';
 import { pushOutOfRock, type RockInfo } from '../world/rocks';
+import type { ScriptPose } from './scriptPose';
 
 export interface CreatureInput {
   /** Screen-space move intent: x right, y up. Length 0..1. */
@@ -81,6 +82,8 @@ class Foot {
   tilt = 0.35;
   /** Toe pitch of the hoof. */
   pitch = 0;
+  /** 0..1: knee points down instead of forward (kneeling, lying). */
+  poleDown = 0;
   constructor(readonly side: number, readonly offset: number) {}
 }
 
@@ -97,6 +100,7 @@ const _hock = new Vector3();
 const _knee = new Vector3();
 const _dir = new Vector3();
 const _pole = new Vector3();
+const _down = new Vector3(0, -1, 0);
 const _fwd = new Vector3();
 const _e = new Euler();
 const _n2 = new Vector2();
@@ -150,6 +154,8 @@ export class Creature {
   private warned = 0;
   /** Time to the next deep recovery breath, and its 0..1 envelope. */
   private sighTimer = 2.5;
+  /** Seconds of grogginess left after a scripted wake-up. */
+  private groggy = 0;
   private sighT = -1;
   readonly cues: StaminaCue[] = [];
   private blinkTimer = 2.5;
@@ -165,6 +171,14 @@ export class Creature {
   constructor(world: World, x = 0, z = 0) {
     this.crouchDyn.reset(0);
     this.teleport(x, z, world);
+  }
+
+  /** Face a direction at once. */
+  setYaw(yaw: number) {
+    this.yaw = yaw;
+    this.yawTarget = yaw;
+    this.yawDyn.reset(yaw);
+    for (const f of this.feet) f.yaw = yaw;
   }
 
   /** Move instantly (used for story beats and debugging). */
@@ -339,7 +353,11 @@ export class Creature {
     const strainTarget = sprinting && !this.exhausted ? smoothstep(WARN_SECONDS, 0, left) : 0;
     this.strain = damp(this.strain, strainTarget, strainTarget > this.strain ? 4 : 2, dt);
     // tired through the recovery, easing off over its last few seconds
-    const tiredTarget = this.exhausted ? 1 - smoothstep(0.72, 1, this.stamina) : 0;
+    let tiredTarget = this.exhausted ? 1 - smoothstep(0.72, 1, this.stamina) : 0;
+    if (this.groggy > 0) {
+      this.groggy -= dt;
+      tiredTarget = Math.max(tiredTarget, 0.6 * smoothstep(0, 2.5, this.groggy));
+    }
     this.tired = damp(this.tired, tiredTarget, 2.5, dt);
   }
 
@@ -677,7 +695,7 @@ export class Creature {
         (1 - moving) * breath * 0.02 +
         tiredWalk * 0.1;
       // bent over: arms reach down and back to brace the hands on the knees
-      target = lerp(target, -lean + 0.45, tiredIdle);
+      target = lerp(target, -lean + 0.45 * saturate(lean / 0.6), tiredIdle);
       const a = this.armDyn[i].update(dt, target);
       let elbowTarget =
         -(0.18 * (1 - tired * 0.6) + run * 1.05 * (1 - strain * 0.4) + crouch * 0.5) -
@@ -696,6 +714,21 @@ export class Creature {
     }
 
     // ---- legs (IK, in world space)
+    for (const f of this.feet) {
+      // cannon tilt and hoof pitch through the swing
+      const swingT = f.swing ? f.t : 0;
+      const curl = f.swing ? Math.sin(Math.PI * Math.min(1, swingT * 1.15)) : 0;
+      const tiltTarget = 0.2 + crouch * 0.35 + curl * (f.idle ? 0.25 : lerp(0.55, 1.1, run));
+      f.tilt = damp(f.tilt, tiltTarget, 30, dt);
+      f.pitch = damp(f.pitch, f.swing ? -curl * lerp(0.5, 0.9, run) : 0, 30, dt);
+      f.poleDown = 0;
+    }
+    this.solveLegs();
+  }
+
+  /** Place both legs between the hips and the hooves (two-bone IK plus the cannon). */
+  private solveLegs() {
+    const rig = this.rig;
     rig.root.updateMatrixWorld(true);
     this.forward(this.yaw, _fwd);
     for (let i = 0; i < 2; i++) {
@@ -703,13 +736,6 @@ export class Creature {
       const leg = rig.legs[i];
       _hip.set(LEG.hipWidth * f.side, -0.04, 0);
       rig.pelvis.localToWorld(_hip);
-
-      // cannon tilt and hoof pitch through the swing
-      const swingT = f.swing ? f.t : 0;
-      const curl = f.swing ? Math.sin(Math.PI * Math.min(1, swingT * 1.15)) : 0;
-      const tiltTarget = 0.2 + crouch * 0.35 + curl * (f.idle ? 0.25 : lerp(0.55, 1.1, run));
-      f.tilt = damp(f.tilt, tiltTarget, 30, dt);
-      f.pitch = damp(f.pitch, f.swing ? -curl * lerp(0.5, 0.9, run) : 0, 30, dt);
 
       const fy = f.yaw;
       const ffx = Math.sin(fy);
@@ -719,11 +745,12 @@ export class Creature {
       _dir.set(-ffx * Math.sin(f.tilt), Math.cos(f.tilt), -ffz * Math.sin(f.tilt));
       _hock.copy(_fet).addScaledVector(_dir, LEG.cannon);
 
-      // knee points forward and slightly out
+      // knee points forward and slightly out (or down into the sand when kneeling or lying)
       _pole.set(ffx + _fwd.x, 0, ffz + _fwd.z).normalize();
       _pole.x += Math.cos(this.yaw) * f.side * 0.25;
       _pole.z -= Math.sin(this.yaw) * f.side * 0.25;
       _pole.y = 0.1;
+      if (f.poleDown > 0) _pole.lerp(_down, f.poleDown);
 
       const reached = solveTwoBone(_hip, _hock, LEG.thigh, LEG.shin, _pole, _knee);
       if (!reached) {
@@ -742,10 +769,159 @@ export class Creature {
     }
   }
 
+  // ------------------------------------------------------------- scripting
+
+  private bodyToWorld(x: number, z: number, out: Vector3) {
+    const c = Math.cos(this.yaw);
+    const sn = Math.sin(this.yaw);
+    return out.set(this.pos.x + x * c + z * sn, 0, this.pos.z - x * sn + z * c);
+  }
+
+  /** Pose the whole body from a script instead of the controls (cutscenes). */
+  updateScripted(dt: number, P: ScriptPose, world: World) {
+    this.time += dt;
+    this.events.length = 0;
+    this.cues.length = 0;
+    this.vel.set(0, 0, 0);
+    this.gaitActive = false;
+    const rig = this.rig;
+    const t = this.time;
+    this.pos.y = this.groundDyn.update(dt, world.height(this.pos.x, this.pos.z));
+
+    this.exertion = Math.max(P.exertion, this.exertion - dt * 0.05);
+    this.breathRate = lerp(0.2, 1.25, this.exertion);
+    this.breathPhase = (this.breathPhase + dt * this.breathRate) % 1;
+    const breath = Math.sin(this.breathPhase * TAU);
+    this.breath = breath;
+    const amp = lerp(0.3, 1.8, this.exertion);
+
+    // exhausted muscles shake: two octaves of noise per joint
+    const tr = P.tremble;
+    const shake = (k: number) => (noise1(t * 11 + k * 7.3, k) * 0.65 + noise1(t * 23 + k * 3.1, k + 40) * 0.35) * tr;
+
+    const delta = this.snap(this.pos, _v);
+    rig.body.position.set(this.pos.x + delta.x, 0, this.pos.z + delta.z);
+    rig.body.rotation.set(0, this.yaw, 0);
+    rig.pelvis.position.set(P.pelvisX + shake(1) * 0.006, this.pos.y + P.pelvisY + shake(2) * 0.012, P.pelvisZ);
+    // XYZ: the yaw turns the body about its own spine, so a lying body rolls onto its side
+    rig.pelvis.rotation.set(P.pelvisPitch + shake(3) * 0.025, P.pelvisYaw, P.pelvisRoll + shake(4) * 0.03, 'XYZ');
+    rig.spine.rotation.set(P.spinePitch + breath * 0.018 * amp, 0, 0, 'YXZ');
+    rig.chest.rotation.set(P.chestPitch - breath * 0.012 * amp + shake(5) * 0.03, 0, P.chestRoll + shake(6) * 0.035, 'YXZ');
+    const bs = breath * 0.022 * amp;
+    rig.chestMesh.scale.set(1 + bs * 0.6, 1 + bs * 0.4, 1 + bs);
+    rig.neck.rotation.set(P.neckPitch, P.headYaw * 0.4, 0, 'YXZ');
+    rig.head.rotation.set(P.headPitch + shake(7) * 0.05, P.headYaw * 0.6, P.headRoll + shake(8) * 0.04, 'YXZ');
+    rig.eye.scale.set(1, Math.max(0.15, P.eyeOpen), 1);
+    rig.eye.visible = P.eyeOpen > 0.1;
+    for (const arm of rig.arms) arm.shoulder.position.y = 0.235 + breath * 0.008 * amp;
+    rig.root.updateMatrixWorld(true);
+
+    // arms: reach planted hands with IK, or hang by the FK angles
+    for (let i = 0; i < 2; i++) {
+      const arm = rig.arms[i];
+      const side = i === 0 ? 1 : -1;
+      const h = i === 0 ? P.handL : P.handR;
+      let a = P.armPitch;
+      let b = side * P.armOut;
+      let e = P.elbow;
+      let tw = 0;
+      if (h.ik > 0) {
+        this.bodyToWorld(h.x, h.z, _v);
+        _v.y = world.height(_v.x, _v.z) + h.y;
+        rig.chest.worldToLocal(_v);
+        solveArm(arm.shoulder.position, _v, side, _arm);
+        a = lerp(a, _arm.a, h.ik);
+        tw = _arm.y * h.ik;
+        b = lerp(b, _arm.b, h.ik);
+        e = lerp(e, _arm.e, h.ik);
+      }
+      arm.shoulder.rotation.set(a, tw, b, 'YXZ');
+      arm.elbow.rotation.set(e + shake(9 + i) * 0.06, 0, -side * 0.05, 'YXZ');
+    }
+
+    for (let i = 0; i < 2; i++) {
+      const f = this.feet[i];
+      const fp = i === 0 ? P.footL : P.footR;
+      this.bodyToWorld(fp.x, fp.z, f.pos);
+      f.pos.y = world.height(f.pos.x, f.pos.z) + fp.lift;
+      f.yaw = this.yaw;
+      f.tilt = fp.tilt;
+      f.pitch = fp.pitch;
+      f.poleDown = fp.poleDown;
+      f.swing = false;
+    }
+    this.solveLegs();
+  }
+
+  /** Hand control back after a script, carrying on smoothly from the scripted pose. */
+  releaseScript(groggySeconds = 0) {
+    const rig = this.rig;
+    rig.eye.visible = true;
+    this.pelvisDyn.reset(rig.pelvis.position.y);
+    this.leanDyn.reset(rig.pelvis.rotation.x / 0.55);
+    for (let i = 0; i < 2; i++) {
+      this.armDyn[i].reset(rig.arms[i].shoulder.rotation.x);
+      this.elbowDyn[i].reset(rig.arms[i].elbow.rotation.x);
+      this.armOutDyn[i].reset(Math.abs(rig.arms[i].shoulder.rotation.z));
+    }
+    for (const f of this.feet) {
+      f.swing = false;
+      f.poleDown = 0;
+      f.pos.y = Math.min(f.pos.y, this.pos.y + 0.02);
+    }
+    this.gaitActive = false;
+    this.idleTime = 0;
+    this.groggy = groggySeconds;
+    this.tired = Math.max(this.tired, groggySeconds > 0 ? 0.6 : 0);
+  }
+
   /** World position of the head, for the camera and sounds. */
   headPosition(out: Vector3) {
     return this.rig.head.getWorldPosition(out);
   }
+}
+
+const ARM_UPPER = 0.22;
+const ARM_FORE = 0.225;
+const _arm = { a: 0, y: 0, b: 0, e: 0 };
+const _elbow = new Vector3();
+const _armPole = new Vector3();
+const _tgt = new Vector3();
+const _ax = new Vector3();
+const _ay = new Vector3();
+const _az = new Vector3();
+const _am = new Matrix4();
+const _ae = new Euler();
+
+/**
+ * Arm IK in the chest's space. The elbow points back toward the hips and a
+ * little out (as in a push-up). Writes the shoulder Euler angles (YXZ) and the
+ * elbow bend (negative folds the forearm forward).
+ */
+export function solveArm(
+  shoulder: Vector3,
+  target: Vector3,
+  side: number,
+  out: { a: number; y: number; b: number; e: number },
+) {
+  _tgt.copy(target);
+  _armPole.set(side * 0.6, -0.7, -0.4).normalize();
+  solveTwoBone(shoulder, _tgt, ARM_UPPER, ARM_FORE, _armPole, _elbow);
+  // shoulder frame: -Y along the upper arm, +Z toward where the forearm folds
+  _ay.subVectors(shoulder, _elbow).normalize();
+  _az.subVectors(_tgt, _elbow).normalize();
+  const cosBend = clamp(-_ay.dot(_az), -1, 1);
+  _az.addScaledVector(_ay, -_ay.dot(_az));
+  if (_az.lengthSq() < 1e-8) _az.copy(_armPole).multiplyScalar(-1).addScaledVector(_ay, -_ay.dot(_armPole) * -1);
+  if (_az.lengthSq() < 1e-8) _az.set(0, 0, 1).addScaledVector(_ay, -_ay.z);
+  _az.normalize();
+  _ax.crossVectors(_ay, _az);
+  _am.makeBasis(_ax, _ay, _az);
+  _ae.setFromRotationMatrix(_am, 'YXZ');
+  out.a = _ae.x;
+  out.y = _ae.y;
+  out.b = _ae.z;
+  out.e = -Math.acos(cosBend);
 }
 
 /**

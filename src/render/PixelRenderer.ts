@@ -81,7 +81,19 @@ uniform sampler2D tDepth;
 uniform float uDepthRange;
 uniform vec2 uCursor;
 uniform float uCursorAlpha;
-uniform float uFade;
+uniform float uDark;
+uniform float uBlur;
+uniform float uGhost;
+uniform float uDesat;
+uniform float uVignette;
+
+float bayer4(vec2 p) {
+  ivec2 i = ivec2(mod(p, 4.0));
+  int idx = i.x + i.y * 4;
+  const float m[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0,
+                                3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+  return (m[idx] + 0.5) / 16.0;
+}
 
 float depthAt(ivec2 p) { return texelFetch(tDepth, p, 0).r * uDepthRange; }
 vec3 normalAt(ivec2 p) {
@@ -119,6 +131,36 @@ void main() {
     col = min(col * (1.0 + 0.32 * info.a) + 0.035 * info.a, vec3(1.0));
   }
 
+  ivec2 size = textureSize(tColor, 0);
+
+  // Waking up: blurred, doubled, drained of colour and swallowed by darkness.
+  if (uBlur > 0.01) {
+    vec3 acc = vec3(0.0);
+    for (int i = 0; i < 24; i++) {
+      float r = sqrt((float(i) + 0.5) / 24.0) * uBlur;
+      float a = float(i) * 2.39996;
+      ivec2 q = clamp(p + ivec2(round(vec2(cos(a), sin(a)) * r)), ivec2(0), size - 1);
+      acc += texelFetch(tColor, q, 0).rgb;
+    }
+    col = mix(col, acc / 24.0, clamp(uBlur, 0.0, 1.0));
+  }
+  if (uGhost > 0.01) {
+    ivec2 q = clamp(p + ivec2(round(uGhost), 0), ivec2(0), size - 1);
+    col = mix(col, texelFetch(tColor, q, 0).rgb, 0.4);
+  }
+  if (uDesat > 0.0) {
+    float lum = dot(col, vec3(0.3, 0.59, 0.11));
+    col = mix(col, vec3(lum) * vec3(1.0, 0.94, 0.9), uDesat);
+  }
+  if (uDark > 0.0 || uVignette > 0.0) {
+    vec2 uv = (vec2(p) - vec2(size) * 0.5) / float(size.y);
+    float vig = smoothstep(0.12, 0.85, length(uv)) * uVignette;
+    float dark = clamp(uDark + vig * (1.0 - uDark), 0.0, 1.0);
+    // fade in dithered steps, the way pixel art fades
+    float dq = clamp(floor(dark * 8.0 + bayer4(gl_FragCoord.xy)) / 8.0, 0.0, 1.0);
+    col = mix(col, ${glslRgb(0x140b0d)}, dq);
+  }
+
   // Pixel cursor: a small plus that fades out when the mouse rests.
   if (uCursorAlpha > 0.0) {
     ivec2 cp = ivec2(floor(uCursor));
@@ -131,7 +173,6 @@ void main() {
     }
   }
 
-  col = mix(${glslRgb(PALETTE.sandLit)}, col, uFade);
   outColor = vec4(col, 1.0);
 }
 `;
@@ -170,6 +211,10 @@ export class PixelRenderer {
   dpr = 1;
   /** Current zoom level; remembered between visits. */
   zoomIndex = loadZoom();
+  /** Extra continuous zoom for cutscenes (2 = twice as close); the pixel size stays. */
+  zoomMul = 1;
+  private appliedZoomMul = 1;
+  private basePpu = BASE_PPU;
   /** Continuous (unsnapped) focus point of the camera. */
   readonly focus = new Vector3();
   private readonly offset = new Vector2();
@@ -190,7 +235,12 @@ export class PixelRenderer {
 
   cursorScreen = new Vector2(-100, -100);
   cursorAlpha = 0;
-  fade = 0;
+  /** Screen effects, 0 = none. `dark` 1 is black; `blur` is a radius in low-res pixels. */
+  dark = 1;
+  blur = 0;
+  ghost = 0;
+  desat = 0;
+  vignette = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({
@@ -238,7 +288,11 @@ export class PixelRenderer {
         uDepthRange: { value: 1 },
         uCursor: { value: new Vector2() },
         uCursorAlpha: { value: 0 },
-        uFade: { value: 0 },
+        uDark: { value: 1 },
+        uBlur: { value: 0 },
+        uGhost: { value: 0 },
+        uDesat: { value: 0 },
+        uVignette: { value: 0 },
       },
     });
     const postMesh = new Mesh(quad, this.postMat);
@@ -295,7 +349,7 @@ export class PixelRenderer {
     this.screenH = h;
     this.renderer.setSize(w, h, false);
     this.scale = this.scaleFor(this.zoomIndex);
-    this.ppu = BASE_PPU / ZOOM_LEVELS[this.zoomIndex].world;
+    this.basePpu = BASE_PPU / ZOOM_LEVELS[this.zoomIndex].world;
     const lowW = Math.ceil(w / this.scale) + 2;
     const lowH = Math.ceil(h / this.scale) + 2;
     if (lowW !== this.lowW || lowH !== this.lowH || !this.mainRT) {
@@ -304,15 +358,21 @@ export class PixelRenderer {
       this.allocateTargets();
     }
 
-    const hw = lowW / 2 / this.ppu;
-    const hh = lowH / 2 / this.ppu;
+    this.applyProjection();
+    this.updateBlitUniforms();
+  }
+
+  private applyProjection() {
+    this.appliedZoomMul = this.zoomMul;
+    this.ppu = this.basePpu * this.zoomMul;
+    const hw = this.lowW / 2 / this.ppu;
+    const hh = this.lowH / 2 / this.ppu;
     this.camera.left = -hw;
     this.camera.right = hw;
     this.camera.top = hh;
     this.camera.bottom = -hh;
     this.camera.updateProjectionMatrix();
     shared.uPixelWorld.value.set(1 / this.ppu, 1 / (this.ppu * Math.sin(this.pitch)));
-    this.updateBlitUniforms();
   }
 
   private allocateTargets() {
@@ -345,6 +405,11 @@ export class PixelRenderer {
     this.blitMat.uniforms.uScale.value = this.scale;
   }
 
+  /** View height in world units at the player's zoom, ignoring `zoomMul`. */
+  get baseViewHeight() {
+    return this.lowH / this.basePpu;
+  }
+
   /** Visible half extents of the view in world units on the camera plane. */
   get halfView() {
     return { w: this.lowW / 2 / this.ppu, h: this.lowH / 2 / this.ppu };
@@ -352,6 +417,7 @@ export class PixelRenderer {
 
   /** Place the camera on `focus`, snapped to the texel grid. */
   setFocus(focus: Vector3) {
+    if (this.zoomMul !== this.appliedZoomMul) this.applyProjection();
     this.focus.copy(focus);
     const fr = focus.dot(this.R);
     const fu = focus.dot(this.U);
@@ -455,7 +521,11 @@ export class PixelRenderer {
     pu.uDepthRange.value = this.camera.far - this.camera.near;
     this.screenToLow(this.cursorScreen.x, this.cursorScreen.y, pu.uCursor.value);
     pu.uCursorAlpha.value = this.cursorAlpha;
-    pu.uFade.value = this.fade;
+    pu.uDark.value = this.dark;
+    pu.uBlur.value = this.blur;
+    pu.uGhost.value = this.ghost;
+    pu.uDesat.value = this.desat;
+    pu.uVignette.value = this.vignette;
     r.setRenderTarget(this.postRT);
     r.render(this.postScene, this.quadCam);
 

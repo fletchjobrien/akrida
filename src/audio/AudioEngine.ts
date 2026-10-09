@@ -181,6 +181,66 @@ function gaspBuffer(ctx: BaseAudioContext, seed: number, deep: number): Buf {
   return buf;
 }
 
+/** One heartbeat, "lub-dub": two low, soft thumps. */
+function heartBuffer(ctx: BaseAudioContext): Buf {
+  const sr = ctx.sampleRate;
+  const len = Math.floor(sr * 0.6);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const beat = (start: number, freq: number, amp: number) => {
+    let phase = 0;
+    for (let i = Math.floor(start * sr); i < len; i++) {
+      const t = i / sr - start;
+      const f = freq * (1 + 0.6 * Math.exp(-t / 0.02));
+      phase += (2 * Math.PI * f) / sr;
+      const env = (1 - Math.exp(-t / 0.006)) * Math.exp(-t / 0.07);
+      d[i] += Math.sin(phase) * env * amp;
+    }
+  };
+  beat(0, 48, 1);
+  beat(0.17, 42, 0.7);
+  let peak = 0;
+  for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(d[i]));
+  for (let i = 0; i < len; i++) d[i] *= 0.9 / peak;
+  return buf;
+}
+
+/** Fine sand pouring off a body: a soft, dense trickle of grains. */
+function pourBuffer(ctx: BaseAudioContext, seed: number): Buf {
+  const sr = ctx.sampleRate;
+  const dur = 1.6;
+  const len = Math.floor(sr * dur);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const r = rng(seed * 619 + 11);
+  let t = 0;
+  while (t < dur) {
+    const u = t / dur;
+    const density = 900 * Math.sin(Math.PI * Math.min(1, u * 1.3)) + 40;
+    t += -Math.log(1 - r() * 0.999) / density;
+    const start = Math.floor(t * sr);
+    const glen = Math.floor(sr * (0.0003 + r() * 0.001));
+    const amp = (0.2 + r() * r()) * Math.sin(Math.PI * Math.min(1, u * 1.15));
+    for (let i = 0; i < glen && start + i < len; i++) d[start + i] += (r() * 2 - 1) * amp * Math.exp((-i / glen) * 3);
+  }
+  // keep the hiss soft: band-limit to roughly 500 Hz - 5 kHz
+  let lp = 0;
+  let hp = 0;
+  let prev = 0;
+  const lpA = 1 - Math.exp((-2 * Math.PI * 5000) / sr);
+  const hpA = Math.exp((-2 * Math.PI * 500) / sr);
+  let peak = 0;
+  for (let i = 0; i < len; i++) {
+    lp += (d[i] - lp) * lpA;
+    hp = hpA * (hp + lp - prev);
+    prev = lp;
+    d[i] = hp;
+    peak = Math.max(peak, Math.abs(hp));
+  }
+  for (let i = 0; i < len; i++) d[i] *= 0.9 / (peak || 1);
+  return buf;
+}
+
 function impulseResponse(ctx: BaseAudioContext, seconds: number): Buf {
   const sr = ctx.sampleRate;
   const len = Math.floor(sr * seconds);
@@ -207,6 +267,10 @@ export class AudioEngine {
   private heavySteps: Buf[] = [];
   private sprays: Buf[] = [];
   private gasps: Buf[] = [];
+  private pours: Buf[] = [];
+  private heart: Buf | null = null;
+  private out!: AudioNode;
+  private muffle!: BiquadFilterNode;
   private deepGasps: Buf[] = [];
   private time = 0;
 
@@ -247,11 +311,19 @@ export class AudioEngine {
     comp.attack.value = 0.01;
     comp.release.value = 0.25;
     comp.connect(ctx.destination);
+    this.out = comp;
+
+    // a low-pass on everything: closed while the creature comes to, then open
+    this.muffle = ctx.createBiquadFilter();
+    this.muffle.type = 'lowpass';
+    this.muffle.Q.value = 0.5;
+    this.muffle.frequency.value = 20000;
+    this.muffle.connect(comp);
 
     this.master = ctx.createGain();
     this.master.gain.value = 0;
     this.master.gain.setTargetAtTime(1.15, ctx.currentTime, 1.2);
-    this.master.connect(comp);
+    this.master.connect(this.muffle);
 
     const reverb = ctx.createConvolver();
     reverb.buffer = impulseResponse(ctx, 2.4);
@@ -268,6 +340,8 @@ export class AudioEngine {
     for (let i = 0; i < 6; i++) this.sprays.push(sprayBuffer(ctx, i));
     for (let i = 0; i < 4; i++) this.gasps.push(gaspBuffer(ctx, i, 0));
     for (let i = 0; i < 3; i++) this.deepGasps.push(gaspBuffer(ctx, 50 + i, 1));
+    for (let i = 0; i < 3; i++) this.pours.push(pourBuffer(ctx, i));
+    this.heart = heartBuffer(ctx);
 
     document.addEventListener('visibilitychange', () => {
       if (!this.ctx) return;
@@ -375,6 +449,88 @@ export class AudioEngine {
     this.wheezeFilter.connect(this.wheezeGain).connect(this.master);
   }
 
+  /**
+   * Coming to: the world fades in from silence through a muffled, closed-in
+   * sound that opens up over `seconds`.
+   */
+  wakeUp(seconds: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const g = this.master.gain;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(0.0001, now);
+    g.linearRampToValueAtTime(0.3, now + seconds * 0.25);
+    g.linearRampToValueAtTime(1.15, now + seconds);
+    const f = this.muffle.frequency;
+    f.cancelScheduledValues(now);
+    f.setValueAtTime(240, now);
+    f.exponentialRampToValueAtTime(700, now + seconds * 0.3);
+    f.exponentialRampToValueAtTime(3500, now + seconds * 0.7);
+    f.exponentialRampToValueAtTime(20000, now + seconds);
+  }
+
+  /** One heartbeat, felt more than heard; bypasses the muffle. */
+  heartbeat(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.heart) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.heart;
+    src.playbackRate.value = 0.97 + Math.random() * 0.06;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(g).connect(this.out);
+    src.start();
+  }
+
+  /** Sand sliding off the body. */
+  sandPour(level: number, rate = 1) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.pours[Math.floor(Math.random() * this.pours.length)];
+    src.playbackRate.value = rate * (0.9 + Math.random() * 0.2);
+    const g = ctx.createGain();
+    g.gain.value = level;
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = (Math.random() - 0.5) * 0.4;
+    src.connect(g).connect(pan).connect(this.master);
+    g.connect(this.reverbSend);
+    src.start();
+  }
+
+  /** A hand, knee or body pressing into the sand. */
+  thud(level: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.steps[Math.floor(Math.random() * this.steps.length)];
+    src.playbackRate.value = 0.7 + Math.random() * 0.15;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1800;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(lp).connect(g).connect(this.master);
+    src.start();
+  }
+
+  /** A strained breath through clenched effort. */
+  effort(level: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.deepGasps[Math.floor(Math.random() * this.deepGasps.length)];
+    src.playbackRate.value = 0.62 + Math.random() * 0.08;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1300;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(lp).connect(g).connect(this.master);
+    src.start();
+  }
+
   /** Stamina sounds: faint wheezes before running out, a deep gasp when it does. */
   cue(kind: StaminaCue) {
     if (!this.ctx) return;
@@ -384,6 +540,11 @@ export class AudioEngine {
       this.gasp(this.deepGasps, 0.2, 0);
       this.gasp(this.deepGasps, 0.12, 0.9);
     }
+  }
+
+  /** A gasp for scripted moments. */
+  wakeGasp(level: number, deep = true) {
+    this.gasp(deep ? this.deepGasps : this.gasps, level, 0);
   }
 
   private gasp(bank: Buf[], level: number, delay: number) {

@@ -65,6 +65,10 @@ export interface ArmParts {
  * upper body is a bone hierarchy (FK); the legs live in world space (IK).
  */
 export class CreatureRig {
+  /** Sand coating the body (0..1), shared by all its materials. */
+  readonly dust = { value: 0 };
+  /** Every mesh of the body except the eye, for sand falling off it. */
+  readonly parts: Mesh[] = [];
   /** Root added to the scene. */
   readonly root = new Group();
   /** Upper body; positioned at the creature, rotated by its yaw, snapped to texels. */
@@ -91,6 +95,7 @@ export class CreatureRig {
       midAt: 0.03,
       outline: 0,
       highlight: 0.2,
+      dust: this.dust,
     });
     const belly = toonMaterial({
       dark: PALETTE.bellyDark,
@@ -100,6 +105,7 @@ export class CreatureRig {
       midAt: -0.2,
       outline: 0,
       highlight: 0,
+      dust: this.dust,
     });
     const hoof = toonMaterial({
       dark: PALETTE.hoofDark,
@@ -109,6 +115,7 @@ export class CreatureRig {
       midAt: 0.03,
       outline: 0,
       highlight: 0,
+      dust: this.dust,
     });
     const eye = toonMaterial({
       dark: PALETTE.eye,
@@ -175,5 +182,8 @@ export class CreatureRig {
       })(),
     });
     this.legs = [makeLeg(), makeLeg()];
+    this.root.traverse((o) => {
+      if (o instanceof Mesh && o !== this.eye) this.parts.push(o);
+    });
   }
 }

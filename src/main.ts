@@ -10,6 +10,7 @@ import { Creature, type CreatureInput, type World } from './character/Creature';
 import { AudioEngine } from './audio/AudioEngine';
 import { Input } from './core/input';
 import { clamp, DynVec3, saturate } from './core/math';
+import { WakeUp } from './story/WakeUp';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const pr = new PixelRenderer(canvas);
@@ -30,19 +31,30 @@ const world: World = { height: terrainHeight, rocks: rocks.nearby };
 const START = new Vector2(-46, 11);
 rocks.update(START.x, START.y);
 const creature = new Creature(world, START.x, START.y);
+creature.setYaw(1.0);
 creature.snap = (p, out) => pr.snapDelta(p, out);
 scene.add(creature.rig.root);
 
 const wind = new Wind();
 const audio = new AudioEngine();
 const input = new Input(canvas);
-input.onGesture(() => audio.start());
+const params = new URLSearchParams(location.search);
+
+// The opening: lying limp in the sand until the player clicks.
+const wake = new WakeUp(creature, world, pr, audio, dust, footprints, () => elapsed);
+if (params.has('skipintro')) wake.skip();
+window.addEventListener('pointerdown', () => wake.begin());
+// sound waits for the click that wakes the creature, so it can swell in
+input.onGesture(() => {
+  if (!wake.active) audio.start();
+});
 input.onWheel((dir) => pr.zoom(dir));
 window.addEventListener('resize', () => pr.resize());
 canvas.focus();
 
 const focusTarget = new Vector3();
 const camDyn = new DynVec3(0.9, 1, 0, new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
+if (wake.active) camDyn.reset(wake.focus(new Vector3()));
 const mouseGround = new Vector3();
 const lookPoint = new Vector3();
 const wanderPoint = new Vector3();
@@ -52,6 +64,9 @@ const control: CreatureInput = { move: new Vector2(), sprint: false, crouch: fal
 
 const bootTime = performance.now();
 let last = bootTime;
+let wokeAt = -1;
+/** Debug: hide the opening's darkness and blur to inspect the animation. */
+let fxOff = false;
 let elapsed = 0;
 
 let paused = false;
@@ -74,6 +89,19 @@ function update(dt: number, now: number) {
   shared.uWindDir.value.copy(wind.dir);
   shared.uWindTravel.value = wind.travel;
   shared.uCloudOffset.value.addScaledVector(wind.dir, -dt * 0.016 * (0.9 + wind.strength * 1.5));
+
+  if (wake.active) {
+    wake.update(dt);
+    if (!wake.active) {
+      // control is ours: keep the freshly faded-in cursor on screen for a moment
+      input.lastMouseMove = now;
+      input.crouch = false;
+      wokeAt = now;
+    }
+    rocks.update(creature.pos.x, creature.pos.z);
+    finishFrame(dt, wake.focus(focusTarget));
+    return;
+  }
 
   // where the creature looks
   const mouseIdle = now - input.lastMouseMove;
@@ -136,7 +164,12 @@ function update(dt: number, now: number) {
     focusTarget.x += bx;
     focusTarget.z += bz;
   }
-  const focus = camDyn.update(dt, focusTarget);
+  finishFrame(dt, focusTarget);
+}
+
+/** Camera, streamed world, particles and sound: shared by play and the opening. */
+function finishFrame(dt: number, target: Vector3) {
+  const focus = camDyn.update(dt, target);
   pr.setFocus(focus);
   terrain.follow(focus.x, focus.z);
   pr.updateShadow(creature.pos);
@@ -156,8 +189,21 @@ function update(dt: number, now: number) {
 function draw(now: number) {
   const mouseIdle = now - input.lastMouseMove;
   pr.cursorScreen.copy(input.mouse);
-  pr.cursorAlpha = input.hasMouse ? saturate(1 - (mouseIdle - 1600) / 400) : 0;
-  pr.fade = saturate((now - bootTime) / 1400);
+  const idleAlpha = input.hasMouse ? saturate(1 - (mouseIdle - 1600) / 400) : 0;
+  if (wake.active) {
+    // the cursor fades in with the creature's senses, wherever the mouse is
+    pr.cursorAlpha = input.hasMouse ? wake.cursorAlpha : 0;
+  } else {
+    pr.cursorAlpha = idleAlpha;
+    if (wokeAt < 0) {
+      // skipped the opening: a short fade in from black
+      pr.dark = 1 - saturate((now - bootTime) / 1400);
+      pr.blur = pr.ghost = pr.desat = pr.vignette = 0;
+    } else {
+      pr.dark = pr.blur = pr.ghost = pr.desat = pr.vignette = 0;
+    }
+  }
+  if (fxOff) pr.dark = pr.blur = pr.ghost = pr.desat = pr.vignette = 0;
   pr.render(scene);
 }
 requestAnimationFrame(frame);
@@ -170,6 +216,11 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     wind,
     input,
     audio,
+    wake,
+    dustCount: () => dust.count,
+    fx(on: boolean) {
+      fxOff = !on;
+    },
     /** Freeze the clock and step the simulation by hand (for frame captures). */
     pause(p: boolean) {
       paused = p;
