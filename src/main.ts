@@ -30,7 +30,6 @@ import {
 } from './world/crater';
 import { Ship } from './world/ship';
 import { DoorScene } from './story/DoorScene';
-import { SiteSpawner } from './story/SiteSpawner';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
 
@@ -51,6 +50,8 @@ scene.add(dust.mesh);
 
 const world: World = { height: terrainHeight, rocks: rocks.nearby };
 const START = new Vector2(-46, 11);
+/** How far right of the start the first pod's crater lies (its trench reaches back toward the start). */
+const CRASH_DISTANCE = 38;
 rocks.update(START.x, START.y);
 const creature = new Creature(world, START.x, START.y);
 creature.setYaw(1.0);
@@ -59,9 +60,8 @@ scene.add(creature.rig.root);
 
 const wind = new Wind();
 const audio = new AudioEngine();
-// the wreck turns up ahead of the player once they have wandered and held a heading
+// the first pod's crater, to the right of the start
 let site: CrashSite | null = null;
-const spawner = new SiteSpawner();
 // a second pod lands near the first, and its survivor lies at the end of a trail
 let site2: CrashSite | null = null;
 // the ship they escaped from, beyond the stranger, and its jammed door
@@ -106,7 +106,7 @@ function planSecondPod(h: Vector2) {
     return !inTrench && Math.hypot(x, z) > CRATER_REACH + 1;
   };
   const rot = (x: number, z: number, a: number) => new Vector2(x * Math.cos(a) - z * Math.sin(a), x * Math.sin(a) + z * Math.cos(a));
-  const side = Math.random() < 0.5 ? -1 : 1;
+  const side = 1;
   let best: SecondPodLayout | null = null;
   let bestScore = -Infinity;
   function layout(deg: number, slideAngle: number, slideSign: number, bend: number, withShip: boolean): SecondPodLayout | null {
@@ -129,10 +129,10 @@ function planSecondPod(h: Vector2) {
     const score = -Math.abs(start.length() - (CRATER_REACH + 6)) * 0.3 + Math.abs(slide.x) * 2 - deg * 0.02;
     const sx = Math.abs(tw.x) > 0.15 ? Math.sign(tw.x) : side;
     const axis = tw.clone().multiplyScalar(0.7).add(new Vector2(sx * 0.6, 0)).normalize();
-    // the ship lies beyond the stranger, the way its head points, across the view, bow
+    // the ship lies beyond the stranger, further right, across the view, bow
     // toward it; its trench runs away behind, clear of everything else
-    const center = end.clone().add(new Vector2(sx * SHIP_GAP, -3));
-    const dir = new Vector2(-sx, 0);
+    const center = end.clone().add(new Vector2(SHIP_GAP, -3));
+    const dir = new Vector2(-1, 0);
     const samples: Vector2[] = [];
     for (let a = SHIP_REACH.bow - 4; a >= -SHIP_LENGTH / 2 - SHIP_TRENCH; a -= 4) samples.push(center.clone().addScaledVector(dir, a));
     const trailPts = [pod, mid, pod.clone().addScaledVector(tw, TRAIL_LENGTH / 4), pod.clone().addScaledVector(tw, (TRAIL_LENGTH * 3) / 4)];
@@ -167,55 +167,19 @@ function planSecondPod(h: Vector2) {
   return best as SecondPodLayout | null;
 }
 
-/** Put the crash site just out of sight in the direction of travel. */
-function spawnSite() {
-  spawner.done = true;
-  const h = spawner.heading;
-  // how far the visible ground reaches along the heading: trace the screen's edge onto the terrain
-  let reach = 0;
-  const edgePoint = new Vector3();
-  const W = window.innerWidth;
-  const H = window.innerHeight;
-  for (let i = 0; i <= 16; i++) {
-    const u = i / 16;
-    for (const [sx, sy] of [
-      [u * W, 0],
-      [u * W, H],
-      [0, u * H],
-      [W, u * H],
-    ]) {
-      pr.screenToGround(sx, sy, terrainHeight, edgePoint);
-      reach = Math.max(reach, (edgePoint.x - creature.pos.x) * h.x + (edgePoint.z - creature.pos.z) * h.y);
-    }
-  }
-  reach += 2.5; // the camera keeps drifting ahead a little
-  // the pod lies nose-right, so the skid always comes in from the left, along its axis
+/**
+ * Lay out the story's places, fixed, to the right of the start: the first
+ * pod's crater, the second pod beyond it, its survivor's trail, and the ship.
+ */
+function layoutWorld() {
+  // everything lies to the right of where the creature wakes, one after another
+  const h = new Vector2(1, 0);
+  // the first pod lies nose-right, so its skid comes in from the left, along its axis
   const dx = POD_DIR.x;
   const dz = POD_DIR.y;
-  // push the crater out until all of it, trench included, is beyond the visible ground
-  let need = CRATER_REACH;
-  for (const t of [-0.15, 1.02]) {
-    for (const s of [-6, 6]) {
-      const ox = -dx * t * TRENCH_LENGTH - dz * s;
-      const oz = -dz * t * TRENCH_LENGTH + dx * s;
-      need = Math.max(need, -(ox * h.x + oz * h.y));
-    }
-  }
   const plan = planSecondPod(h);
-  if (plan) {
-    for (const [p, r] of [
-      [plan.pod, BOWL2_REACH + 0.5],
-      [plan.mid, 6.5],
-      [plan.end, 6.5],
-      ...plan.skid.map((k) => [k, 5] as const),
-      ...(plan.ship?.samples ?? []).map((k) => [k, SHIP_REACH.side + 1] as const),
-    ] as const) {
-      need = Math.max(need, -(p.x * h.x + p.y * h.y) + r);
-    }
-  }
-  const d = reach + need + 0.8;
-  const cx = creature.pos.x + h.x * d;
-  const cz = creature.pos.z + h.y * d;
+  const cx = START.x + CRASH_DISTANCE;
+  const cz = START.y;
   SITE.x = cx;
   SITE.z = cz;
   SITE.dx = dx;
@@ -282,6 +246,7 @@ let noticeTime = 0;
 let noticeWhat: { lookPoint: Vector3 } | 'stranger' | null = null;
 /** The cursor is over the stranger, close enough to reach. */
 let strangerHover = false;
+layoutWorld();
 const input = new Input(canvas);
 const params = new URLSearchParams(location.search);
 
@@ -499,7 +464,6 @@ function update(dt: number, now: number) {
 
 /** Camera, streamed world, particles and sound: shared by play and the opening. */
 function finishFrame(dt: number, target: Vector3) {
-  if (!wake.active && spawner.update(dt, creature.vel.x, creature.vel.z)) spawnSite();
   site?.update(dt, elapsed, wind, creature.pos);
   if (site?.justDiscovered && !wake.active) {
     audio.stinger();
@@ -615,8 +579,6 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     SITE3,
     SITE2,
-    spawner,
-    spawnSite,
     crater: { craterHeight, siteMask },
     shared,
     dustCount: () => dust.count,

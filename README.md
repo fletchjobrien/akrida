@@ -45,16 +45,21 @@ Add `?skipintro` to the URL to start standing.
 
 ## The crash site
 
-The wreck is not in a fixed place. Once you have walked about 25 units and then
-held roughly one heading for about 18 more, an impact crater appears just out of
-sight in front of you, with an escape pod nose-down inside it. The pod lies
-nose-right, and its skid trench always runs off to the left of the crater, in
-line with the pod, with wreckage along it and past the rim. The whole site,
-trench included, is placed beyond the edge of the screen, so heading right you
-meet the trench first and follow it to the pod. If you only wander, it appears anyway after about 140 units. The ground
-it changes is always off screen, so you never see it pop in: you see its smoke
-first, then the crater. The first time the creature comes near, a low sound
-swells and it turns its head to look.
+Everything lies in a fixed place, in a line to the right of where the creature
+wakes. Walk right:
+
+| Place | Units right of the start |
+| --- | --- |
+| The first pod's skid trench begins | about 18 |
+| Its crater | 38 |
+| The second pod | 64 |
+| The dying stranger | 86 |
+| The ship (centre) | 108 |
+
+The first pod lies nose-down in its crater. Its skid trench runs off to the
+left, back toward the start, with wreckage along it and past the rim, so you
+meet the trench first and follow it to the pod. The first time the creature
+comes near, a low sound swells and it turns its head to look.
 
 - **Animated:** the emergency beacon blinks (sometimes twice, sometimes not at
   all). The hatch door swings in the gusts and knocks against the hull. Sparks
@@ -64,17 +69,15 @@ swells and it turns its head to look.
   cools, spark crackles, hinge creaks and metal clanks. All of it gets louder
   and clearer as you walk closer, and pans with the pod's position.
 - **Code:** the trench and crater are part of the terrain height (CPU and GPU,
-  `src/world/crater.ts`, placed at run time through shader uniforms). When it
-  appears is decided in `src/story/SiteSpawner.ts`; the pod, wreckage,
+  `src/world/crater.ts`, set through shader uniforms). The layout of all the
+  places is `layoutWorld()` in `src/main.ts`; the pod, wreckage,
   animation and sound are in `src/world/crashSite.ts`. The pod blocks the
-  creature; flat scraps do not. With `?debug`, `__akrida.spawnSite()` places it
-  ahead at once.
+  creature; flat scraps do not.
 
 ## The second pod and the stranger
 
-A second escape pod comes down with the first. It lies about 26 units from the
-crater, further along your heading. The site spawner places it off screen
-together with the first pod. It is the same model as the first, but it came
+A second escape pod came down with the first. It lies 26 units further right
+than the crater. It is the same model as the first, but it came
 down differently:
 
 - **Impact:** it came in at a low angle and skidded. Two skip marks show where
@@ -153,8 +156,7 @@ down differently:
 
 ## The ship
 
-The ship you escaped from lies about 22 units beyond the stranger, the way its
-head points. From where the stranger lies, only the tip of the ship's bow shows
+The ship you escaped from lies about 22 units further right than the stranger. From where the stranger lies, only the tip of the ship's bow shows
 at the edge of the screen. As you come closer, a low swell plays and the
 creature turns to look.
 
@@ -334,7 +336,7 @@ src/
                           crater, pods and ship, stain map (blood, drag marks)
   character/              creature rig and procedural animation
   audio/                  synthesised sound, the stranger's voice
-  story/                  the opening, when the wreck appears, the stranger, the tune,
+  story/                  the opening, the stranger, the tune,
                           pulling the ship's door open
 ```
 
