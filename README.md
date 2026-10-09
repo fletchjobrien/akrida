@@ -8,7 +8,7 @@ low resolution so that it looks like hand-made 2D pixel art.
 | Input | Action |
 | --- | --- |
 | W A S D (or arrow keys) | Walk |
-| Shift (hold) | Sprint |
+| Shift (hold) | Sprint (uses stamina, see below) |
 | Ctrl or C (tap) | Crouch on or off. Sprinting also stands the creature up. |
 | Mouse | Look. When the creature stands still, it looks at the cursor. When it runs, it tilts its head toward the cursor. |
 | Mouse wheel | Zoom in (wheel up) or out (wheel down). The game remembers your zoom. |
@@ -23,6 +23,20 @@ If you press Ctrl+W by accident, Chrome closes the tab, because a web page
 cannot cancel that shortcut. While Ctrl is down, the game asks the browser to
 confirm before the tab closes. In fullscreen (double-click), the game uses the
 Keyboard Lock API, which lets the page receive Ctrl+W.
+
+## Stamina
+
+There is no stamina bar. You hear and see it instead:
+
+- A full stamina gives 9 seconds of sprinting. When you are not sprinting,
+  it refills (from empty in 13 seconds).
+- 2 seconds before it runs out, you hear a faint wheeze, and the run gets
+  ragged: the head lolls, the arms stop pumping and flail. A second wheeze
+  comes just before the end.
+- When it runs out, the creature gasps and cannot sprint until stamina is
+  full again (13 seconds). It trudges with its head down and arms limp. When it
+  stands still, it bends over with its hands near its knees and pants. It
+  sometimes takes a deep breath, and it straightens up as it recovers.
 
 ## Run locally
 
@@ -86,6 +100,9 @@ To add server logic later (saves, story state), add a `main` script to
 - **Idle.** The creature breathes (faster after sprints), blinks, shifts its
   weight, turns in place with small steps, and looks around when the mouse
   stays still.
+- **Stamina.** Two blend values, `strain` (the last 2 seconds of a sprint) and
+  `tired` (the recovery), change the lean, head, arms, step height, sway and
+  breathing. They do not swap in separate animations.
 
 ## How the sound works
 
@@ -98,6 +115,9 @@ There are no audio files. The Web Audio API makes all sound at start-up:
   step uses a random variant, pitch and filter.
 - **Sand spray and skids** when running or stopping hard, and **breathing**
   after a sprint.
+- **Wheezes and gasps** when stamina runs low or out: breath noise through a
+  formant that opens up, with a thin whistling resonance. While tired, the
+  panting has a faint wheeze on each inhale.
 
 ## Project layout
 

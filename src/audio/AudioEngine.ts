@@ -1,5 +1,5 @@
 import { clamp, lerp, noise1, rng } from '../core/math';
-import type { StepEvent } from '../character/Creature';
+import type { StaminaCue, StepEvent } from '../character/Creature';
 import type { Wind } from '../world/wind';
 
 /**
@@ -125,6 +125,62 @@ function sprayBuffer(ctx: BaseAudioContext, seed: number): Buf {
   return buf;
 }
 
+/**
+ * A breathy gasp with a thin wheeze in it: noise through a broad formant
+ * that opens up ("hhh-aah"), plus a narrow whistling resonance.
+ */
+function gaspBuffer(ctx: BaseAudioContext, seed: number, deep: number): Buf {
+  const sr = ctx.sampleRate;
+  const dur = 0.42 + deep * 0.38;
+  const len = Math.floor(sr * dur);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const r = rng(seed * 733 + 5);
+  const breathy = new Float32Array(len);
+  const whistle = new Float32Array(len);
+  // Chamberlin state-variable band-pass filters
+  let l1 = 0;
+  let b1 = 0;
+  let l2 = 0;
+  let b2 = 0;
+  const wheezeHz = 1450 + r() * 450;
+  const vibHz = 5 + r() * 3;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const u = t / dur;
+    const n = r() * 2 - 1;
+    const fc1 = 600 + 1200 * Math.min(1, u * 1.7);
+    const f1 = 2 * Math.sin((Math.PI * fc1) / sr);
+    l1 += f1 * b1;
+    b1 += f1 * (n - l1 - 0.9 * b1);
+    breathy[i] = b1;
+    const fc2 = wheezeHz * (1 + 0.2 * u) + 70 * Math.sin(2 * Math.PI * vibHz * t);
+    const f2 = 2 * Math.sin((Math.PI * fc2) / sr);
+    l2 += f2 * b2;
+    b2 += f2 * (n - l2 - 0.05 * b2);
+    whistle[i] = b2;
+  }
+  const peak = (a: Float32Array) => a.reduce((m, v) => Math.max(m, Math.abs(v)), 0) || 1;
+  const pb = peak(breathy);
+  const pw = peak(whistle);
+  const wheezeMix = 0.3 - deep * 0.16;
+  for (let i = 0; i < len; i++) {
+    const t = i / sr;
+    const u = t / dur;
+    // sharp intake, ragged hold, quick fade
+    const attack = 1 - Math.exp(-t / (0.02 + deep * 0.03));
+    const release = u < 0.62 ? 1 : Math.exp(-(u - 0.62) / 0.11);
+    const rag = 0.8 + 0.2 * Math.sin(2 * Math.PI * 23 * t + seed);
+    d[i] = attack * release * rag * ((breathy[i] / pb) * (1 - wheezeMix) + (whistle[i] / pw) * wheezeMix);
+  }
+  // the catch of the throat at the very start
+  const click = Math.floor(sr * 0.01);
+  for (let i = 0; i < click && i < len; i++) d[i] += (r() * 2 - 1) * (1 - i / click) * 0.5;
+  const g = 0.9 / peak(d);
+  for (let i = 0; i < len; i++) d[i] *= g;
+  return buf;
+}
+
 function impulseResponse(ctx: BaseAudioContext, seconds: number): Buf {
   const sr = ctx.sampleRate;
   const len = Math.floor(sr * seconds);
@@ -150,6 +206,8 @@ export class AudioEngine {
   private steps: Buf[] = [];
   private heavySteps: Buf[] = [];
   private sprays: Buf[] = [];
+  private gasps: Buf[] = [];
+  private deepGasps: Buf[] = [];
   private time = 0;
 
   private windGain!: GainNode;
@@ -164,6 +222,8 @@ export class AudioEngine {
   private hissPan!: StereoPannerNode;
   private breathFilter!: BiquadFilterNode;
   private breathGain!: GainNode;
+  private wheezeFilter!: BiquadFilterNode;
+  private wheezeGain!: GainNode;
 
   get running() {
     return this.ctx !== null;
@@ -206,6 +266,8 @@ export class AudioEngine {
     for (let i = 0; i < 10; i++) this.steps.push(stepBuffer(ctx, i, 0));
     for (let i = 0; i < 8; i++) this.heavySteps.push(stepBuffer(ctx, 100 + i, 1));
     for (let i = 0; i < 6; i++) this.sprays.push(sprayBuffer(ctx, i));
+    for (let i = 0; i < 4; i++) this.gasps.push(gaspBuffer(ctx, i, 0));
+    for (let i = 0; i < 3; i++) this.deepGasps.push(gaspBuffer(ctx, 50 + i, 1));
 
     document.addEventListener('visibilitychange', () => {
       if (!this.ctx) return;
@@ -299,11 +361,48 @@ export class AudioEngine {
     this.breathFilter.Q.value = 1.4;
     this.breathGain = ctx.createGain();
     this.breathGain.gain.value = 0;
-    this.loop(ctx, pink).connect(this.breathFilter);
+    const src = this.loop(ctx, pink);
+    src.connect(this.breathFilter);
     this.breathFilter.connect(this.breathGain).connect(this.master);
+    // a thin whistle in the breath when out of breath
+    this.wheezeFilter = ctx.createBiquadFilter();
+    this.wheezeFilter.type = 'bandpass';
+    this.wheezeFilter.frequency.value = 1650;
+    this.wheezeFilter.Q.value = 24;
+    this.wheezeGain = ctx.createGain();
+    this.wheezeGain.gain.value = 0;
+    src.connect(this.wheezeFilter);
+    this.wheezeFilter.connect(this.wheezeGain).connect(this.master);
   }
 
-  update(dt: number, wind: Wind, breath: { value: number; exertion: number }) {
+  /** Stamina sounds: faint wheezes before running out, a deep gasp when it does. */
+  cue(kind: StaminaCue) {
+    if (!this.ctx) return;
+    if (kind === 'warn') this.gasp(this.gasps, 0.07, 0);
+    else if (kind === 'warn-late') this.gasp(this.gasps, 0.1, 0);
+    else {
+      this.gasp(this.deepGasps, 0.2, 0);
+      this.gasp(this.deepGasps, 0.12, 0.9);
+    }
+  }
+
+  private gasp(bank: Buf[], level: number, delay: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const src = ctx.createBufferSource();
+    src.buffer = bank[Math.floor(Math.random() * bank.length)];
+    src.playbackRate.value = 0.94 + Math.random() * 0.14;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 280;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(hp).connect(g).connect(this.master);
+    g.connect(this.reverbSend);
+    src.start(ctx.currentTime + delay);
+  }
+
+  update(dt: number, wind: Wind, breath: { value: number; exertion: number; wheeze: number }) {
     const ctx = this.ctx;
     if (!ctx) return;
     this.time += dt;
@@ -338,6 +437,10 @@ export class AudioEngine {
     const env = b < 0 ? -b * 1.0 : b * 0.55;
     this.breathGain.gain.setTargetAtTime(level * env * env * 0.16, now, 0.03);
     this.breathFilter.frequency.setTargetAtTime(b < 0 ? 850 : 1500, now, 0.06);
+    // the whistle is strongest on the inhale
+    const inhale = b > 0 ? b : 0;
+    this.wheezeGain.gain.setTargetAtTime(breath.wheeze * level * inhale * inhale * 0.05, now, 0.04);
+    this.wheezeFilter.frequency.setTargetAtTime(1550 + noise1(t * 0.9, 99) * 160 + inhale * 220, now, 0.05);
   }
 
   /** A long scrape of hooves digging into the sand. */

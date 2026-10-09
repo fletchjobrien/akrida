@@ -111,6 +111,7 @@ function update(dt: number, now: number) {
     if (amount > 0) dust.kick(ev.x, ev.y, ev.z, creature.vel.x / sp, creature.vel.z / sp, amount, 0.4 + ev.run);
     audio.step(ev);
   }
+  for (const cue of creature.cues) audio.cue(cue);
 
   // digging in hard to stop throws sand forward
   const skid = creature.skid;
@@ -145,7 +146,11 @@ function update(dt: number, now: number) {
   streaks.update(dt, wind, focus.x, focus.z, hv.w, halfDepth, terrainHeight);
   dust.update(dt, wind, terrainHeight);
 
-  audio.update(dt, wind, { value: creature.breath, exertion: creature.exertion });
+  audio.update(dt, wind, {
+    value: creature.breath,
+    exertion: creature.exertion,
+    wheeze: Math.max(creature.strain, creature.tired * 0.6),
+  });
 }
 
 function draw(now: number) {

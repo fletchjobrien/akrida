@@ -36,6 +36,9 @@ export interface StepEvent {
   scuff: boolean;
 }
 
+/** Sound cues from the stamina system. */
+export type StaminaCue = 'warn' | 'warn-late' | 'exhausted';
+
 export interface World {
   height(x: number, z: number): number;
   rocks: RockInfo[];
@@ -44,6 +47,13 @@ export interface World {
 const WALK_SPEED = 1.85;
 const SPRINT_SPEED = 6.3;
 const CROUCH_SPEED = 1.05;
+/** A full stamina lasts this many seconds of sprinting. */
+export const SPRINT_SECONDS = 9;
+/** Stamina refills from empty in this many seconds. */
+export const RECOVER_SECONDS = 13;
+/** The warning comes this many seconds before stamina runs out. */
+const WARN_SECONDS = 2;
+const TIRED_WALK_SPEED = 1.35;
 const HIP_HEIGHT = 0.7;
 const WALK_HIP = 0.645;
 const CROUCH_HIP = 0.45;
@@ -128,6 +138,20 @@ export class Creature {
 
   private breathPhase = 0;
   exertion = 0;
+
+  /** 0..1. Sprinting drains it in SPRINT_SECONDS; it refills in RECOVER_SECONDS. */
+  stamina = 1;
+  /** True from running out until stamina is full again: no sprinting meanwhile. */
+  exhausted = false;
+  /** 0..1, how ragged the last seconds of a sprint look. */
+  strain = 0;
+  /** 0..1, how tired the creature looks while it recovers. */
+  tired = 0;
+  private warned = 0;
+  /** Time to the next deep recovery breath, and its 0..1 envelope. */
+  private sighTimer = 2.5;
+  private sighT = -1;
+  readonly cues: StaminaCue[] = [];
   private blinkTimer = 2.5;
   private blinkT = -1;
 
@@ -196,6 +220,7 @@ export class Creature {
   update(dt: number, input: CreatureInput, world: World) {
     this.time += dt;
     this.events.length = 0;
+    this.cues.length = 0;
     this.locomotion(dt, input, world);
     this.gait(dt, world);
     this.pose(dt, input, world);
@@ -207,8 +232,13 @@ export class Creature {
     const moveLen = Math.min(1, input.move.length());
     const crouching = input.crouch;
     this.crouch = saturate(this.crouchDyn.update(dt, crouching ? 1 : 0));
-    const sprinting = input.sprint && !crouching && moveLen > 0.1;
-    const maxSpeed = crouching ? CROUCH_SPEED : sprinting ? SPRINT_SPEED : WALK_SPEED;
+    const sprinting = input.sprint && !crouching && moveLen > 0.1 && !this.exhausted;
+    this.updateStamina(dt, sprinting);
+    const maxSpeed = crouching
+      ? CROUCH_SPEED
+      : sprinting
+        ? SPRINT_SPEED * (1 - 0.1 * this.strain)
+        : lerp(WALK_SPEED, TIRED_WALK_SPEED, this.tired);
 
     // desired direction on the ground: screen up is world -Z
     const dx = moveLen > 0 ? input.move.x / input.move.length() : 0;
@@ -279,6 +309,40 @@ export class Creature {
     this.yawRate = damp(this.yawRate, (this.yaw - prevYaw) / Math.max(dt, 1e-4), 12, dt);
   }
 
+  // ----------------------------------------------------------------- stamina
+
+  private updateStamina(dt: number, sprinting: boolean) {
+    if (sprinting && this.speed > 0.5) this.stamina -= dt / SPRINT_SECONDS;
+    else if (!sprinting) this.stamina += dt / RECOVER_SECONDS;
+    this.stamina = saturate(this.stamina);
+
+    if (!this.exhausted && this.stamina <= 0) {
+      this.exhausted = true;
+      this.cues.push('exhausted');
+    } else if (this.exhausted && this.stamina >= 1) {
+      this.exhausted = false;
+    }
+
+    // a faint wheeze two seconds before running out, and another near the end
+    const left = this.stamina * SPRINT_SECONDS;
+    if (sprinting && !this.exhausted) {
+      if (this.warned === 0 && left < WARN_SECONDS) {
+        this.warned = 1;
+        this.cues.push('warn');
+      } else if (this.warned === 1 && left < 0.9) {
+        this.warned = 2;
+        this.cues.push('warn-late');
+      }
+    }
+    if (left > WARN_SECONDS + 0.5) this.warned = 0;
+
+    const strainTarget = sprinting && !this.exhausted ? smoothstep(WARN_SECONDS, 0, left) : 0;
+    this.strain = damp(this.strain, strainTarget, strainTarget > this.strain ? 4 : 2, dt);
+    // tired through the recovery, easing off over its last few seconds
+    const tiredTarget = this.exhausted ? 1 - smoothstep(0.72, 1, this.stamina) : 0;
+    this.tired = damp(this.tired, tiredTarget, 2.5, dt);
+  }
+
   // -------------------------------------------------------------------- gait
 
   private gait(dt: number, world: World) {
@@ -287,7 +351,7 @@ export class Creature {
     const crouch = this.crouch;
     const walkCad = 1.1 + 0.42 * speed;
     const runCad = 1.5 + 0.17 * speed;
-    this.cadence = lerp(walkCad, runCad, this.run) * (1 - crouch * 0.12);
+    this.cadence = lerp(walkCad, runCad, this.run) * (1 - crouch * 0.12) * (1 - this.tired * 0.12);
     this.swingFrac = lerp(0.38, 0.62, this.run);
 
     const wasActive = this.gaitActive;
@@ -371,7 +435,9 @@ export class Creature {
       f.height = 0.055 * (1 - crouch * 0.3);
       this.lastIdleStep = this.time;
     } else {
-      f.height = lerp(0.07, 0.15, this.run) * (1 - crouch * 0.35) * lerp(0.5, 1, saturate(this.speed / 1.2));
+      // tired hooves barely leave the sand
+      f.height =
+        lerp(0.07, 0.15, this.run) * (1 - crouch * 0.35) * lerp(0.5, 1, saturate(this.speed / 1.2)) * (1 - this.tired * 0.45);
     }
   }
 
@@ -423,7 +489,7 @@ export class Creature {
     f.yaw = f.targetYaw;
     const speed = this.speed;
     // weight of the landing drops the pelvis a little
-    this.pelvisDyn.yd -= (0.12 + speed * 0.07) * (1 - this.crouch * 0.5);
+    this.pelvisDyn.yd -= (0.12 + speed * 0.07) * (1 - this.crouch * 0.5) * (1 + this.strain * 0.5 + this.tired * 0.3);
     this.events.push({
       x: f.pos.x,
       y: f.pos.y,
@@ -453,11 +519,36 @@ export class Creature {
     // exertion, breathing, blinking
     if (run > 0.5) this.exertion = Math.min(1, this.exertion + dt * 0.09 * run);
     else this.exertion = Math.max(0, this.exertion - dt * (speed < 0.2 ? 0.06 : 0.035));
+    // out of breath: pant hard, slowing as stamina comes back
+    const tired = this.tired;
+    const strain = this.strain;
+    const recovery = this.exhausted ? this.stamina : 1;
+    this.exertion = Math.max(this.exertion, strain * 0.9, tired * lerp(1, 0.45, recovery));
     this.breathRate = lerp(0.27, 1.25, this.exertion) + run * 0.3;
     this.breathPhase = (this.breathPhase + dt * this.breathRate) % 1;
     const breath = Math.sin(this.breathPhase * TAU);
     this.breath = breath;
-    const breathAmp = lerp(0.6, 1.6, this.exertion);
+    const breathAmp = lerp(0.6, 1.6, this.exertion) * (1 + tired * 0.6);
+    // tired standing: bent over, hands on thighs, straightening as breath returns
+    const tiredIdle = tired * (1 - moving);
+    const tiredWalk = tired * moving;
+    // now and then a slow, deep breath: straighten a little, lift the head, sink back
+    let sigh = 0;
+    if (tiredIdle > 0.3) {
+      this.sighTimer -= dt;
+      if (this.sighTimer <= 0 && this.sighT < 0) {
+        this.sighT = 0;
+        this.sighTimer = 3.2 + Math.random() * 2.5;
+      }
+    }
+    if (this.sighT >= 0) {
+      this.sighT += dt;
+      const st = this.sighT;
+      sigh = st < 0.7 ? smoothstep(0, 0.7, st) : 1 - smoothstep(0.7, 1.8, st);
+      if (st > 1.8) this.sighT = -1;
+    }
+    sigh *= tiredIdle;
+    const bendOver = tiredIdle * lerp(0.95, 0.3, recovery) * (1 - sigh * 0.3);
 
     this.blinkTimer -= dt;
     if (this.blinkTimer <= 0) {
@@ -468,15 +559,17 @@ export class Creature {
     let eyeScale = 1;
     if (this.blinkT >= 0) {
       this.blinkT += dt;
-      eyeScale = this.blinkT < 0.11 ? 0.15 : 1;
-      if (this.blinkT > 0.11) this.blinkT = -1;
+      const blinkLen = 0.11 + tired * 0.14;
+      eyeScale = this.blinkT < blinkLen ? 0.15 : 1;
+      if (this.blinkT > blinkLen) this.blinkT = -1;
     }
     rig.eye.scale.set(1, eyeScale, 1);
 
     // ---- pelvis height
-    const hipBase = lerp(lerp(HIP_HEIGHT, WALK_HIP, moving), CROUCH_HIP, crouch);
+    const hipBase = lerp(lerp(HIP_HEIGHT, WALK_HIP, moving), CROUCH_HIP, crouch) - tiredIdle * 0.1 - tiredWalk * 0.02;
     const cyc = Math.cos(2 * TAU * (phase - midL));
-    const bobAmp = lerp(0.024, 0.055, run) * moving * (1 - crouch * 0.5);
+    const bobAmp =
+      lerp(0.024, 0.055, run) * moving * (1 - crouch * 0.5) * (1 + strain * 0.45 + tiredWalk * 0.35);
     const bob = cyc * bobAmp * (1 - 2 * run);
     const idleBob = (1 - moving) * breath * 0.006 * breathAmp;
     let pelvisY = this.pos.y + hipBase + bob + idleBob - run * 0.03;
@@ -498,22 +591,32 @@ export class Creature {
         ? (world.height(this.pos.x + (this.vel.x / speed) * 0.5, this.pos.z + (this.vel.z / speed) * 0.5) - this.pos.y) / 0.5
         : 0;
     const leanTarget =
-      speed * 0.035 + run * 0.13 + clamp(this.accelFwd, -7, 7) * 0.02 + crouch * 0.5 + clamp(slopeAhead, -0.5, 0.6) * 0.25;
+      speed * 0.035 +
+      run * 0.13 +
+      clamp(this.accelFwd, -7, 7) * 0.02 +
+      crouch * 0.5 +
+      clamp(slopeAhead, -0.5, 0.6) * 0.25 +
+      strain * 0.12 +
+      tiredWalk * 0.16 +
+      bendOver;
     const lean = this.leanDyn.update(dt, leanTarget);
     const bank = this.bankDyn.update(dt, clamp(-this.yawRate * speed * 0.045, -0.35, 0.35));
 
-    const sway = Math.cos(TAU * (phase - midL)) * 0.032 * moving * (1 - run * 0.7);
+    const waddle = 1 + tiredWalk * 0.9;
+    const sway = Math.cos(TAU * (phase - midL)) * 0.032 * moving * (1 - run * 0.7) * waddle;
     const idleSway = (1 - moving) * noise1(t * 0.23, 3) * 0.018;
     const twist = -Math.cos(TAU * (phase - S / 2)) * lerp(0.16, 0.24, run) * moving;
-    const roll = Math.cos(TAU * (phase - midL)) * 0.06 * moving * (1 - run * 0.5) + idleSway * 1.2;
+    const roll = Math.cos(TAU * (phase - midL)) * 0.06 * moving * (1 - run * 0.5) * waddle + idleSway * 1.2;
+    // bent over, the whole torso heaves with each breath
+    const heave = tiredIdle * breath * 0.045 * breathAmp;
 
     const delta = this.snap(this.pos, _v);
     rig.body.position.set(this.pos.x + delta.x, 0, this.pos.z + delta.z);
     rig.body.rotation.set(0, this.yaw, 0);
 
     // pelvis sits back to balance the forward bend of a crouch
-    rig.pelvis.position.set(sway + idleSway, py, -crouch * 0.07);
-    rig.pelvis.rotation.set(lean * 0.55, twist, roll + bank, 'YXZ');
+    rig.pelvis.position.set(sway + idleSway, py, -crouch * 0.07 - tiredIdle * 0.09);
+    rig.pelvis.rotation.set(lean * 0.55 - heave, twist, roll + bank, 'YXZ');
     rig.spine.rotation.set(lean * 0.25 + breath * 0.012 * breathAmp, -twist * 0.6, -roll * 0.5, 'YXZ');
 
     // ---- look
@@ -536,6 +639,8 @@ export class Creature {
     }
     lookYaw += noise1(t * 0.31, 7) * 0.05 * (1 - moving);
     lookPitch += noise1(t * 0.27, 11) * 0.03 * (1 - moving);
+    lookYaw *= 1 - tired * 0.35;
+    lookPitch += strain * 0.15 + tiredWalk * 0.32 + tiredIdle * 0.35 - sigh * 0.45;
     const ly = this.lookYawDyn.update(dt, lookYaw);
     const lp = this.lookPitchDyn.update(dt, lookPitch);
     const lr = this.lookRollDyn.update(dt, clamp(lookRoll, -0.4, 0.4));
@@ -547,10 +652,12 @@ export class Creature {
     rig.neck.rotation.set(-lean * 0.35 + lp * 0.25, ly * 0.3 + twist * 0.3, lr * 0.3, 'YXZ');
     // head stays level against bob and lean
     const headBob = -cyc * bobAmp * 0.8;
+    // a straining head stops holding level and lolls with each stride
+    const loll = strain * Math.sin(TAU * phase * 2);
     rig.head.rotation.set(
-      lp * 0.6 - lean * 0.45 - chestLean + headBob,
+      lp * 0.6 - lean * 0.45 - chestLean + headBob * (1 - strain) + strain * cyc * 0.09 + heave * 0.5,
       ly * 0.5 + twist * 0.2,
-      lr * 0.7 - roll * 0.5 - bank * 0.5,
+      lr * 0.7 - roll * 0.5 - bank * 0.5 + loll * 0.13,
       'YXZ',
     );
 
@@ -559,16 +666,32 @@ export class Creature {
       const arm = rig.arms[i];
       const side = i === 0 ? 1 : -1;
       const legPhase = i === 0 ? 0 : 0.5;
-      const swing = Math.cos(TAU * (phase - legPhase - S)) * lerp(0.3, 0.95, run) * moving;
-      const target =
-        swing - crouch * 0.35 + clamp(this.accelFwd, -6, 6) * 0.02 + lean * 0.4 + (1 - moving) * breath * 0.02;
+      // straining arms stop pumping and flail lower; tired arms hang limp
+      const swingAmp = lerp(0.3, 0.95, run) * moving * (1 - strain * 0.35 - tiredWalk * 0.65);
+      const swing = Math.cos(TAU * (phase - legPhase - S)) * swingAmp;
+      let target =
+        swing -
+        crouch * 0.35 +
+        clamp(this.accelFwd, -6, 6) * 0.02 +
+        lean * 0.4 +
+        (1 - moving) * breath * 0.02 +
+        tiredWalk * 0.1;
+      // bent over: arms reach down and back to brace the hands on the knees
+      target = lerp(target, -lean + 0.45, tiredIdle);
       const a = this.armDyn[i].update(dt, target);
-      const elbowTarget =
-        -(0.18 + run * 1.05 + crouch * 0.5) - Math.max(0, -swing) * 0.5 * (0.4 + run) + noise1(t * 0.4, 20 + i) * 0.04;
+      let elbowTarget =
+        -(0.18 * (1 - tired * 0.6) + run * 1.05 * (1 - strain * 0.4) + crouch * 0.5) -
+        Math.max(0, -swing) * 0.5 * (0.4 + run) +
+        noise1(t * 0.4, 20 + i) * 0.04;
+      elbowTarget = lerp(elbowTarget, -0.22, tiredIdle);
       const el = this.elbowDyn[i].update(dt, elbowTarget);
-      const out = this.armOutDyn[i].update(dt, 0.08 + run * 0.12 + crouch * 0.1 + Math.abs(bank) * 0.5);
+      const out = this.armOutDyn[i].update(
+        dt,
+        0.08 + run * 0.12 + crouch * 0.1 + Math.abs(bank) * 0.5 + strain * 0.14 + tiredIdle * 0.12,
+      );
       arm.shoulder.rotation.set(a, 0, side * out + side * breath * 0.01, 'YXZ');
-      arm.shoulder.position.y = 0.235 + breath * 0.006 * breathAmp;
+      // shoulders slump when tired and rise with each panting breath
+      arm.shoulder.position.y = 0.235 + breath * 0.006 * breathAmp - tired * 0.015 + tiredIdle * breath * 0.01;
       arm.elbow.rotation.set(el, 0, -side * 0.05, 'YXZ');
     }
 
