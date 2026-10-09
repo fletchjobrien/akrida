@@ -1,0 +1,412 @@
+import {
+  DepthTexture,
+  GLSL3,
+  Matrix4,
+  Mesh,
+  MeshDepthMaterial,
+  NearestFilter,
+  OrthographicCamera,
+  PlaneGeometry,
+  RGBADepthPacking,
+  Scene,
+  ShaderMaterial,
+  UnsignedByteType,
+  UnsignedIntType,
+  Vector2,
+  Vector3,
+  WebGLRenderTarget,
+  WebGLRenderer,
+} from 'three';
+import { shared } from './shared';
+import { glslRgb, PALETTE } from './palette';
+
+/** Layer used for objects that cast shadows. */
+export const SHADOW_LAYER = 1;
+
+const FULLSCREEN_VERT = /* glsl */ `
+void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
+`;
+
+/**
+ * Low-resolution post pass: outlines on silhouettes (depth edges), soft
+ * highlights on creases (normal edges), the pixel cursor and the fade in.
+ * Edge rules follow the approach t3ssel8r described for 3D pixel art.
+ */
+const POST_FRAG = /* glsl */ `
+precision highp float;
+precision highp int;
+layout(location = 0) out vec4 outColor;
+uniform sampler2D tColor;
+uniform sampler2D tInfo;
+uniform sampler2D tDepth;
+uniform float uDepthRange;
+uniform vec2 uCursor;
+uniform float uCursorAlpha;
+uniform float uFade;
+
+float depthAt(ivec2 p) { return texelFetch(tDepth, p, 0).r * uDepthRange; }
+vec3 normalAt(ivec2 p) {
+  vec2 xy = texelFetch(tInfo, p, 0).rg * 2.0 - 1.0;
+  return vec3(xy, sqrt(max(0.0, 1.0 - dot(xy, xy))));
+}
+
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec4 c = texelFetch(tColor, p, 0);
+  vec4 info = texelFetch(tInfo, p, 0);
+  float d = depthAt(p);
+  vec3 n = normalAt(p);
+
+  ivec2 offs[4] = ivec2[4](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+  float depthEdge = 0.0;
+  float normalEdge = 0.0;
+  const vec3 bias = normalize(vec3(1.0, 1.0, 0.6));
+  for (int i = 0; i < 4; i++) {
+    ivec2 q = p + offs[i];
+    float dq = depthAt(q);
+    float diff = dq - d;
+    depthEdge += clamp(diff - 0.25, 0.0, 1.0);
+    if (abs(diff) < 0.25) {
+      vec3 nq = normalAt(q);
+      float side = dot(n - nq, bias);
+      normalEdge += side > 0.05 ? (1.0 - dot(n, nq)) : 0.0;
+    }
+  }
+
+  vec3 col = c.rgb;
+  if (depthEdge > 0.0 && info.b > 0.0) {
+    col *= mix(1.0, 0.64, info.b);
+  } else if (normalEdge > 0.18 && info.a > 0.0) {
+    col = min(col * (1.0 + 0.32 * info.a) + 0.035 * info.a, vec3(1.0));
+  }
+
+  // Pixel cursor: a small plus that fades out when the mouse rests.
+  if (uCursorAlpha > 0.0) {
+    ivec2 cp = ivec2(floor(uCursor));
+    ivec2 dd = p - cp;
+    int ad = abs(dd.x) + abs(dd.y);
+    bool arm = (dd.x == 0 || dd.y == 0) && ad <= 2;
+    if (arm) {
+      vec3 cc = ad == 0 ? ${glslRgb(PALETTE.sandHi)} : ${glslRgb(PALETTE.furDark)};
+      col = mix(col, cc, uCursorAlpha);
+    }
+  }
+
+  col = mix(${glslRgb(PALETTE.sandLit)}, col, uFade);
+  outColor = vec4(col, 1.0);
+}
+`;
+
+/** Nearest-neighbour upscale with sub-texel offset for smooth scrolling. */
+const BLIT_FRAG = /* glsl */ `
+precision highp float;
+layout(location = 0) out vec4 outColor;
+uniform sampler2D tLow;
+uniform vec2 uLowSize;
+uniform vec2 uScreenSize;
+uniform float uScale;
+uniform vec2 uOffset;
+void main() {
+  vec2 lc = (gl_FragCoord.xy - uScreenSize * 0.5) / uScale + uLowSize * 0.5 + uOffset;
+  ivec2 ip = clamp(ivec2(floor(lc)), ivec2(0), ivec2(uLowSize) - 1);
+  outColor = texelFetch(tLow, ip, 0);
+}
+`;
+
+export class PixelRenderer {
+  readonly renderer: WebGLRenderer;
+  readonly camera: OrthographicCamera;
+  readonly shadowCam: OrthographicCamera;
+  /** Low-res pixels per world unit. */
+  ppu = 18;
+  readonly pitch = (38 * Math.PI) / 180;
+  readonly R = new Vector3(1, 0, 0);
+  readonly U = new Vector3();
+  readonly F = new Vector3();
+  scale = 5;
+  lowW = 0;
+  lowH = 0;
+  screenW = 0;
+  screenH = 0;
+  dpr = 1;
+  /** Target number of low-res rows; the mouse wheel steps through these. */
+  private zoomSteps = [150, 180, 210, 250, 300];
+  zoomIndex = 1;
+  /** Continuous (unsnapped) focus point of the camera. */
+  readonly focus = new Vector3();
+  private readonly offset = new Vector2();
+  private readonly camDist = 100;
+
+  private mainRT!: WebGLRenderTarget;
+  private postRT!: WebGLRenderTarget;
+  private readonly shadowRT: WebGLRenderTarget;
+  private readonly shadowSize = 2048;
+  private readonly shadowExtent = 34;
+  private readonly depthMat = new MeshDepthMaterial({ depthPacking: RGBADepthPacking });
+
+  private readonly quadCam = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private readonly postScene = new Scene();
+  private readonly blitScene = new Scene();
+  private readonly postMat: ShaderMaterial;
+  private readonly blitMat: ShaderMaterial;
+
+  cursorScreen = new Vector2(-100, -100);
+  cursorAlpha = 0;
+  fade = 0;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.renderer = new WebGLRenderer({
+      canvas,
+      antialias: false,
+      alpha: false,
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: false,
+    });
+    this.renderer.autoClear = false;
+    this.renderer.setPixelRatio(1);
+
+    const c = Math.cos(this.pitch);
+    const s = Math.sin(this.pitch);
+    this.U.set(0, c, -s);
+    this.F.set(0, -s, -c);
+
+    this.camera = new OrthographicCamera(-1, 1, 1, -1, 1, 220);
+    const basis = new Matrix4().makeBasis(this.R, this.U, this.F.clone().negate());
+    this.camera.quaternion.setFromRotationMatrix(basis);
+
+    const e = this.shadowExtent;
+    this.shadowCam = new OrthographicCamera(-e, e, e, -e, 1, 160);
+    this.shadowCam.layers.set(SHADOW_LAYER);
+    this.shadowRT = new WebGLRenderTarget(this.shadowSize, this.shadowSize, {
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      generateMipmaps: false,
+      depthBuffer: true,
+    });
+    this.shadowRT.depthTexture = new DepthTexture(this.shadowSize, this.shadowSize, UnsignedIntType);
+    shared.uShadowMap.value = this.shadowRT.depthTexture;
+
+    const quad = new PlaneGeometry(2, 2);
+    this.postMat = new ShaderMaterial({
+      glslVersion: GLSL3,
+      vertexShader: FULLSCREEN_VERT,
+      fragmentShader: POST_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tColor: { value: null },
+        tInfo: { value: null },
+        tDepth: { value: null },
+        uDepthRange: { value: 1 },
+        uCursor: { value: new Vector2() },
+        uCursorAlpha: { value: 0 },
+        uFade: { value: 0 },
+      },
+    });
+    const postMesh = new Mesh(quad, this.postMat);
+    postMesh.frustumCulled = false;
+    this.postScene.add(postMesh);
+
+    this.blitMat = new ShaderMaterial({
+      glslVersion: GLSL3,
+      vertexShader: FULLSCREEN_VERT,
+      fragmentShader: BLIT_FRAG,
+      depthTest: false,
+      depthWrite: false,
+      uniforms: {
+        tLow: { value: null },
+        uLowSize: { value: new Vector2() },
+        uScreenSize: { value: new Vector2() },
+        uScale: { value: 1 },
+        uOffset: { value: this.offset },
+      },
+    });
+    const blitMesh = new Mesh(quad, this.blitMat);
+    blitMesh.frustumCulled = false;
+    this.blitScene.add(blitMesh);
+
+    this.resize();
+  }
+
+  zoom(dir: number) {
+    const next = Math.min(this.zoomSteps.length - 1, Math.max(0, this.zoomIndex + dir));
+    if (next !== this.zoomIndex) {
+      this.zoomIndex = next;
+      this.resize();
+    }
+  }
+
+  resize() {
+    this.dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const w = Math.max(1, Math.floor(window.innerWidth * this.dpr));
+    const h = Math.max(1, Math.floor(window.innerHeight * this.dpr));
+    this.screenW = w;
+    this.screenH = h;
+    this.renderer.setSize(w, h, false);
+    this.scale = Math.max(1, Math.round(h / this.zoomSteps[this.zoomIndex]));
+    const lowW = Math.ceil(w / this.scale) + 2;
+    const lowH = Math.ceil(h / this.scale) + 2;
+    if (lowW === this.lowW && lowH === this.lowH && this.mainRT) {
+      this.updateBlitUniforms();
+      return;
+    }
+    this.lowW = lowW;
+    this.lowH = lowH;
+
+    this.mainRT?.dispose();
+    this.mainRT?.depthTexture?.dispose();
+    this.postRT?.dispose();
+
+    this.mainRT = new WebGLRenderTarget(lowW, lowH, {
+      count: 2,
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      generateMipmaps: false,
+      type: UnsignedByteType,
+      depthBuffer: true,
+    });
+    this.mainRT.depthTexture = new DepthTexture(lowW, lowH, UnsignedIntType);
+    this.postRT = new WebGLRenderTarget(lowW, lowH, {
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      generateMipmaps: false,
+      depthBuffer: false,
+    });
+
+    const hw = lowW / 2 / this.ppu;
+    const hh = lowH / 2 / this.ppu;
+    this.camera.left = -hw;
+    this.camera.right = hw;
+    this.camera.top = hh;
+    this.camera.bottom = -hh;
+    this.camera.updateProjectionMatrix();
+    shared.uPixelWorld.value.set(1 / this.ppu, 1 / (this.ppu * Math.sin(this.pitch)));
+    this.updateBlitUniforms();
+  }
+
+  private updateBlitUniforms() {
+    this.blitMat.uniforms.uLowSize.value.set(this.lowW, this.lowH);
+    this.blitMat.uniforms.uScreenSize.value.set(this.screenW, this.screenH);
+    this.blitMat.uniforms.uScale.value = this.scale;
+  }
+
+  /** Visible half extents of the view in world units on the camera plane. */
+  get halfView() {
+    return { w: this.lowW / 2 / this.ppu, h: this.lowH / 2 / this.ppu };
+  }
+
+  /** Place the camera on `focus`, snapped to the texel grid. */
+  setFocus(focus: Vector3) {
+    this.focus.copy(focus);
+    const fr = focus.dot(this.R);
+    const fu = focus.dot(this.U);
+    const ff = focus.dot(this.F);
+    const tr = Math.round(fr * this.ppu);
+    const tu = Math.round(fu * this.ppu);
+    this.offset.set(fr * this.ppu - tr, fu * this.ppu - tu);
+    shared.uCamTexel.value.set(tr, tu);
+    const snapped = new Vector3()
+      .addScaledVector(this.R, tr / this.ppu)
+      .addScaledVector(this.U, tu / this.ppu)
+      .addScaledVector(this.F, ff);
+    this.camera.position.copy(snapped).addScaledVector(this.F, -this.camDist);
+    this.camera.updateMatrixWorld();
+  }
+
+  /**
+   * World offset (on the ground plane) that moves `p` onto the texel grid, so
+   * a moving character keeps a stable pixel pattern.
+   */
+  snapDelta(p: Vector3, out: Vector3): Vector3 {
+    const pr = p.dot(this.R) * this.ppu;
+    const pu = p.dot(this.U) * this.ppu;
+    const dr = (Math.round(pr) - pr) / this.ppu;
+    const du = (Math.round(pu) - pu) / this.ppu;
+    return out.set(dr, 0, -du / Math.sin(this.pitch));
+  }
+
+  /** Keep the shadow camera on `center`, snapped to shadow texels. */
+  updateShadow(center: Vector3) {
+    const L = shared.uSunDir.value;
+    const cam = this.shadowCam;
+    const up = Math.abs(L.y) > 0.99 ? new Vector3(0, 0, 1) : new Vector3(0, 1, 0);
+    const lz = L.clone();
+    const lx = new Vector3().crossVectors(up, lz).normalize();
+    const ly = new Vector3().crossVectors(lz, lx);
+    const texel = (2 * this.shadowExtent) / this.shadowSize;
+    const cx = Math.round(center.dot(lx) / texel) * texel;
+    const cy = Math.round(center.dot(ly) / texel) * texel;
+    const cz = center.dot(lz);
+    const c = new Vector3().addScaledVector(lx, cx).addScaledVector(ly, cy).addScaledVector(lz, cz);
+    cam.position.copy(c).addScaledVector(lz, 80);
+    cam.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(lx, ly, lz));
+    cam.updateMatrixWorld();
+    cam.updateProjectionMatrix();
+    const m = shared.uShadowMatrix.value;
+    m.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1);
+    m.multiply(cam.projectionMatrix).multiply(cam.matrixWorldInverse);
+  }
+
+  /** Mouse (CSS px) to low-res pixel coordinates (before the blit offset). */
+  screenToLow(mx: number, my: number, out: Vector2): Vector2 {
+    const sx = mx * this.dpr;
+    const sy = this.screenH - my * this.dpr;
+    return out.set(
+      (sx - this.screenW * 0.5) / this.scale + this.lowW * 0.5 + this.offset.x,
+      (sy - this.screenH * 0.5) / this.scale + this.lowH * 0.5 + this.offset.y,
+    );
+  }
+
+  /** Mouse (CSS px) to a point on the ground. */
+  screenToGround(mx: number, my: number, height: (x: number, z: number) => number, out: Vector3) {
+    const sx = ((mx * this.dpr - this.screenW * 0.5) / this.scale) / this.ppu;
+    const sy = (-(my * this.dpr - this.screenH * 0.5) / this.scale) / this.ppu;
+    const origin = new Vector3()
+      .copy(this.focus)
+      .addScaledVector(this.R, sx)
+      .addScaledVector(this.U, sy)
+      .addScaledVector(this.F, -this.camDist);
+    let h = this.focus.y;
+    for (let i = 0; i < 4; i++) {
+      const t = (h - origin.y) / this.F.y;
+      out.copy(origin).addScaledVector(this.F, t);
+      h = height(out.x, out.z);
+    }
+    return out;
+  }
+
+  render(scene: Scene) {
+    const r = this.renderer;
+
+    // 1. Shadow depth from the sun.
+    scene.overrideMaterial = this.depthMat;
+    r.setRenderTarget(this.shadowRT);
+    r.setClearColor(0xffffff, 1);
+    r.clear(true, true, false);
+    r.render(scene, this.shadowCam);
+    scene.overrideMaterial = null;
+
+    // 2. Scene into the low-res colour + normal/flags targets.
+    r.setRenderTarget(this.mainRT);
+    r.setClearColor(0x000000, 0);
+    r.clear(true, true, false);
+    r.render(scene, this.camera);
+
+    // 3. Edges, cursor, fade.
+    const pu = this.postMat.uniforms;
+    pu.tColor.value = this.mainRT.textures[0];
+    pu.tInfo.value = this.mainRT.textures[1];
+    pu.tDepth.value = this.mainRT.depthTexture;
+    pu.uDepthRange.value = this.camera.far - this.camera.near;
+    this.screenToLow(this.cursorScreen.x, this.cursorScreen.y, pu.uCursor.value);
+    pu.uCursorAlpha.value = this.cursorAlpha;
+    pu.uFade.value = this.fade;
+    r.setRenderTarget(this.postRT);
+    r.render(this.postScene, this.quadCam);
+
+    // 4. Upscale to the screen.
+    this.blitMat.uniforms.tLow.value = this.postRT.texture;
+    r.setRenderTarget(null);
+    r.render(this.blitScene, this.quadCam);
+  }
+}

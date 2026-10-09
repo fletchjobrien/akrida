@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "akrida",
+  "compatibility_date": "2026-10-01",
+  // Static assets only. Vite builds the game into ./dist and Cloudflare
+  // serves it from the edge. Add "main" here later for server-side logic.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
