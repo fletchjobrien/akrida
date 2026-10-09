@@ -372,7 +372,10 @@ export class PixelRenderer {
     this.camera.top = hh;
     this.camera.bottom = -hh;
     this.camera.updateProjectionMatrix();
-    shared.uPixelWorld.value.set(1 / this.ppu, 1 / (this.ppu * Math.sin(this.pitch)));
+    // Ground detail (pebbles, glints, ragged edges) sits on a world grid sized to one
+    // pixel at the player's zoom. The cutscene zoom must not resize it, or the
+    // pattern slides across the sand while the camera moves.
+    shared.uPixelWorld.value.set(1 / this.basePpu, 1 / (this.basePpu * Math.sin(this.pitch)));
   }
 
   private allocateTargets() {

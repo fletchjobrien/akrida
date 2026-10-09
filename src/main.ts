@@ -292,6 +292,7 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     spawner,
     spawnSite,
     crater: { craterHeight, siteMask },
+    shared,
     dustCount: () => dust.count,
     fx(on: boolean) {
       fxOff = !on;
