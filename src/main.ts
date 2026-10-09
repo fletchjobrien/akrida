@@ -12,7 +12,7 @@ import { Input } from './core/input';
 import { clamp, DynVec3, saturate } from './core/math';
 import { WakeUp } from './story/WakeUp';
 import { CrashSite } from './world/crashSite';
-import { CRATER_REACH, craterHeight, SITE, siteMask } from './world/crater';
+import { CRATER_REACH, craterHeight, POD_DIR, SITE, siteMask, TRENCH_LENGTH } from './world/crater';
 import { SiteSpawner } from './story/SiteSpawner';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -66,14 +66,21 @@ function spawnSite() {
     }
   }
   reach += 2.5; // the camera keeps drifting ahead a little
-  // the crater sits just past that, so nothing on screen changes when it appears
-  const d = reach + CRATER_REACH + 0.8;
+  // the pod lies nose-right, so the skid always comes in from the left, along its axis
+  const dx = POD_DIR.x;
+  const dz = POD_DIR.y;
+  // push the crater out until all of it, trench included, is beyond the visible ground
+  let need = CRATER_REACH;
+  for (const t of [-0.15, 1.02]) {
+    for (const s of [-6, 6]) {
+      const ox = -dx * t * TRENCH_LENGTH - dz * s;
+      const oz = -dz * t * TRENCH_LENGTH + dx * s;
+      need = Math.max(need, -(ox * h.x + oz * h.y));
+    }
+  }
+  const d = reach + need + 0.8;
   const cx = creature.pos.x + h.x * d;
   const cz = creature.pos.z + h.y * d;
-  // it skidded in from further off, across the line of travel toward the player
-  const turn = (Math.random() < 0.5 ? -1 : 1) * (1.85 + Math.random() * 0.45);
-  const dx = h.x * Math.cos(turn) - h.y * Math.sin(turn);
-  const dz = h.x * Math.sin(turn) + h.y * Math.cos(turn);
   SITE.x = cx;
   SITE.z = cz;
   SITE.dx = dx;

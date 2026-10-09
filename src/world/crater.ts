@@ -35,6 +35,9 @@ function trench(x: number, z: number) {
 /** Beyond this distance from the centre the crater changes nothing (dunes, rocks, height). */
 export const CRATER_REACH = R * 3.2;
 
+/** The pod's heading on the ground (x, z): it lies nose-right, so the skid comes in from the left. */
+export const POD_DIR = { x: 0.9928, y: -0.1191 };
+
 /** Length of the skid trench leading into the crater. */
 export const TRENCH_LENGTH = TRENCH;
 

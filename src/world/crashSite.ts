@@ -154,7 +154,7 @@ export class CrashSite {
 
     // it slewed sideways at the end of the skid: nose-down in the crater, lying across
     // the view, rolled so the hatch faces up and toward the viewer
-    const axis = new Vector3(1, -0.3, -0.12).normalize();
+    const axis = new Vector3(SITE.dx, -0.3, SITE.dz).normalize();
     const want = new Vector3(0, 1, 0.6).normalize();
     const hatch = want.clone().addScaledVector(axis, -want.dot(axis)).normalize();
     const side = new Vector3().crossVectors(hatch, axis);

@@ -47,9 +47,11 @@ Add `?skipintro` to the URL to start standing.
 
 The wreck is not in a fixed place. Once you have walked about 25 units and then
 held roughly one heading for about 18 more, an impact crater appears just out of
-sight in front of you, with an escape pod nose-down inside it. A skid trench
-runs back from it, away across your path, with wreckage along it and past the
-rim. If you only wander, it appears anyway after about 140 units. The ground
+sight in front of you, with an escape pod nose-down inside it. The pod lies
+nose-right, and its skid trench always runs off to the left of the crater, in
+line with the pod, with wreckage along it and past the rim. The whole site,
+trench included, is placed beyond the edge of the screen, so heading right you
+meet the trench first and follow it to the pod. If you only wander, it appears anyway after about 140 units. The ground
 it changes is always off screen, so you never see it pop in: you see its smoke
 first, then the crater. The first time the creature comes near, a low sound
 swells and it turns its head to look.
