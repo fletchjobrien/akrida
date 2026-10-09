@@ -378,7 +378,7 @@ function impulseResponse(ctx: BaseAudioContext, seconds: number): Buf {
 }
 
 /** What a wreck hums with: a damaged power unit, or a failing light's buzz. */
-export type SiteHum = 'power' | 'buzz';
+export type SiteHum = 'power' | 'buzz' | 'fire';
 
 interface SiteNodes {
   bus: GainNode;
@@ -728,6 +728,33 @@ export class AudioEngine {
         o.connect(og).connect(filt);
         o.start();
       }
+    } else if (kind === 'fire') {
+      // the ship burning: a low roar of flame with a deep failing drone under it
+      filt.type = 'lowpass';
+      filt.frequency.value = 520;
+      filt.Q.value = 0.4;
+      const roar = this.loop(ctx, noiseBuffer(ctx, 6.7, 'brown', 21));
+      const rg = ctx.createGain();
+      rg.gain.value = 3.2;
+      roar.connect(rg).connect(filt);
+      const flutter = ctx.createOscillator();
+      flutter.frequency.value = 0.37;
+      const fg = ctx.createGain();
+      fg.gain.value = 160;
+      flutter.connect(fg).connect(filt.frequency);
+      flutter.start();
+      for (const [f, g] of [
+        [36.5, 0.5],
+        [37.3, 0.4],
+        [73.4, 0.12],
+      ]) {
+        const o = ctx.createOscillator();
+        o.frequency.value = f;
+        const og = ctx.createGain();
+        og.gain.value = g;
+        o.connect(og).connect(filt);
+        o.start();
+      }
     } else {
       // a failing light ballast: a thin, nasal mains buzz
       filt.type = 'bandpass';
@@ -900,6 +927,344 @@ export class AudioEngine {
     o.connect(bp).connect(g).connect(n.bus);
     o.start(now);
     o.stop(now + 0.25);
+  }
+
+  /** A deep groan of stressed hull plating, bending and settling. */
+  shipGroan(i: number, level: number) {
+    const ctx = this.ctx;
+    const n = this.sites[i];
+    if (!ctx || !n) return;
+    const now = ctx.currentTime;
+    const dur = 2.2 + Math.random() * 2;
+    const f0 = 38 + Math.random() * 30;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.exponentialRampToValueAtTime(level, now + dur * 0.3);
+    out.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    out.connect(n.bus);
+    // metal resonances the groan drives
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(180 + Math.random() * 120, now);
+    bp.frequency.linearRampToValueAtTime(120 + Math.random() * 60, now + dur);
+    bp.Q.value = 6;
+    bp.connect(out);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 260;
+    lp.connect(out);
+    for (const [mul, g] of [
+      [1, 0.6],
+      [1.007, 0.5],
+      [2.03, 0.25],
+    ]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f0 * mul, now);
+      o.frequency.linearRampToValueAtTime(f0 * mul * (0.8 + Math.random() * 0.3), now + dur);
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og);
+      og.connect(bp);
+      og.connect(lp);
+      o.start(now);
+      o.stop(now + dur + 0.1);
+    }
+    // a scrape of grit and rivets
+    if (this.white) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.white;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'bandpass';
+      hp.frequency.value = 900;
+      hp.Q.value = 3;
+      const g = ctx.createGain();
+      g.gain.value = 0.06;
+      src.connect(hp).connect(g).connect(out);
+      src.start(now, Math.random());
+      src.stop(now + dur);
+    }
+  }
+
+  /** Something inside the wreck goes up: a thump, a deep boom and a long rumble. */
+  shipBoom(i: number, level: number) {
+    const ctx = this.ctx;
+    const n = this.sites[i];
+    if (!ctx || !n || !this.white) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    out.connect(n.bus);
+    const send = ctx.createGain();
+    send.gain.value = 0.8;
+    out.connect(send).connect(this.reverbSend);
+    const o = ctx.createOscillator();
+    o.frequency.setValueAtTime(90, now);
+    o.frequency.exponentialRampToValueAtTime(28, now + 0.9);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(1, now);
+    og.gain.exponentialRampToValueAtTime(0.001, now + 1.6);
+    o.connect(og).connect(out);
+    o.start(now);
+    o.stop(now + 1.7);
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(2400, now);
+    lp.frequency.exponentialRampToValueAtTime(160, now + 2.2);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.9, now);
+    ng.gain.exponentialRampToValueAtTime(0.001, now + 2.6);
+    src.connect(lp).connect(ng).connect(out);
+    src.start(now, Math.random());
+    src.stop(now + 2.7);
+  }
+
+  /** The ship's alarm, still going somewhere inside: a muffled, failing two-tone klaxon. */
+  shipAlarm(i: number, level: number) {
+    const ctx = this.ctx;
+    const n = this.sites[i];
+    if (!ctx || !n) return;
+    const now = ctx.currentTime;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 700;
+    bp.Q.value = 1.4;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    bp.connect(g).connect(n.bus);
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    const sag = 0.96 + Math.random() * 0.04;
+    for (let k = 0; k < 3; k++) {
+      const t = now + k * 0.9;
+      o.frequency.setValueAtTime(587 * sag, t);
+      o.frequency.setValueAtTime(466 * sag, t + 0.42);
+      g.gain.setTargetAtTime(level, t, 0.02);
+      g.gain.setTargetAtTime(level * 0.8, t + 0.42, 0.02);
+      g.gain.setTargetAtTime(0, t + 0.8, 0.03);
+    }
+    o.connect(bp);
+    o.start(now);
+    o.stop(now + 2.9);
+  }
+
+  // ------------------------------------------------------------ the keypad
+
+  /** One keypad button: a clean, glassy electronic tone at TONES[tone]. */
+  padTone(tone: number, level: number, pan = 0) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const f = TONES[tone];
+    if (!f) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.exponentialRampToValueAtTime(level, now + 0.008);
+    out.gain.setTargetAtTime(level * 0.55, now + 0.05, 0.08);
+    out.gain.setTargetAtTime(0.0001, now + 0.55, 0.12);
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    out.connect(p).connect(this.master);
+    const send = ctx.createGain();
+    send.gain.value = 0.35;
+    p.connect(send).connect(this.reverbSend);
+    // a sine with a soft bell-like partial and a faint click at the press
+    for (const [mul, type, g] of [
+      [1, 'sine', 0.7],
+      [2, 'triangle', 0.12],
+      [3.01, 'sine', 0.06],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f * mul;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(out);
+      o.start(now);
+      o.stop(now + 1.3);
+    }
+    this.click(0.08);
+  }
+
+  /** A small mechanical click, for a button going down. */
+  click(level: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.tickAt(level, 2.2);
+  }
+
+  private tickAt(level: number, rate: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.ticks.length) return;
+    const src = ctx.createBufferSource();
+    src.buffer = this.ticks[Math.floor(Math.random() * this.ticks.length)];
+    src.playbackRate.value = rate;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(g).connect(this.master);
+    src.start();
+  }
+
+  /** The keypad rejects a sequence: a flat, falling double buzz. */
+  padError(level: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    for (let k = 0; k < 2; k++) {
+      const t = now + k * 0.16;
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.setValueAtTime(150, t);
+      o.frequency.linearRampToValueAtTime(118, t + 0.12);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 1200;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(level, t);
+      g.gain.setTargetAtTime(0, t + 0.1, 0.02);
+      o.connect(lp).connect(g).connect(this.master);
+      o.start(t);
+      o.stop(t + 0.2);
+    }
+  }
+
+  /** The keypad accepts: the three tones again, quick and bright, rising into a chord. */
+  padAccept(tones: readonly number[], level: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    tones.forEach((tone, k) => {
+      const t = now + k * 0.09;
+      const o = ctx.createOscillator();
+      o.frequency.value = TONES[tone] * 2;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(level, t + 0.01);
+      g.gain.setTargetAtTime(0.0001, t + 0.6, 0.25);
+      o.connect(g).connect(this.master);
+      g.connect(this.reverbSend);
+      o.start(t);
+      o.stop(t + 2);
+    });
+  }
+
+  /**
+   * The door's lock lets go: a servo strains and dies, bolts clunk back, and the
+   * seal breaks with a hiss of stale air.
+   */
+  doorCrack(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(220, now);
+    o.frequency.linearRampToValueAtTime(340, now + 0.5);
+    o.frequency.exponentialRampToValueAtTime(60, now + 1.1);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 900;
+    bp.Q.value = 2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level * 0.25, now + 0.1);
+    g.gain.setTargetAtTime(0, now + 0.9, 0.08);
+    o.connect(bp).connect(g).connect(this.master);
+    o.start(now);
+    o.stop(now + 1.3);
+    for (const t of [1.0, 1.12, 1.3]) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.clanks[Math.floor(Math.random() * this.clanks.length)];
+      src.playbackRate.value = 0.7 + Math.random() * 0.15;
+      const cg = ctx.createGain();
+      cg.gain.value = level * 0.6;
+      src.connect(cg).connect(this.master);
+      cg.connect(this.reverbSend);
+      src.start(now + t);
+    }
+    // the seal breaks
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2200;
+    const hg = ctx.createGain();
+    hg.gain.setValueAtTime(0.0001, now + 1.35);
+    hg.gain.exponentialRampToValueAtTime(level * 0.35, now + 1.4);
+    hg.gain.setTargetAtTime(0.0001, now + 1.6, 0.35);
+    src.connect(hp).connect(hg).connect(this.master);
+    src.start(now + 1.3, Math.random());
+    src.stop(now + 3.5);
+  }
+
+  /** Metal dragged against metal: the jammed door grinding along its track. */
+  doorGrind(level: number, seconds: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(700, now);
+    bp.Q.value = 5;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    // it moves in judders: stick, slip, stick
+    for (let t = 0; t < seconds; t += 0.06 + Math.random() * 0.1) {
+      g.gain.setTargetAtTime(level * (Math.random() < 0.35 ? 0.15 : 0.6 + Math.random() * 0.4), now + t, 0.015);
+      bp.frequency.setTargetAtTime(500 + Math.random() * 700, now + t, 0.03);
+    }
+    g.gain.setTargetAtTime(0.0001, now + seconds, 0.05);
+    src.connect(bp).connect(g).connect(this.master);
+    // and a thin squeal riding over it
+    const sq = ctx.createOscillator();
+    sq.type = 'triangle';
+    sq.frequency.setValueAtTime(1500 + Math.random() * 400, now);
+    sq.frequency.linearRampToValueAtTime(1300 + Math.random() * 600, now + seconds);
+    const sg = ctx.createGain();
+    sg.gain.value = 0;
+    for (let t = 0; t < seconds; t += 0.2 + Math.random() * 0.3) sg.gain.setTargetAtTime(Math.random() < 0.5 ? level * 0.08 : 0, now + t, 0.03);
+    sg.gain.setTargetAtTime(0, now + seconds, 0.03);
+    sq.connect(sg).connect(this.master);
+    src.start(now, Math.random());
+    src.stop(now + seconds + 0.4);
+    sq.start(now);
+    sq.stop(now + seconds + 0.4);
+  }
+
+  /** The door gives all at once: a loud clang and a rumbling slide to its stop. */
+  doorGive(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    for (const [t, r, l] of [
+      [0, 0.6, 1],
+      [0.42, 0.5, 0.8],
+    ]) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.clanks[Math.floor(Math.random() * this.clanks.length)];
+      src.playbackRate.value = r;
+      const g = ctx.createGain();
+      g.gain.value = level * l;
+      src.connect(g).connect(this.master);
+      g.connect(this.reverbSend);
+      src.start(now + t);
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 500;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(level * 0.5, now);
+    g.gain.setTargetAtTime(0.0001, now + 0.35, 0.06);
+    src.connect(lp).connect(g).connect(this.master);
+    src.start(now, Math.random());
+    src.stop(now + 1);
   }
 
   /** A low swell when the wreck first comes into view. */

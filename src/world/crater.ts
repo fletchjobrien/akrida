@@ -125,6 +125,46 @@ function bowl2(a: number, s: number) {
   return bowl + rim + wings + bank;
 }
 
+/**
+ * The ship they escaped from, which came down beyond both pods: its centre
+ * (x, z) and the direction its bow points (dx, dz). Mirrored into uSite3 and
+ * uSite3On.
+ */
+export const SITE3 = { x: 0, z: 0, dx: 1, dz: 0, on: false };
+/** Ship length, and the trench it ploughed before it stopped. */
+export const SHIP_LENGTH = 20;
+export const SHIP_TRENCH = 50;
+/** How far beyond the bow, behind the trench and to the sides the ship changes the ground. */
+export const SHIP_REACH = { bow: 19, side: 11 };
+
+function shipCoords(x: number, z: number) {
+  const ox = x - SITE3.x;
+  const oz = z - SITE3.z;
+  return { a: ox * SITE3.dx + oz * SITE3.dz, s: ox * -SITE3.dz + oz * SITE3.dx };
+}
+
+/**
+ * Height added by the ship: a long trench, flat-floored with banked sides,
+ * that deepens and widens toward the wreck and runs on under it, ending in a
+ * great bank of sand shoved up in front of the bow, splashed out to the sides.
+ */
+function shipHeight(x: number, z: number): number {
+  const { a, s } = shipCoords(x, z);
+  const half = SHIP_LENGTH / 2;
+  if (a < -half - SHIP_TRENCH - 4 || a > SHIP_REACH.bow || Math.abs(s) > SHIP_REACH.side) return 0;
+  const t = (a + half + SHIP_TRENCH) / SHIP_TRENCH;
+  const tc = Math.min(1, Math.max(0, t));
+  const w = 1.6 + 3.2 * tc;
+  const dep = 0.15 + 0.75 * tc;
+  const ends = smooth(-0.03, 0.06, t) * (1 - smooth(half - 3, half, a));
+  const floor = 1 - smooth(0.55 * w, w, Math.abs(s));
+  const berm = 0.32 * (0.3 + tc) * Math.exp(-sq((Math.abs(s) - 1.15 * w) / (0.45 + 0.25 * tc)));
+  let h = (-dep * floor + berm) * ends;
+  h += 1.3 * Math.exp(-sq((a - half - 1.6) / 1.6) - sq(s / 3.2));
+  h += 0.3 * Math.exp(-sq((a - half + 1) / 3)) * Math.exp(-sq((Math.abs(s) - 5) / 1.5));
+  return h;
+}
+
 /** 1 near the crash, 0 away from it: keeps dunes and rocks out of the way. */
 export function siteMask(x: number, z: number): number {
   if (!SITE.on) return 0;
@@ -140,12 +180,22 @@ export function siteMask(x: number, z: number): number {
     const near2 = 1 - smooth(6.5, BOWL2_REACH, Math.hypot(x - SITE2.x, z - SITE2.z));
     m = Math.max(m, sk, near2, 1 - smooth(3, 6.5, trailDistance(x, z)));
   }
+  if (SITE3.on) {
+    const k = shipCoords(x, z);
+    const along = smooth(-SHIP_LENGTH / 2 - SHIP_TRENCH - 5, -SHIP_LENGTH / 2 - SHIP_TRENCH, k.a) * (1 - smooth(SHIP_REACH.bow - 4, SHIP_REACH.bow, k.a));
+    m = Math.max(m, along * (1 - smooth(SHIP_REACH.side - 4, SHIP_REACH.side, Math.abs(k.s))));
+  }
   return m;
 }
 
 /** Height added to the terrain by the impact. */
 export function craterHeight(x: number, z: number): number {
   if (!SITE.on) return 0;
+  return firstHeight(x, z) + (SITE2.on ? skidHeight(x, z) : 0) + (SITE3.on ? shipHeight(x, z) : 0);
+}
+
+/** Height added by the first pod's crater and trench. */
+function firstHeight(x: number, z: number): number {
   const ox = x - SITE.x;
   const oz = z - SITE.z;
   const r = Math.hypot(ox, oz);
@@ -166,7 +216,7 @@ export function craterHeight(x: number, z: number): number {
     const ends = smooth(-0.05, 0.08, t);
     gouge = (-(0.12 + 0.35 * t) * Math.exp(-sq(s / w)) + 0.1 * (0.5 + t) * Math.exp(-sq((Math.abs(s) - 1.5 * w) / 0.45))) * ends;
   }
-  return bowl + rim + ejecta + gouge + (SITE2.on ? skidHeight(x, z) : 0);
+  return bowl + rim + ejecta + gouge;
 }
 
 const f = (n: number) => n.toFixed(5);
@@ -197,6 +247,33 @@ float segDistance(vec2 p, vec2 a, vec2 b) {
 float trailDistance(vec2 p) {
   return min(segDistance(p, uSite2.xy, uSite2Trail.xy), segDistance(p, uSite2Trail.xy, uSite2Trail.zw));
 }
+uniform vec4 uSite3; // the ship: centre x, z; bow direction x, z
+uniform float uSite3On;
+vec2 shipCoords(vec2 p) {
+  vec2 o = p - uSite3.xy;
+  return vec2(dot(o, uSite3.zw), o.x * -uSite3.w + o.y * uSite3.z);
+}
+float shipHeight(vec2 p) {
+  vec2 k = shipCoords(p);
+  float half_ = ${f(SHIP_LENGTH / 2)};
+  if (k.x < -half_ - ${f(SHIP_TRENCH + 4)} || k.x > ${f(SHIP_REACH.bow)} || abs(k.y) > ${f(SHIP_REACH.side)}) return 0.0;
+  float t = (k.x + half_ + ${f(SHIP_TRENCH)}) / ${f(SHIP_TRENCH)};
+  float tc = clamp(t, 0.0, 1.0);
+  float w = 1.6 + 3.2 * tc;
+  float dep = 0.15 + 0.75 * tc;
+  float ends = smoothstep(-0.03, 0.06, t) * (1.0 - smoothstep(half_ - 3.0, half_, k.x));
+  float floor_ = 1.0 - smoothstep(0.55 * w, w, abs(k.y));
+  float bq = (abs(k.y) - 1.15 * w) / (0.45 + 0.25 * tc);
+  float berm = 0.32 * (0.3 + tc) * exp(-bq * bq);
+  float h = (-dep * floor_ + berm) * ends;
+  float ba = (k.x - half_ - 1.6) / 1.6;
+  float bs = k.y / 3.2;
+  h += 1.3 * exp(-ba * ba - bs * bs);
+  float wa = (k.x - half_ + 1.0) / 3.0;
+  float ws = (abs(k.y) - 5.0) / 1.5;
+  h += 0.3 * exp(-wa * wa) * exp(-ws * ws);
+  return h;
+}
 float siteMask(vec2 p) {
   if (uSiteOn < 0.5) return 0.0;
   float r = length(p - SITE);
@@ -209,6 +286,11 @@ float siteMask(vec2 p) {
     float ka = smoothstep(${f(-SKID - SKIP_REACH - 1)}, ${f(-SKID - SKIP_REACH + 0.5)}, k.x) * (1.0 - smoothstep(3.0, 5.0, k.x));
     float near2 = 1.0 - smoothstep(6.5, ${f(BOWL2_REACH)}, length(p - uSite2.xy));
     m = max(m, max(max(ka * (1.0 - smoothstep(2.5, 5.0, abs(k.y))), near2), 1.0 - smoothstep(3.0, 6.5, trailDistance(p))));
+  }
+  if (uSite3On > 0.5) {
+    vec2 k3 = shipCoords(p);
+    float al = smoothstep(${f(-SHIP_LENGTH / 2 - SHIP_TRENCH - 5)}, ${f(-SHIP_LENGTH / 2 - SHIP_TRENCH)}, k3.x) * (1.0 - smoothstep(${f(SHIP_REACH.bow - 4)}, ${f(SHIP_REACH.bow)}, k3.x));
+    m = max(m, al * (1.0 - smoothstep(${f(SHIP_REACH.side - 4)}, ${f(SHIP_REACH.side)}, abs(k3.y))));
   }
   return m;
 }
@@ -251,8 +333,7 @@ float skidHeight(vec2 p) {
   }
   return h;
 }
-float craterHeight(vec2 p) {
-  if (uSiteOn < 0.5) return 0.0;
+float firstHeight(vec2 p) {
   vec2 o = p - SITE;
   float r = length(o);
   vec2 ts = trenchCoords(p);
@@ -272,7 +353,11 @@ float craterHeight(vec2 p) {
     float bq = (abs(ts.y) - 1.5 * w) / 0.45;
     gouge = (-(0.12 + 0.35 * ts.x) * exp(-sw * sw) + 0.1 * (0.5 + ts.x) * exp(-bq * bq)) * ends;
   }
-  return bowl + rim + ejecta + gouge + (uSite2On > 0.5 ? skidHeight(p) : 0.0);
+  return bowl + rim + ejecta + gouge;
+}
+float craterHeight(vec2 p) {
+  if (uSiteOn < 0.5) return 0.0;
+  return firstHeight(p) + (uSite2On > 0.5 ? skidHeight(p) : 0.0) + (uSite3On > 0.5 ? shipHeight(p) : 0.0);
 }
 // 0..1: how burnt the sand is (crater floor and the trench nearest it)
 float scorchAt(vec2 p) {
@@ -293,6 +378,20 @@ float scorchAt(vec2 p) {
     float c2 = 1.0 - smoothstep(0.35, 1.75, length(bq));
     float tr2 = t > 0.0 && t < 1.05 ? 0.85 * exp(-(k.y * k.y) / (kw * kw * 1.4)) * smoothstep(0.3, 0.95, t) : 0.0;
     sc = max(sc, max(c2, tr2));
+  }
+  if (uSite3On > 0.5) {
+    // the ship: its trench burnt more and more toward the wreck, the ground under and
+    // around it blackened, and blast marks flung out where it broke apart
+    vec2 k3 = shipCoords(p);
+    float half_ = ${f(SHIP_LENGTH / 2)};
+    float t3 = (k3.x + half_ + ${f(SHIP_TRENCH)}) / ${f(SHIP_TRENCH)};
+    float w3 = 1.6 + 3.2 * clamp(t3, 0.0, 1.0);
+    float tr3 = t3 > 0.0 ? 0.9 * (1.0 - smoothstep(0.5 * w3, 1.1 * w3, abs(k3.y))) * smoothstep(0.35, 0.95, t3) * (1.0 - smoothstep(half_ + 1.0, half_ + 4.0, k3.x)) : 0.0;
+    float hull = (1.0 - smoothstep(half_ - 1.0, half_ + 3.5, abs(k3.x))) * (1.0 - smoothstep(4.0, 7.5, abs(k3.y)));
+    vec2 b1 = (k3 - vec2(1.5, 4.8)) / vec2(2.6, 1.7);
+    vec2 b2 = (k3 - vec2(-4.0, -5.2)) / vec2(2.0, 1.4);
+    float blasts = max(1.0 - smoothstep(0.3, 1.0, length(b1)), 1.0 - smoothstep(0.3, 1.0, length(b2)));
+    sc = max(sc, max(tr3, max(hull, blasts)));
   }
   return clamp(sc * (0.75 + 0.6 * gnoise(p * 0.9)), 0.0, 1.0);
 }

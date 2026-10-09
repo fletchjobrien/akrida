@@ -136,10 +136,10 @@ down differently:
      on each note.
   4. Then everything eases back and you have control again. Click again to hear
      the tune again.
-- **The tune** is data for the puzzle that comes next: `src/story/tune.ts` has
-  five tones (an A minor pentatonic: A3 C4 D4 E4 G4) and the stranger's three
-  (D, G, C). Under the rasp there is a thin pure tone, so you can tell each
-  pitch apart.
+- **The tune** opens the ship's door (see below). `src/story/tune.ts` has the
+  nine tones (an A minor pentatonic over two octaves: A3 C4 D4 E4 G4 A4 C5 D5
+  E5) and the stranger's three (D4, G4, C4). Under the rasp there is a thin
+  pure tone, so you can tell each pitch apart.
 - **Code:**
   - The skid and skip marks are part of the terrain height, on the CPU and the
     GPU (`src/world/crater.ts`, uniforms `uSite2`, `uSite2Trail`, `uSite2On`).
@@ -150,6 +150,75 @@ down differently:
     `'second'`); each has its own positional sound bus. The stranger, its
     animation, the encounter and the painting of the trail are in
     `src/story/Stranger.ts`.
+
+## The ship
+
+The ship you escaped from lies about 22 units beyond the stranger, the way its
+head points. From where the stranger lies, only the tip of the ship's bow shows
+at the edge of the screen. As you come closer, a low swell plays and the
+creature turns to look.
+
+- **The crash:** it came in long and low. It ploughed a 50-unit trench, banked
+  and flat-floored, scorched black toward the wreck. It shoved up a great bank
+  of sand in front of its bow, and its back broke on landing.
+- **The ship:** about 20 units long, eight times a pod's length. It has the
+  same off-white faceted hull, orange bands and charred heat shielding, so it
+  reads as the pods' mothership. On its flank is a row of four pod bays: two
+  are sealed, two stand empty (your pod and the stranger's).
+- **Damage:**
+  - its back is broken: the bow half is bent down and aside, with frame rings,
+    hanging cables and fire in the gap;
+  - three hull breaches have plating peeled outward and soot blown over the
+    hull;
+  - more blast scars mark the hull;
+  - one of the three engine bells is torn off and lies in the trench;
+  - the near wing is sheared off (it lies in the trench too), and the dorsal
+    fin is bent over;
+  - the sensor mast is snapped;
+  - debris lies along the whole trench, with small fires still burning in it.
+- **Effects:**
+  - thick smoke columns rise from the breaches and lean away on the wind;
+  - flames flicker in the breaches, with embers rising and molten drips
+    falling;
+  - sparks shower from the break, and the jammed door's frame shorts out in
+    blue arcs;
+  - nav lights blink;
+  - every 14 to 34 seconds, something inside explodes: a flash, a fireball,
+    sparks, a gust of smoke, and a boom that shakes the camera when you are
+    close.
+- **Sound:** a low roar of fire over a failing drone, deep groans of stressed
+  hull, cooling ticks, sparks, the booms, and a muffled, failing alarm somewhere
+  inside. It is audible from where the stranger lies, so it pulls you on.
+
+### The door and the keypad
+
+On the flank facing you there is an airlock. Its door is buckled and jammed,
+an amber light blinks over it, and beside it is a 3x3 keypad of glowing
+glyphs.
+
+1. Walk up and click the keypad. The camera closes in, so the glyphs are easy
+   to read.
+2. Click buttons. Each one plays a clean tone, one of the nine. The order of
+   tones on the pad is shuffled (`PAD_TONES` in `src/story/tune.ts`).
+3. Play the stranger's three tones in order. A wrong sequence buzzes and the
+   pad flashes red. The right one turns the glyphs blue and the light green.
+   The lock's servo strains, bolts clunk back, and the seal breaks with a puff
+   of stale air. The door jerks open a hand's width.
+4. To leave the keypad, move or click away from it.
+5. Click the cracked door. Your creature steps up and gets its hands into the
+   gap. It braces and hauls while the door grinds and judders along its track.
+   It rests, then pulls again with everything it has. The door gives all at
+   once with a clang. The creature is thrown off balance, stumbles away,
+   catches itself doubled over, and straightens beside the open doorway. A red
+   emergency light flickers inside.
+
+**Code:**
+- The ship, its effects, the keypad and the door are in `src/world/ship.ts`.
+- The trench and bank are part of the terrain height, on the CPU and the GPU
+  (`src/world/crater.ts`, uniforms `uSite3` and `uSite3On`).
+- The pull is a scripted pose sequence, in `src/story/DoorScene.ts`.
+- Each glyph is a 7x7 pixel pattern drawn by a small shader on its button.
+- With `?debug`, `__akrida.ship.press(i)` presses button `i`.
 
 ## Stamina
 
@@ -262,10 +331,11 @@ src/
   core/                   maths helpers, input
   render/                 pixel renderer, palette, shared lighting
   world/                  terrain, noise, rocks, wind, particles, footprints,
-                          crater and pods, stain map (blood, drag marks)
+                          crater, pods and ship, stain map (blood, drag marks)
   character/              creature rig and procedural animation
   audio/                  synthesised sound, the stranger's voice
-  story/                  the opening, when the wreck appears, the stranger, the tune
+  story/                  the opening, when the wreck appears, the stranger, the tune,
+                          pulling the ship's door open
 ```
 
 ## Sources

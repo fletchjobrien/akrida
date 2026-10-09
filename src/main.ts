@@ -12,7 +12,24 @@ import { Input } from './core/input';
 import { clamp, DynVec3, saturate } from './core/math';
 import { WakeUp } from './story/WakeUp';
 import { CrashSite } from './world/crashSite';
-import { BOWL2_REACH, CRATER_REACH, craterHeight, POD_DIR, SITE, SITE2, siteMask, SKID, SKIP_REACH, TRENCH_LENGTH } from './world/crater';
+import {
+  BOWL2_REACH,
+  CRATER_REACH,
+  craterHeight,
+  POD_DIR,
+  SHIP_LENGTH,
+  SHIP_REACH,
+  SHIP_TRENCH,
+  SITE,
+  SITE2,
+  SITE3,
+  siteMask,
+  SKID,
+  SKIP_REACH,
+  TRENCH_LENGTH,
+} from './world/crater';
+import { Ship } from './world/ship';
+import { DoorScene } from './story/DoorScene';
 import { SiteSpawner } from './story/SiteSpawner';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
@@ -29,7 +46,7 @@ const footprints = new Footprints();
 scene.add(footprints.mesh);
 const streaks = new SandStreaks();
 scene.add(streaks.mesh);
-const dust = new Dust();
+const dust = new Dust(1800);
 scene.add(dust.mesh);
 
 const world: World = { height: terrainHeight, rocks: rocks.nearby };
@@ -47,6 +64,14 @@ let site: CrashSite | null = null;
 const spawner = new SiteSpawner();
 // a second pod lands near the first, and its survivor lies at the end of a trail
 let site2: CrashSite | null = null;
+// the ship they escaped from, beyond the stranger, and its jammed door
+let ship: Ship | null = null;
+let doorScene: DoorScene | null = null;
+/** Using the keypad: the camera closes in on it and the buttons can be pressed. */
+let padMode = false;
+let padWeight = 0;
+let doorHover = false;
+let padHover = false;
 let stranger: Stranger | null = null;
 
 interface SecondPodLayout {
@@ -57,11 +82,14 @@ interface SecondPodLayout {
   axis: Vector2;
   skid: Vector2[];
   score: number;
+  ship: { center: Vector2; dir: Vector2; samples: Vector2[] } | null;
 }
 
 /** How far the second pod lies from the crater, and its survivor's trail from the pod. */
 const POD2_DISTANCE = 26;
 const TRAIL_LENGTH = 22;
+/** How far the ship's centre lies beyond the stranger: its bow is just in sight from there. */
+const SHIP_GAP = 22;
 
 /**
  * Lay out the second pod and its survivor around the crater (crater at 0, 0),
@@ -81,7 +109,7 @@ function planSecondPod(h: Vector2) {
   const side = Math.random() < 0.5 ? -1 : 1;
   let best: SecondPodLayout | null = null;
   let bestScore = -Infinity;
-  function layout(deg: number, slideAngle: number, slideSign: number, bend: number): SecondPodLayout | null {
+  function layout(deg: number, slideAngle: number, slideSign: number, bend: number, withShip: boolean): SecondPodLayout | null {
     const u = rot(h.x, h.y, side * deg * (Math.PI / 180));
     const pod = u.clone().multiplyScalar(POD2_DISTANCE);
     const tw = rot(...(u.clone().multiplyScalar(0.5).add(h).normalize().toArray() as [number, number]), bend);
@@ -101,19 +129,38 @@ function planSecondPod(h: Vector2) {
     const score = -Math.abs(start.length() - (CRATER_REACH + 6)) * 0.3 + Math.abs(slide.x) * 2 - deg * 0.02;
     const sx = Math.abs(tw.x) > 0.15 ? Math.sign(tw.x) : side;
     const axis = tw.clone().multiplyScalar(0.7).add(new Vector2(sx * 0.6, 0)).normalize();
-    return { pod, slide, end, mid, axis, skid, score };
+    // the ship lies beyond the stranger, the way its head points, across the view, bow
+    // toward it; its trench runs away behind, clear of everything else
+    const center = end.clone().add(new Vector2(sx * SHIP_GAP, -3));
+    const dir = new Vector2(-sx, 0);
+    const samples: Vector2[] = [];
+    for (let a = SHIP_REACH.bow - 4; a >= -SHIP_LENGTH / 2 - SHIP_TRENCH; a -= 4) samples.push(center.clone().addScaledVector(dir, a));
+    const trailPts = [pod, mid, pod.clone().addScaledVector(tw, TRAIL_LENGTH / 4), pod.clone().addScaledVector(tw, (TRAIL_LENGTH * 3) / 4)];
+    let ok = withShip;
+    for (const p of samples) {
+      if (!ok) break;
+      if (!clear(p.x, p.y, 12) || p.length() < CRATER_REACH + 10 || p.distanceTo(pod) < BOWL2_REACH + 10) ok = false;
+      // its bow and the sand it ploughed up may come close to the stranger, not over the trail
+      else if (skid.some((k) => k.distanceTo(p) < 10) || trailPts.some((k) => k.distanceTo(p) < 9.5) || p.distanceTo(end) < 6) ok = false;
+    }
+    if (withShip && !ok) return null;
+    return { pod, slide, end, mid, axis, skid, score, ship: ok ? { center, dir, samples } : null };
   }
-  for (const deg of [0, 20, -20, 40, -40, 60, -60, 80, -80]) {
-    for (const bend of [0, 0.3, -0.3]) {
-      for (const a of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]) {
-        for (const sgn of [1, -1]) {
-          const l = layout(deg, a, sgn, bend);
-          if (l && l.score > bestScore) {
-            bestScore = l.score;
-            best = l;
+  // with the ship if it fits anywhere; failing that, without it
+  for (const withShip of [true, false]) {
+    for (const deg of [0, 20, -20, 40, -40, 60, -60, 80, -80]) {
+      for (const bend of [0, 0.3, -0.3]) {
+        for (const a of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05]) {
+          for (const sgn of [1, -1]) {
+            const l = layout(deg, a, sgn, bend, withShip);
+            if (l && l.score > bestScore) {
+              bestScore = l.score;
+              best = l;
+            }
           }
         }
       }
+      if (best) break;
     }
     if (best) break;
   }
@@ -156,7 +203,13 @@ function spawnSite() {
   }
   const plan = planSecondPod(h);
   if (plan) {
-    for (const [p, r] of [[plan.pod, BOWL2_REACH + 0.5], [plan.mid, 6.5], [plan.end, 6.5], ...plan.skid.map((k) => [k, 5] as const)] as const) {
+    for (const [p, r] of [
+      [plan.pod, BOWL2_REACH + 0.5],
+      [plan.mid, 6.5],
+      [plan.end, 6.5],
+      ...plan.skid.map((k) => [k, 5] as const),
+      ...(plan.ship?.samples ?? []).map((k) => [k, SHIP_REACH.side + 1] as const),
+    ] as const) {
       need = Math.max(need, -(p.x * h.x + p.y * h.y) + r);
     }
   }
@@ -183,6 +236,15 @@ function spawnSite() {
     shared.uSite2.value.set(SITE2.x, SITE2.z, SITE2.dx, SITE2.dz);
     shared.uSite2Trail.value.set(SITE2.mx, SITE2.mz, SITE2.ex, SITE2.ez);
     shared.uSite2On.value = 1;
+    if (plan.ship) {
+      SITE3.x = cx + plan.ship.center.x;
+      SITE3.z = cz + plan.ship.center.y;
+      SITE3.dx = plan.ship.dir.x;
+      SITE3.dz = plan.ship.dir.y;
+      SITE3.on = true;
+      shared.uSite3.value.set(SITE3.x, SITE3.z, SITE3.dx, SITE3.dz);
+      shared.uSite3On.value = 1;
+    }
   }
   rocks.refresh();
   site = new CrashSite(rocks, dust, audio, 'first');
@@ -207,11 +269,17 @@ function spawnSite() {
     const size = Math.max(Math.max(...xs) + 3 - minX, Math.max(...zs) + 3 - minZ);
     const stains = new StainMap(minX, minZ, size);
     stranger.paint(stains, site2.hatchGround);
+    if (SITE3.on) {
+      ship = new Ship(rocks, dust, audio);
+      ship.addTo(scene);
+      doorScene = new DoorScene(creature, world, ship, audio, dust);
+      rocks.refresh();
+    }
   }
 }
 /** Seconds left of the creature staring at something it has just noticed. */
 let noticeTime = 0;
-let noticeWhat: CrashSite | 'stranger' | null = null;
+let noticeWhat: { lookPoint: Vector3 } | 'stranger' | null = null;
 /** The cursor is over the stranger, close enough to reach. */
 let strangerHover = false;
 const input = new Input(canvas);
@@ -221,13 +289,36 @@ const params = new URLSearchParams(location.search);
 const wake = new WakeUp(creature, world, pr, audio, dust, footprints, () => elapsed);
 if (params.has('skipintro')) wake.skip();
 const clickGround = new Vector3();
+const clickAt = new Vector2();
 window.addEventListener('pointerdown', (e) => {
   wake.begin();
+  if (e.button !== 0 || wake.active || doorScene?.active) return;
+  clickAt.set(e.clientX, e.clientY);
+  // the keypad: press the button under the click; a click off the pad steps back from it
+  if (ship && padMode) {
+    const b = ship.buttonAt(clickAt, pr.camera);
+    if (b >= 0) ship.press(b);
+    else if (!ship.padAt(clickAt, pr.camera)) padMode = false;
+    return;
+  }
+  if (ship && nearPad() && ship.state === 'locked' && ship.padAt(clickAt, pr.camera)) {
+    padMode = true;
+    return;
+  }
+  if (ship && doorScene && doorScene.canStart(creature.pos) && ship.doorAt(clickAt, pr.camera)) {
+    doorScene.begin();
+    return;
+  }
   // kneel by the stranger: judged where the click lands, not where the cursor was last frame
-  if (e.button !== 0 || !stranger || wake.active || stranger.busy) return;
+  if (!stranger || stranger.busy) return;
   pr.screenToGround(e.clientX, e.clientY, terrainHeight, clickGround);
   if (stranger.canInteract(creature.pos, clickGround)) stranger.interact();
 });
+
+/** Close enough to the keypad to use it. */
+function nearPad() {
+  return !!ship && Math.hypot(creature.pos.x - ship.padCenter.x, creature.pos.z - ship.padCenter.z) < 2.4;
+}
 // sound waits for the click that wakes the creature, so it can swell in
 input.onGesture(() => {
   if (!wake.active) audio.start();
@@ -241,6 +332,7 @@ const camDyn = new DynVec3(0.9, 1, 0, new Vector3(creature.pos.x, creature.pos.y
 if (wake.active) camDyn.reset(wake.focus(new Vector3()));
 const mouseGround = new Vector3();
 const encounterFocus = new Vector3();
+const shaken = new Vector3();
 const lookPoint = new Vector3();
 const wanderPoint = new Vector3();
 let wanderTimer = 0;
@@ -290,6 +382,13 @@ function update(dt: number, now: number) {
     finishFrame(dt, wake.focus(focusTarget));
     return;
   }
+  if (doorScene?.active) {
+    padMode = false;
+    doorScene.update(dt);
+    rocks.update(creature.pos.x, creature.pos.z);
+    finishFrame(dt, doorScene.focus(focusTarget));
+    return;
+  }
 
   // where the creature looks
   const mouseIdle = now - input.lastMouseMove;
@@ -297,8 +396,12 @@ function update(dt: number, now: number) {
   if (input.hasMouse) {
     pr.screenToGround(input.mouse.x, input.mouse.y, terrainHeight, mouseGround);
   }
-  const holding = stranger?.busy ?? false;
-  if (holding) {
+  // stepping away (or the door cracking open behind its work) ends using the keypad
+  if (padMode && (input.move.lengthSq() > 0 || !ship || ship.state === 'cracked' || !nearPad())) padMode = false;
+  const holding = (stranger?.busy ?? false) || padMode;
+  if (padMode) {
+    look = lookPoint.copy(ship!.padCenter);
+  } else if (holding) {
     // kneeling by the stranger: eyes on it, whatever the mouse is doing
     look = stranger!.headPosition(lookPoint);
   } else if (noticeTime > 0) {
@@ -309,6 +412,8 @@ function update(dt: number, now: number) {
     look = lookPoint.copy(mouseGround);
   } else if (stranger && stranger.distance < 7) {
     look = stranger.headPosition(lookPoint);
+  } else if (ship && ship.distance < 14) {
+    look = lookPoint.copy(ship.state === 'locked' && nearPad() ? ship.padCenter : ship.lookPoint);
   } else if (site2 && site2.distance < 12) {
     look = lookPoint.copy(site2.lookPoint);
   } else if (site && site.distance < 16) {
@@ -335,9 +440,16 @@ function update(dt: number, now: number) {
   if (holding) {
     control.move.set(0, 0);
     control.sprint = false;
-    control.crouch = true;
+    control.crouch = !padMode;
   }
   strangerHover = !!stranger && input.hasMouse && !holding && stranger.canInteract(creature.pos, mouseGround);
+  // what the cursor is over at the ship: a keypad button, the keypad, the cracked door
+  padHover = doorHover = false;
+  if (ship && input.hasMouse) {
+    ship.hover = padMode ? ship.buttonAt(input.mouse, pr.camera) : -1;
+    if (!padMode && ship.state === 'locked' && nearPad()) padHover = ship.padAt(input.mouse, pr.camera);
+    if (doorScene?.canStart(creature.pos)) doorHover = ship.doorAt(input.mouse, pr.camera);
+  }
   creature.update(dt, control, world);
 
   for (const ev of creature.events) {
@@ -372,6 +484,11 @@ function update(dt: number, now: number) {
     focusTarget.x += bx;
     focusTarget.z += bz;
   }
+  if (ship && padWeight > 0) {
+    // using the keypad: close in on it so the glyphs can be read
+    const e = padWeight * padWeight * (3 - 2 * padWeight);
+    focusTarget.lerp(encounterFocus.copy(ship.padCenter).setY(ship.padCenter.y - 0.1), e);
+  }
   if (stranger && stranger.weight > 0) {
     // the encounter draws the camera in between the two of them
     const w = stranger.weight;
@@ -401,14 +518,33 @@ function finishFrame(dt: number, target: Vector3) {
       noticeTime = 3;
       noticeWhat = 'stranger';
     }
-    // close in a little and quieten the world while it sings
-    const w = stranger.weight;
-    const e = w * w * (3 - 2 * w);
-    if (!wake.active) pr.zoomMul = (1 + 0.32 * e) * debugZoom;
-    audio.duck(1 - 0.45 * e);
   }
+  if (ship) {
+    ship.update(dt, elapsed, wind, creature.pos);
+    if (ship.justDiscovered && !wake.active) {
+      audio.stinger();
+      noticeTime = 3;
+      noticeWhat = ship;
+    }
+  }
+  if (doorScene && !doorScene.active) doorScene.update(dt); // eases the camera back out
+  padWeight = Math.min(1, Math.max(0, padWeight + (padMode ? dt * 1.4 : -dt * 1.8)));
+  // close in and quieten the world for the moments that need it
+  const sm = (w: number) => w * w * (3 - 2 * w);
+  const eS = sm(stranger?.weight ?? 0);
+  const eP = sm(padWeight);
+  const eD = sm(doorScene?.weight ?? 0);
+  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 1.9 * eP) * (1 + 0.4 * eD) * debugZoom;
+  audio.duck(1 - 0.45 * eS - 0.3 * eP - 0.2 * eD);
   const focus = camDyn.update(dt, debugFocus ?? target);
-  pr.setFocus(focus);
+  // a blast at the ship shakes the ground
+  const shake = ship ? ship.shake : 0;
+  if (shake > 0.01) {
+    shaken.copy(focus);
+    shaken.x += (Math.random() - 0.5) * 0.3 * shake;
+    shaken.z += (Math.random() - 0.5) * 0.3 * shake;
+    pr.setFocus(shaken);
+  } else pr.setFocus(focus);
   terrain.follow(focus.x, focus.z);
   pr.updateShadow(creature.pos);
 
@@ -433,7 +569,7 @@ function draw(now: number) {
     pr.cursorAlpha = input.hasMouse ? wake.cursorAlpha : 0;
   } else {
     pr.cursorAlpha = idleAlpha;
-    pr.cursorGlow = strangerHover ? 1 : 0;
+    pr.cursorGlow = strangerHover || padHover || doorHover || (padMode && ship!.hoveredButton >= 0) ? 1 : 0;
     if (wokeAt < 0) {
       // skipped the opening: a short fade in from black
       pr.dark = 1 - saturate((now - bootTime) / 1400);
@@ -465,6 +601,19 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     get site2() {
       return site2;
     },
+    get ship() {
+      return ship;
+    },
+    get doorScene() {
+      return doorScene;
+    },
+    get padMode() {
+      return padMode;
+    },
+    get hovers() {
+      return { padHover, doorHover, strangerHover, nearPad: nearPad() };
+    },
+    SITE3,
     SITE2,
     spawner,
     spawnSite,

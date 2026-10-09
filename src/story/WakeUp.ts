@@ -13,9 +13,9 @@ import type { Footprints } from '../world/footprints';
  * swells in, and it struggles up onto its hooves, shedding sand.
  */
 
-type Ease = 'linear' | 'in' | 'out' | 'inOut';
+export type Ease = 'linear' | 'in' | 'out' | 'inOut';
 
-const ease = (e: Ease, u: number) => {
+export const ease = (e: Ease, u: number) => {
   switch (e) {
     case 'in':
       return u * u * u;
@@ -30,7 +30,7 @@ const ease = (e: Ease, u: number) => {
 
 type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
 
-function mk(base: ScriptPose, over: DeepPartial<ScriptPose>): ScriptPose {
+export function mk(base: ScriptPose, over: DeepPartial<ScriptPose>): ScriptPose {
   const p = clonePose(base);
   for (const k of Object.keys(over) as (keyof ScriptPose)[]) {
     const v = over[k];
@@ -40,8 +40,8 @@ function mk(base: ScriptPose, over: DeepPartial<ScriptPose>): ScriptPose {
   return p;
 }
 
-const hand = (x: number, y: number, z: number, ik = 1): HandPose => ({ x, y, z, ik });
-const foot = (x: number, z: number, lift: number, tilt: number, pitch: number, poleDown: number): FootPose => ({
+export const hand = (x: number, y: number, z: number, ik = 1): HandPose => ({ x, y, z, ik });
+export const foot = (x: number, z: number, lift: number, tilt: number, pitch: number, poleDown: number): FootPose => ({
   x,
   z,
   lift,
@@ -229,7 +229,7 @@ const STAND = mk(RISE, {
 });
 
 /** Head up, taking in the desert. */
-const LOOK = mk(STAND, { pelvisPitch: 0.12, spinePitch: 0.03, chestPitch: 0.03, neckPitch: 0.02, headPitch: -0.04, tremble: 0.22 });
+export const LOOK = mk(STAND, { pelvisPitch: 0.12, spinePitch: 0.03, chestPitch: 0.03, neckPitch: 0.02, headPitch: -0.04, tremble: 0.22 });
 
 const KEYS: { t: number; pose: ScriptPose; ease: Ease }[] = [
   { t: 0, pose: LIMP, ease: 'linear' },
