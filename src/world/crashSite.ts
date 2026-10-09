@@ -18,7 +18,7 @@ import { clamp, noise1, rng, smoothstep } from '../core/math';
 import { toonMaterial } from '../render/shared';
 import { rgb } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
-import { SITE_DX, SITE_DZ, SITE_X, SITE_Z } from './crater';
+import { SITE } from './crater';
 import { terrainHeight } from './terrain';
 import { footprintOf, type Rocks } from './rocks';
 import type { Dust } from './particles';
@@ -49,7 +49,7 @@ const BEACON_OFF = rgb(0x5a2420);
  */
 export class CrashSite {
   readonly group = new Group();
-  readonly center = new Vector3(SITE_X, 0, SITE_Z);
+  readonly center = new Vector3();
   /** Set for one frame when the creature first comes close enough to see it. */
   justDiscovered = false;
   discovered = false;
@@ -159,8 +159,8 @@ export class CrashSite {
     const hatch = want.clone().addScaledVector(axis, -want.dot(axis)).normalize();
     const side = new Vector3().crossVectors(hatch, axis);
     P.quaternion.setFromRotationMatrix(new Matrix4().makeBasis(hatch, axis, side));
-    const px = SITE_X + SITE_DX * 0.5;
-    const pz = SITE_Z + SITE_DZ * 0.5;
+    const px = SITE.x + SITE.dx * 0.5;
+    const pz = SITE.z + SITE.dz * 0.5;
     P.position.set(px, terrainHeight(px, pz) + 0.3, pz);
     P.scale.setScalar(1.15);
     this.group.add(P);
@@ -177,10 +177,10 @@ export class CrashSite {
   private scatterDebris(m: Record<'hull' | 'charred' | 'accent' | 'metal' | 'glass', Material>) {
     const rand = rng(90210);
     const L = 20;
-    const sx = SITE_X - SITE_DX * L;
-    const sz = SITE_Z - SITE_DZ * L;
-    const px = -SITE_DZ;
-    const pz = SITE_DX;
+    const sx = SITE.x - SITE.dx * L;
+    const sz = SITE.z - SITE.dz * L;
+    const px = -SITE.dz;
+    const pz = SITE.dx;
     const pick = <T,>(a: T[]) => a[Math.floor(rand() * a.length)];
 
     const piece = (x: number, z: number, scale: number) => {
@@ -223,18 +223,18 @@ export class CrashSite {
       const t = i < 4 ? 0.02 + rand() * 0.1 : 0.12 + 0.85 * Math.pow(rand(), 0.65);
       const spread = (0.6 + 1.3 * t) * (rand() < 0.2 ? 3 : 1);
       const s = (rand() - 0.5) * 2 * spread;
-      piece(sx + SITE_DX * t * L + px * s, sz + SITE_DZ * t * L + pz * s, 0.8 + rand() * 0.6);
+      piece(sx + SITE.dx * t * L + px * s, sz + SITE.dz * t * L + pz * s, 0.8 + rand() * 0.6);
     }
     // thrown forward over the rim
-    const fwd = Math.atan2(SITE_DZ, SITE_DX);
+    const fwd = Math.atan2(SITE.dz, SITE.dx);
     for (let i = 0; i < 16; i++) {
       const a = fwd + (rand() - 0.5) * 2.4;
       const r = 3.6 + rand() * 4.5;
-      piece(SITE_X + Math.cos(a) * r, SITE_Z + Math.sin(a) * r, 0.7 + rand() * 0.7);
+      piece(SITE.x + Math.cos(a) * r, SITE.z + Math.sin(a) * r, 0.7 + rand() * 0.7);
     }
     // the fin that tore off, lying where it landed
-    const fx = SITE_X - SITE_DX * 5.5 + px * 1.6;
-    const fz = SITE_Z - SITE_DZ * 5.5 + pz * 1.6;
+    const fx = SITE.x - SITE.dx * 5.5 + px * 1.6;
+    const fz = SITE.z - SITE.dz * 5.5 + pz * 1.6;
     const fin = new Group();
     const finPlate = new Mesh(faceted(new BoxGeometry(0.32, 0.04, 0.46)), m.hull);
     const finEdge = new Mesh(faceted(new BoxGeometry(0.33, 0.045, 0.06)), m.accent);
@@ -364,8 +364,8 @@ export class CrashSite {
       this.trickleTimer = 1.2 + Math.random() * 3;
       const a = Math.random() * Math.PI * 2;
       const r = 3.3;
-      const x = SITE_X + Math.cos(a) * r;
-      const z = SITE_Z + Math.sin(a) * r;
+      const x = SITE.x + Math.cos(a) * r;
+      const z = SITE.z + Math.sin(a) * r;
       const y = terrainHeight(x, z) + 0.03;
       for (let i = 0; i < 8; i++) {
         this.dust.spawn(

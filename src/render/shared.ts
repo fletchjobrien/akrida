@@ -5,6 +5,7 @@ import {
   Texture,
   Vector2,
   Vector3,
+  Vector4,
   type IUniform,
 } from 'three';
 import { NOISE_GLSL } from '../world/noise';
@@ -22,6 +23,9 @@ export const shared = {
   uWindDir: { value: new Vector2(-0.963, -0.27) },
   uWindStrength: { value: 0.4 },
   uWindTravel: { value: 0 },
+  /** The crash site (see world/crater.ts): centre x, z and travel direction x, z. */
+  uSite: { value: new Vector4(0, 0, 1, 0) },
+  uSiteOn: { value: 0 },
   uPixelWorld: { value: new Vector2(1 / 18, 1 / 18) },
 };
 

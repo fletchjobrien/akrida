@@ -45,12 +45,14 @@ Add `?skipintro` to the URL to start standing.
 
 ## The crash site
 
-A skid trench starts a short walk from where the creature wakes, in the
-direction it faces when it stands. Follow it and it ends at an impact crater
-with a raised rim and burnt, glassy sand. An escape pod lies nose-down in the
-crater with its hatch hanging open, and wreckage lies along the trench and past
-the rim. The first time the creature comes near, a low sound swells and it
-turns its head to look.
+The wreck is not in a fixed place. Once you have walked about 25 units and then
+held roughly one heading for about 18 more, an impact crater appears just out of
+sight in front of you, with an escape pod nose-down inside it. A skid trench
+runs back from it, away across your path, with wreckage along it and past the
+rim. If you only wander, it appears anyway after about 140 units. The ground
+it changes is always off screen, so you never see it pop in: you see its smoke
+first, then the crater. The first time the creature comes near, a low sound
+swells and it turns its head to look.
 
 - **Animated:** the emergency beacon blinks (sometimes twice, sometimes not at
   all). The hatch door swings in the gusts and knocks against the hull. Sparks
@@ -60,8 +62,11 @@ turns its head to look.
   cools, spark crackles, hinge creaks and metal clanks. All of it gets louder
   and clearer as you walk closer, and pans with the pod's position.
 - **Code:** the trench and crater are part of the terrain height (CPU and GPU,
-  `src/world/crater.ts`). The pod, wreckage, animation and sound are in
-  `src/world/crashSite.ts`. The pod blocks the creature; flat scraps do not.
+  `src/world/crater.ts`, placed at run time through shader uniforms). When it
+  appears is decided in `src/story/SiteSpawner.ts`; the pod, wreckage,
+  animation and sound are in `src/world/crashSite.ts`. The pod blocks the
+  creature; flat scraps do not. With `?debug`, `__akrida.spawnSite()` places it
+  ahead at once.
 
 ## Stamina
 

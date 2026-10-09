@@ -208,6 +208,11 @@ export class Rocks {
   /** Fixed obstacles (the pod, big wreckage) that always collide. */
   private readonly statics: RockInfo[] = [];
 
+  /** Re-place rocks on the next update (after the terrain or exclusions change). */
+  refresh() {
+    this.lastCx = Number.NaN;
+  }
+
   addStatic(info: RockInfo) {
     this.statics.push(info);
     this.nearby.push(info);

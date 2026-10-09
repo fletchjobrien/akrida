@@ -12,6 +12,8 @@ import { Input } from './core/input';
 import { clamp, DynVec3, saturate } from './core/math';
 import { WakeUp } from './story/WakeUp';
 import { CrashSite } from './world/crashSite';
+import { CRATER_REACH, craterHeight, SITE, siteMask } from './world/crater';
+import { SiteSpawner } from './story/SiteSpawner';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const pr = new PixelRenderer(canvas);
@@ -38,9 +40,51 @@ scene.add(creature.rig.root);
 
 const wind = new Wind();
 const audio = new AudioEngine();
-// the wreck at the end of the skid trench that starts near where the creature wakes
-const site = new CrashSite(rocks, dust, audio);
-scene.add(site.group);
+// the wreck turns up ahead of the player once they have wandered and held a heading
+let site: CrashSite | null = null;
+const spawner = new SiteSpawner();
+
+/** Put the crash site just out of sight in the direction of travel. */
+function spawnSite() {
+  spawner.done = true;
+  const h = spawner.heading;
+  // how far the visible ground reaches along the heading: trace the screen's edge onto the terrain
+  let reach = 0;
+  const edgePoint = new Vector3();
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  for (let i = 0; i <= 16; i++) {
+    const u = i / 16;
+    for (const [sx, sy] of [
+      [u * W, 0],
+      [u * W, H],
+      [0, u * H],
+      [W, u * H],
+    ]) {
+      pr.screenToGround(sx, sy, terrainHeight, edgePoint);
+      reach = Math.max(reach, (edgePoint.x - creature.pos.x) * h.x + (edgePoint.z - creature.pos.z) * h.y);
+    }
+  }
+  reach += 2.5; // the camera keeps drifting ahead a little
+  // the crater sits just past that, so nothing on screen changes when it appears
+  const d = reach + CRATER_REACH + 0.8;
+  const cx = creature.pos.x + h.x * d;
+  const cz = creature.pos.z + h.y * d;
+  // it skidded in from further off, across the line of travel toward the player
+  const turn = (Math.random() < 0.5 ? -1 : 1) * (1.85 + Math.random() * 0.45);
+  const dx = h.x * Math.cos(turn) - h.y * Math.sin(turn);
+  const dz = h.x * Math.sin(turn) + h.y * Math.cos(turn);
+  SITE.x = cx;
+  SITE.z = cz;
+  SITE.dx = dx;
+  SITE.dz = dz;
+  SITE.on = true;
+  shared.uSite.value.set(SITE.x, SITE.z, dx, dz);
+  shared.uSiteOn.value = 1;
+  rocks.refresh();
+  site = new CrashSite(rocks, dust, audio);
+  scene.add(site.group);
+}
 /** Seconds left of the creature staring at the wreck when it first sees it. */
 let noticeTime = 0;
 const input = new Input(canvas);
@@ -118,10 +162,10 @@ function update(dt: number, now: number) {
   if (noticeTime > 0) {
     // the first sight of the wreck turns the head, whatever the mouse is doing
     noticeTime -= dt;
-    look = lookPoint.copy(site.lookPoint);
+    look = lookPoint.copy(site!.lookPoint);
   } else if (input.hasMouse && mouseIdle < 7000) {
     look = lookPoint.copy(mouseGround);
-  } else if (site.distance < 16) {
+  } else if (site && site.distance < 16) {
     look = lookPoint.copy(site.lookPoint);
   } else if (creature.speed < 0.2) {
     // nobody is steering the gaze: glance around the desert now and then
@@ -181,8 +225,9 @@ function update(dt: number, now: number) {
 
 /** Camera, streamed world, particles and sound: shared by play and the opening. */
 function finishFrame(dt: number, target: Vector3) {
-  site.update(dt, elapsed, wind, creature.pos);
-  if (site.justDiscovered && !wake.active) {
+  if (!wake.active && spawner.update(dt, creature.vel.x, creature.vel.z)) spawnSite();
+  site?.update(dt, elapsed, wind, creature.pos);
+  if (site?.justDiscovered && !wake.active) {
     audio.stinger();
     noticeTime = 2.8;
   }
@@ -234,7 +279,12 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     input,
     audio,
     wake,
-    site,
+    get site() {
+      return site;
+    },
+    spawner,
+    spawnSite,
+    crater: { craterHeight, siteMask },
     dustCount: () => dust.count,
     fx(on: boolean) {
       fxOff = !on;
