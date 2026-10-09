@@ -65,7 +65,7 @@ float cloudField(vec2 xz) {
 }
 float cloudShadowAt(vec2 xz, float dither) {
   float c = cloudField(xz);
-  return step(uCloudCover + (dither - 0.5) * 0.025, c);
+  return step(uCloudCover + (dither - 0.5) * 0.008, c);
 }
 `;
 

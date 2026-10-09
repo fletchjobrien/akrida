@@ -31,6 +31,7 @@ export class Input {
   private gestureHandlers: (() => void)[] = [];
   private wheelHandlers: ((dir: number) => void)[] = [];
   private readonly moveVec = new Vector2();
+  private lastWheel = 0;
 
   constructor(el: HTMLElement) {
     window.addEventListener('keydown', this.onKeyDown, { capture: true });
@@ -54,8 +55,11 @@ export class Input {
       'wheel',
       (e) => {
         e.preventDefault();
-        if (Math.abs(e.deltaY) < 1) return;
-        for (const h of this.wheelHandlers) h(e.deltaY > 0 ? -1 : 1);
+        const now = performance.now();
+        if (Math.abs(e.deltaY) < 1 || now - this.lastWheel < 180) return;
+        this.lastWheel = now;
+        // wheel up zooms in
+        for (const h of this.wheelHandlers) h(e.deltaY < 0 ? -1 : 1);
       },
       { passive: false },
     );

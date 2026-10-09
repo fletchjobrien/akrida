@@ -111,7 +111,7 @@ export class Creature {
 
   private readonly groundDyn = new Dyn(5, 1, 0);
   private readonly pelvisDyn = new Dyn(5.5, 0.55, 0);
-  private readonly leanDyn = new Dyn(1.7, 0.42, 0);
+  private readonly leanDyn = new Dyn(2.6, 0.5, 0);
   private readonly bankDyn = new Dyn(2.2, 0.6, 0);
   private readonly lookYawDyn = new Dyn(2.6, 0.78, 0);
   private readonly lookPitchDyn = new Dyn(2.2, 0.8, 0);
@@ -163,6 +163,11 @@ export class Creature {
 
   get speed() {
     return Math.hypot(this.vel.x, this.vel.z);
+  }
+
+  /** 0..1, how hard the creature is digging in to stop. */
+  get skid() {
+    return saturate((-this.accelFwd - 4) / 8) * saturate((this.speed - 1) / 3);
   }
 
   get running() {
@@ -488,7 +493,7 @@ export class Creature {
         ? (world.height(this.pos.x + (this.vel.x / speed) * 0.5, this.pos.z + (this.vel.z / speed) * 0.5) - this.pos.y) / 0.5
         : 0;
     const leanTarget =
-      speed * 0.035 + run * 0.13 + clamp(this.accelFwd, -8, 8) * 0.03 + crouch * 0.27 + clamp(slopeAhead, -0.5, 0.6) * 0.25;
+      speed * 0.035 + run * 0.13 + clamp(this.accelFwd, -7, 7) * 0.02 + crouch * 0.27 + clamp(slopeAhead, -0.5, 0.6) * 0.25;
     const lean = this.leanDyn.update(dt, leanTarget);
     const bank = this.bankDyn.update(dt, clamp(-this.yawRate * speed * 0.045, -0.35, 0.35));
 

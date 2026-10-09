@@ -340,6 +340,24 @@ export class AudioEngine {
     this.breathFilter.frequency.setTargetAtTime(b < 0 ? 850 : 1500, now, 0.06);
   }
 
+  /** A long scrape of hooves digging into the sand. */
+  scuff(amount: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.sprays[Math.floor(Math.random() * this.sprays.length)];
+    src.playbackRate.value = 0.55 + Math.random() * 0.15;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2600;
+    const g = ctx.createGain();
+    g.gain.value = 0.35 * amount;
+    src.connect(lp).connect(g).connect(this.master);
+    g.connect(this.reverbSend);
+    src.start(now);
+  }
+
   step(ev: StepEvent) {
     const ctx = this.ctx;
     if (!ctx) return;
@@ -355,7 +373,7 @@ export class AudioEngine {
     lp.type = 'lowpass';
     lp.frequency.value = lerp(lerp(3800, 7000, ev.run), 1500, ev.crouch);
     const gain = ctx.createGain();
-    const loud = ev.scuff ? 0.18 : clamp(0.22 + ev.speed * 0.09, 0.2, 0.75) * lerp(1, 0.45, ev.crouch);
+    const loud = ev.scuff ? 0.11 : clamp(0.22 + ev.speed * 0.09, 0.2, 0.75) * lerp(1, 0.45, ev.crouch);
     gain.gain.value = loud * (0.85 + Math.random() * 0.3);
     const pan = ctx.createStereoPanner();
     pan.pan.value = ev.side * 0.12;

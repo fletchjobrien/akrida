@@ -47,6 +47,7 @@ const mouseGround = new Vector3();
 const lookPoint = new Vector3();
 const wanderPoint = new Vector3();
 let wanderTimer = 0;
+let skidSound = 0;
 const control: CreatureInput = { move: new Vector2(), sprint: false, crouch: false, look: null };
 
 const bootTime = performance.now();
@@ -107,6 +108,18 @@ function update(dt: number, now: number) {
     const amount = Math.round(ev.run * 7 + (ev.speed > 1.5 ? 1 : 0) + (ev.scuff ? 1 : 0));
     if (amount > 0) dust.kick(ev.x, ev.y, ev.z, creature.vel.x / sp, creature.vel.z / sp, amount, 0.4 + ev.run);
     audio.step(ev);
+  }
+
+  // digging in hard to stop throws sand forward
+  const skid = creature.skid;
+  if (skid > 0 && Math.random() < skid * dt * 40) {
+    const sp = Math.max(creature.speed, 0.001);
+    dust.kick(creature.pos.x, creature.pos.y, creature.pos.z, -creature.vel.x / sp, -creature.vel.z / sp, 2, 0.6 + skid);
+  }
+  skidSound = Math.max(0, skidSound - dt);
+  if (skid > 0.35 && skidSound === 0) {
+    audio.scuff(skid);
+    skidSound = 0.5;
   }
 
   rocks.update(creature.pos.x, creature.pos.z);
