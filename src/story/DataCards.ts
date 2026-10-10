@@ -11,18 +11,18 @@ import type { AudioEngine } from '../audio/AudioEngine';
 
 /** The cards' colours: red, green and blue first (the three the reader takes), then the rest. */
 const COLORS: [string, number][] = [
-  ['red', 0xd02828],
-  ['green', 0x30b040],
-  ['blue', 0x2860d8],
-  ['yellow', 0xe8c030],
-  ['orange', 0xe07828],
-  ['purple', 0x7a40c0],
-  ['magenta', 0xd040a0],
-  ['cyan', 0x40c0d0],
-  ['white', 0xd8d6cc],
-  ['grey', 0x6a6a6a],
+  ['red', 0xa23a32],
+  ['green', 0x4a8646],
+  ['blue', 0x3c5c96],
+  ['yellow', 0xb0983e],
+  ['orange', 0xa86a36],
+  ['purple', 0x684c86],
+  ['magenta', 0x904a78],
+  ['cyan', 0x4a8a8e],
+  ['white', 0xb4b0a4],
+  ['grey', 0x5c5c5c],
   ['black', 0x2a2a2e],
-  ['brown', 0x7a5232],
+  ['brown', 0x684a34],
 ];
 
 type CardState = 'lying' | 'rising' | 'held' | 'falling' | 'slotting' | 'slot' | 'rejecting' | 'returning';
@@ -90,7 +90,7 @@ export class DataCards {
     const t = (c: number) => {
       const k = rgb(c);
       const hex = (v: Vector3, f: number) => (Math.min(255, Math.round(v.x * f * 255)) << 16) | (Math.min(255, Math.round(v.y * f * 255)) << 8) | Math.min(255, Math.round(v.z * f * 255));
-      return toonMaterial({ dark: hex(k, 0.55), mid: hex(k, 0.85), light: hex(k, 1.12), litAt: 0.5, midAt: -0.1, outline: 0.6, highlight: 0.8 });
+      return toonMaterial({ dark: hex(k, 0.6), mid: hex(k, 0.88), light: hex(k, 1.04), litAt: 0.5, midAt: -0.1, outline: 0.6, highlight: 0.6 });
     };
     const shutter = toonMaterial({ dark: 0x5a5c60, mid: 0x9a9ca0, light: 0xd8dade, litAt: 0.5, outline: 0.5, highlight: 1 });
     const label = toonMaterial({ dark: 0x9a968a, mid: 0xd0ccbe, light: 0xf0ece0, litAt: 0.5, outline: 0.3, highlight: 0.2 });
