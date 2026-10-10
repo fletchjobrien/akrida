@@ -1,13 +1,15 @@
 import { AddEquation, CustomBlending, GLSL3, Mesh, OneFactor, PlaneGeometry, ShaderMaterial, Vector3 } from 'three';
-import { shared } from './shared';
+import { ROOM_GLSL, shared } from './shared';
 
 const GLOW_VERT = /* glsl */ `
 uniform float uSize;
 uniform float uLift;
 uniform float uFlat;
 out vec2 vUv;
+out vec3 vWorld;
 void main() {
   vUv = uv * 2.0 - 1.0;
+  vWorld = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
   if (uFlat > 0.5) {
     // a pool of light lying on the ground
     vec4 wp = modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
@@ -31,7 +33,9 @@ uniform vec3 uColor;
 uniform float uStrength;
 uniform float uCore;
 uniform vec2 uCamTexel;
+${ROOM_GLSL}
 in vec2 vUv;
+in vec3 vWorld;
 float bayer4(vec2 p) {
   ivec2 i = ivec2(mod(p, 4.0));
   int idx = i.x + i.y * 4;
@@ -41,7 +45,7 @@ float bayer4(vec2 p) {
 }
 void main() {
   float r = length(vUv);
-  if (r >= 1.0) discard;
+  if (r >= 1.0 || outsideRoom(vWorld)) discard;
   float fall = 1.0 - r;
   float v = uStrength * (fall * fall * 0.75 + uCore * smoothstep(0.32, 0.0, r));
   // a few hard steps, dithered between, so the light reads as pixel art
@@ -68,6 +72,8 @@ export class Glow extends Mesh<PlaneGeometry, ShaderMaterial> {
         uLift: { value: opts.lift ?? 0.15 },
         uFlat: { value: opts.flat ? 1 : 0 },
         uCamTexel: shared.uCamTexel,
+        uRoomInv: shared.uRoomInv,
+        uRoomOn: shared.uRoomOn,
       },
       vertexShader: GLOW_VERT,
       fragmentShader: GLOW_FRAG,

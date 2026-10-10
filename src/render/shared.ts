@@ -52,6 +52,28 @@ export const shared = {
   uRoomOn: { value: 0 },
 };
 
+/**
+ * While the creature is inside the research station (`uRoomOn`), nothing
+ * outside its rooms can be seen: `outsideRoom` tells the shaders what to
+ * black out. The rooms are the habitat, the tube and the lab, in the
+ * habitat's frame (`uRoomInv` maps the world into it); see
+ * world/stationInterior.ts.
+ */
+export const ROOM_GLSL = /* glsl */ `
+uniform mat4 uRoomInv;
+uniform float uRoomOn;
+const vec3 ROOM_BLACK = vec3(0.028, 0.024, 0.03);
+bool outsideRoom(vec3 wp) {
+  if (uRoomOn < 0.5) return false;
+  vec3 l = (uRoomInv * vec4(wp, 1.0)).xyz;
+  if (l.y > 3.0) return true;
+  bool hab = abs(l.x) < 5.68 && l.z > -2.42 && l.z < 2.35;
+  bool tube = l.x > 5.2 && l.x < 6.4 && l.z > -0.62 && l.z < 1.02;
+  bool lab = length(l.xz - vec2(8.4, 0.4)) < 2.8;
+  return !(hab || tube || lab);
+}
+`;
+
 export const LIGHTING_GLSL = /* glsl */ `
 uniform vec3 uSunDir;
 uniform sampler2D uShadowMap;
@@ -65,17 +87,14 @@ uniform float uWindStrength;
 uniform float uWindTravel;
 uniform vec2 uPixelWorld;
 uniform vec4 uRoomLight[5];
-uniform mat4 uRoomInv;
-uniform float uRoomOn;
+${ROOM_GLSL}
 
 ${NOISE_GLSL}
 
 // The station's lamps, inside its walls only: a soft fall-off, wrapped a
 // little round the surfaces they light.
 float roomLight(vec3 wp, vec3 n) {
-  if (uRoomOn < 0.5) return 0.0;
-  vec3 lp = (uRoomInv * vec4(wp, 1.0)).xyz;
-  if (lp.x < -5.7 || lp.x > 11.2 || lp.z < -2.6 || lp.z > 3.1 || lp.y > 3.8 || lp.y < -0.5) return 0.0;
+  if (uRoomOn < 0.5 || outsideRoom(wp)) return 0.0;
   float l = 0.0;
   for (int i = 0; i < 5; i++) {
     vec3 d = uRoomLight[i].xyz - wp;
@@ -177,6 +196,11 @@ void main() {
   outColor = vec4(col, 1.0);
   vec3 vn = normalize(vViewNormal);
   outInfo = vec4(vn.xy * 0.5 + 0.5, uOutline, uHighlight);
+  // indoors, the world outside the walls is not seen
+  if (outsideRoom(vWorldPos)) {
+    outColor = vec4(ROOM_BLACK, 1.0);
+    outInfo = vec4(0.5, 1.0, 0.0, 0.0);
+  }
 }
 `;
 

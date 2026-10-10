@@ -105,6 +105,91 @@ function stepBuffer(ctx: BaseAudioContext, seed: number, heavy: number): Buf {
   return buf;
 }
 
+/**
+ * A hoof coming down on a steel deck plate, by modal synthesis: a hard
+ * contact click drives a bank of damped, inharmonic plate modes (a dull
+ * clank, not a bell), with the hollow thump of the space under the deck, a
+ * couple of small rattles as the loose plate settles, and a little grit
+ * crunched underfoot.
+ */
+function metalStepBuffer(ctx: BaseAudioContext, seed: number, heavy: number): Buf {
+  const sr = ctx.sampleRate;
+  const dur = 0.42;
+  const len = Math.floor(sr * dur);
+  const buf = ctx.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  const r = rng(seed * 4513 + 11);
+  // the excitation: the hoof's hard contact, then the plate rattling back down on its frame
+  const ex = new Float32Array(len);
+  const hit = (at: number, amp: number, width: number) => {
+    const i0 = Math.floor(at * sr);
+    const w = Math.max(2, Math.floor(width * sr));
+    for (let i = 0; i < w && i0 + i < len; i++) ex[i0 + i] += Math.sin((Math.PI * i) / w) * amp;
+    // a short burst of noise with it: the hoof's edge skidding a hair on the plate
+    const n = Math.floor(sr * (0.004 + heavy * 0.002));
+    for (let i = 0; i < n && i0 + i < len; i++) ex[i0 + i] += (r() * 2 - 1) * amp * 0.5 * Math.exp((-i / n) * 4);
+  };
+  hit(0.002, 1, 0.0012 + heavy * 0.0008);
+  const rattles = 1 + Math.floor(r() * 3);
+  for (let k = 0; k < rattles; k++) hit(0.016 + r() * 0.03 + k * 0.012, 0.12 + r() * 0.18, 0.0006);
+  // the plate's modes, crowded and out of tune with one another, the high ones dying fast
+  const f0 = 170 + r() * 90 - heavy * 25;
+  const modes = 22;
+  const out = new Float32Array(len);
+  for (let k = 0; k < modes; k++) {
+    const f = f0 * Math.pow(1 + k * 0.72 + r() * 0.45, 1.28);
+    if (f > sr * 0.45) break;
+    const tau = (0.07 + heavy * 0.025) * Math.pow(f0 / f, 0.55) * (0.6 + r() * 0.8) + 0.006;
+    const amp = (0.6 + r() * 0.8) / (1 + k * 0.28);
+    const rr = Math.exp(-1 / (tau * sr));
+    const c = 2 * rr * Math.cos((2 * Math.PI * f) / sr);
+    const r2 = rr * rr;
+    let y1 = 0;
+    let y2 = 0;
+    const norm = 1 - rr;
+    for (let i = 0; i < len; i++) {
+      const y = c * y1 - r2 * y2 + ex[i] * norm;
+      y2 = y1;
+      y1 = y;
+      out[i] += y * amp;
+    }
+  }
+  // the hollow under the deck: a low, quick boom
+  {
+    const f = 80 + r() * 35;
+    const rr = Math.exp(-1 / ((0.035 + heavy * 0.015) * sr));
+    const c = 2 * rr * Math.cos((2 * Math.PI * f) / sr);
+    let y1 = 0;
+    let y2 = 0;
+    for (let i = 0; i < len; i++) {
+      const y = c * y1 - rr * rr * y2 + ex[i] * (1 - rr);
+      y2 = y1;
+      y1 = y;
+      out[i] += y * (2.2 + heavy);
+    }
+  }
+  // grit crunched between hoof and plate
+  for (let t = 0.002; t < 0.035; t += 0.0015 + r() * 0.004) {
+    const i0 = Math.floor(t * sr);
+    const n = Math.floor(sr * 0.0004);
+    const a = 0.05 * Math.exp(-t / 0.015) * r();
+    for (let i = 0; i < n && i0 + i < len; i++) out[i0 + i] += (r() * 2 - 1) * a;
+  }
+  // a gentle top cut, a fade at the end, and level
+  let lp = 0;
+  const lpA = 1 - Math.exp((-2 * Math.PI * 6500) / sr);
+  let peak = 0;
+  for (let i = 0; i < len; i++) {
+    lp += (out[i] - lp) * lpA;
+    const fade = i > len - sr * 0.05 ? (len - i) / (sr * 0.05) : 1;
+    d[i] = lp * fade;
+    peak = Math.max(peak, Math.abs(d[i]));
+  }
+  const g = 0.9 / (peak || 1);
+  for (let i = 0; i < len; i++) d[i] *= g;
+  return buf;
+}
+
 /** Sand sprayed by a running hoof: a short hiss with a scattered tail. */
 function sprayBuffer(ctx: BaseAudioContext, seed: number): Buf {
   const sr = ctx.sampleRate;
@@ -394,6 +479,8 @@ export class AudioEngine {
   private reverbSend!: GainNode;
   private steps: Buf[] = [];
   private heavySteps: Buf[] = [];
+  private metalSteps: Buf[] = [];
+  private heavyMetalSteps: Buf[] = [];
   private sprays: Buf[] = [];
   private gasps: Buf[] = [];
   private pours: Buf[] = [];
@@ -539,6 +626,8 @@ export class AudioEngine {
       ...Array.from({ length: 10 }, (_, i) => () => this.steps.push(stepBuffer(ctx, i, 0))),
       ...[0, 1, 2].map((i) => () => this.pours.push(pourBuffer(ctx, i))),
       ...Array.from({ length: 8 }, (_, i) => () => this.heavySteps.push(stepBuffer(ctx, 100 + i, 1))),
+      ...Array.from({ length: 10 }, (_, i) => () => this.metalSteps.push(metalStepBuffer(ctx, i, 0))),
+      ...Array.from({ length: 8 }, (_, i) => () => this.heavyMetalSteps.push(metalStepBuffer(ctx, 200 + i, 1))),
       ...Array.from({ length: 6 }, (_, i) => () => this.sprays.push(sprayBuffer(ctx, i))),
       ...Array.from({ length: 6 }, (_, i) => () => this.ticks.push(tickBuffer(ctx, i))),
       ...[0, 1, 2].map((i) => () => this.crackles.push(crackleBuffer(ctx, i))),
@@ -1924,47 +2013,34 @@ export class AudioEngine {
     }
   }
 
-  /** A hoof on the metal deck: a dull knock, a hollow ring under it, and the room's slap. */
+  /** A hoof on the metal deck, with the room's slap off its walls. */
   private metalStep(ev: StepEvent) {
     const ctx = this.ctx!;
+    const heavy = ev.run > 0.5;
+    const bank = heavy && this.heavyMetalSteps.length ? this.heavyMetalSteps : this.metalSteps;
+    if (!bank.length) return;
     const now = ctx.currentTime;
     const r = this.roomBus();
-    const pace = 0.2 + Math.min(ev.speed, 2.5) * 0.08;
-    const loud = (ev.scuff ? 0.08 : pace) * lerp(1, 0.4, ev.crouch) * (0.85 + Math.random() * 0.3);
+    const src = ctx.createBufferSource();
+    src.buffer = bank[Math.floor(Math.random() * bank.length)];
+    src.playbackRate.value = (0.94 + Math.random() * 0.12) * lerp(1, 0.9, ev.crouch);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    // soft-footed when crouching, sharper at a run
+    lp.frequency.value = lerp(lerp(5200, 7000, ev.run), 1400, ev.crouch);
+    const g = ctx.createGain();
+    const pace = 0.2 + Math.min(ev.speed, 2.5) * 0.07;
+    g.gain.value = (ev.scuff ? 0.07 : pace) * lerp(1, 0.4, ev.crouch) * (0.85 + Math.random() * 0.3);
     const p = ctx.createStereoPanner();
     p.pan.value = ev.side * 0.12;
+    src.connect(lp).connect(g).connect(p);
     p.connect(this.master);
-    if (r) p.connect(r.echo);
-    // the knock
-    if (this.white) {
-      const src = ctx.createBufferSource();
-      src.buffer = this.white;
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = 1300 + Math.random() * 500 + ev.run * 500;
-      bp.Q.value = 1.4;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(loud * 1.6, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
-      src.connect(bp).connect(g).connect(p);
-      src.start(now, Math.random(), 0.08);
+    if (r) {
+      const send = ctx.createGain();
+      send.gain.value = 0.55;
+      p.connect(send).connect(r.echo);
     }
-    // the deck plate rings, hollow over the space beneath
-    for (const [f, d, a] of [
-      [140 + Math.random() * 20, 0.12, 0.9],
-      [610 + Math.random() * 60, 0.09, 0.25],
-      [1730 + Math.random() * 90, 0.05, 0.1],
-    ]) {
-      const o = ctx.createOscillator();
-      o.frequency.value = f;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.exponentialRampToValueAtTime(loud * a, now + 0.004);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + d);
-      o.connect(g).connect(p);
-      o.start(now);
-      o.stop(now + d + 0.02);
-    }
+    src.start(now);
   }
 
   private droneBus() {

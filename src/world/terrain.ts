@@ -277,6 +277,11 @@ void main() {
 
   outColor = vec4(col, 1.0);
   outInfo = info;
+  // indoors no ground is seen: the deck covers all of it inside the walls
+  if (uRoomOn > 0.5) {
+    outColor = vec4(ROOM_BLACK, 1.0);
+    outInfo = vec4(0.5, 1.0, 0.0, 0.0);
+  }
 }
 `;
 
