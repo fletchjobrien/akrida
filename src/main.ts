@@ -747,7 +747,7 @@ function finishFrame(dt: number, target: Vector3) {
   const eD = sm(doorScene?.weight ?? 0);
   const eK = sm(Math.max(pickup?.weight ?? 0, peek?.weight ?? 0));
   const eH = tracker?.carried ? sm(saturate(creature.holdDyn.y)) : 0;
-  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 1.9 * eP) * (1 + 0.4 * eD) * (1 + 0.45 * eK) * (1 + 0.6 * eH) * debugZoom;
+  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 3.1 * eP) * (1 + 0.4 * eD) * (1 + 0.45 * eK) * (1 + 0.6 * eH) * debugZoom;
   audio.duck(1 - 0.45 * eS - 0.3 * eP - 0.2 * eD - 0.15 * eK - 0.3 * eH);
   const focus = camDyn.update(dt, debugFocus ?? target);
   // a blast at the ship shakes the ground

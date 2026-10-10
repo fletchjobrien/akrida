@@ -17,8 +17,8 @@ low resolution so that it looks like hand-made 2D pixel art.
 | Double-click | Fullscreen |
 
 The game shows no UI. A small pixel cursor shows when you move the mouse and
-hides when the mouse stops. Over something you can use, the cursor turns pale
-blue, and four corner brackets close round it and slowly breathe in and out.
+hides when the mouse stops. Over something you can use, the cursor takes on a
+pale blue tint, with a faint dot at each corner.
 
 **Click to use.** Click anything you can use, from up to 30 units away. Your
 creature walks over to it and starts: the escape pods, the stranger, the

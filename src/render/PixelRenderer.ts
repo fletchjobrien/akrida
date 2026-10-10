@@ -82,14 +82,6 @@ uniform float uDepthRange;
 uniform vec2 uCursor;
 uniform float uCursorAlpha;
 uniform float uCursorGlow;
-uniform float uCursorTime;
-
-// Corner brackets of a square of radius r round the cursor, two pixels to a side.
-bool bracket(ivec2 d, int r) {
-  int ax = abs(d.x);
-  int ay = abs(d.y);
-  return (ax == r && ay >= r - 2 && ay <= r) || (ay == r && ax >= r - 2 && ax <= r);
-}
 uniform float uDark;
 uniform float uBlur;
 uniform float uGhost;
@@ -171,23 +163,19 @@ void main() {
   }
 
   // Pixel cursor: a small plus that fades out when the mouse rests. Over
-  // something that can be used, it lights up pale blue and four corner
-  // brackets close round it, breathing slowly in and out.
+  // something that can be used, it takes on a pale blue tint, with a faint
+  // dot at each corner.
   if (uCursorAlpha > 0.0) {
     ivec2 cp = ivec2(floor(uCursor));
     ivec2 dd = p - cp;
     int ad = abs(dd.x) + abs(dd.y);
-    bool use = uCursorGlow > 0.5;
-    bool arm = (dd.x == 0 || dd.y == 0) && ad <= (use ? 3 : 2);
+    bool arm = (dd.x == 0 || dd.y == 0) && ad <= 2;
     if (arm) {
-      vec3 cc = ad == 0 ? (use ? ${glslRgb(0xffffff)} : ${glslRgb(PALETTE.sandHi)})
-                        : (use ? ${glslRgb(0x7cc4ff)} : ${glslRgb(PALETTE.furDark)});
+      vec3 cc = ad == 0 ? mix(${glslRgb(PALETTE.sandHi)}, ${glslRgb(0xe6f6ff)}, uCursorGlow)
+                        : mix(${glslRgb(PALETTE.furDark)}, ${glslRgb(0x3a5878)}, uCursorGlow);
       col = mix(col, cc, uCursorAlpha);
-    } else if (use) {
-      int r = 5 + int(floor(0.5 + 0.5 * sin(uCursorTime * 5.0)));
-      if (bracket(dd, r)) col = mix(col, ${glslRgb(0xd8f0ff)}, uCursorAlpha);
-      // a dark edge under them, so they read on bright sand
-      else if (bracket(dd - ivec2(1, -1), r) || bracket(dd + ivec2(0, 1), r)) col = mix(col, ${glslRgb(0x24303e)}, uCursorAlpha * 0.85);
+    } else if (uCursorGlow > 0.5 && abs(dd.x) == 2 && abs(dd.y) == 2) {
+      col = mix(col, ${glslRgb(0xbfe4ff)}, uCursorAlpha * 0.55);
     }
   }
 
@@ -309,7 +297,6 @@ export class PixelRenderer {
         uCursor: { value: new Vector2() },
         uCursorAlpha: { value: 0 },
         uCursorGlow: { value: 0 },
-        uCursorTime: { value: 0 },
         uDark: { value: 1 },
         uBlur: { value: 0 },
         uGhost: { value: 0 },
@@ -547,7 +534,6 @@ export class PixelRenderer {
     this.screenToLow(this.cursorScreen.x, this.cursorScreen.y, pu.uCursor.value);
     pu.uCursorAlpha.value = this.cursorAlpha;
     pu.uCursorGlow.value = this.cursorGlow;
-    pu.uCursorTime.value = performance.now() / 1000;
     pu.uDark.value = this.dark;
     pu.uBlur.value = this.blur;
     pu.uGhost.value = this.ghost;
