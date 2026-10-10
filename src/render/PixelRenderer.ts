@@ -163,8 +163,7 @@ void main() {
   }
 
   // Pixel cursor: a small plus that fades out when the mouse rests. Over
-  // something that can be used, it takes on a pale blue tint, with a faint
-  // dot at each corner.
+  // something that can be used, it turns light blue.
   if (uCursorAlpha > 0.0) {
     ivec2 cp = ivec2(floor(uCursor));
     ivec2 dd = p - cp;
@@ -172,10 +171,8 @@ void main() {
     bool arm = (dd.x == 0 || dd.y == 0) && ad <= 2;
     if (arm) {
       vec3 cc = ad == 0 ? mix(${glslRgb(PALETTE.sandHi)}, ${glslRgb(0xe6f6ff)}, uCursorGlow)
-                        : mix(${glslRgb(PALETTE.furDark)}, ${glslRgb(0x3a5878)}, uCursorGlow);
+                        : mix(${glslRgb(PALETTE.furDark)}, ${glslRgb(0x8ccaf2)}, uCursorGlow);
       col = mix(col, cc, uCursorAlpha);
-    } else if (uCursorGlow > 0.5 && abs(dd.x) == 2 && abs(dd.y) == 2) {
-      col = mix(col, ${glslRgb(0xbfe4ff)}, uCursorAlpha * 0.55);
     }
   }
 
