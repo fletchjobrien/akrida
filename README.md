@@ -198,6 +198,12 @@ swell plays and the creature turns to look.
 - **Damage:**
   - its back is broken: the bow half is bent down and aside, with frame rings,
     hanging cables and fire in the gap;
+  - four laser hits run along the flank facing you, from one strafing pass
+    before the crash. Each is a small black pit melted into the plating, with a
+    lip of slag round it. Round that, the plating is burned black, then
+    charred, then stained grey with smoke. Soot streaks splash out from each
+    hit, and runs of molten metal have dripped down the flank. Two of the rims
+    still glow a dull orange that brightens and fades;
   - three hull breaches have plating peeled outward and soot blown over the
     hull;
   - more blast scars mark the hull;

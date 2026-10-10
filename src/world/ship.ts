@@ -329,6 +329,8 @@ export class Ship {
   private readonly hull: Mats;
   private readonly flames: Flame[] = [];
   private readonly flameMats: ShaderMaterial[] = [];
+  /** The rims of laser hits that have not quite cooled: a dull glow that comes and goes. */
+  private readonly emberMats: { mat: ShaderMaterial; seed: number }[] = [];
   private readonly smokeFrom: { o: Object3D; rate: number; big: boolean; debt: number }[] = [];
   private readonly fireFrom: Object3D[] = [];
   private readonly sparkFrom: Object3D[] = [];
@@ -883,7 +885,6 @@ export class Ship {
     for (const [x, phi, s] of [
       [-6.6, 1.25, 1],
       [0.4, 0.2, 0.8],
-      [4.2, 1.35, 0.9],
       [-7.5, 0.55, 0.7],
       [8.6, 0.6, 0.6],
       [-3.8, -1.0, 0.9],
@@ -891,7 +892,80 @@ export class Ship {
       const sc = this.onHull(new IcosahedronGeometry(0.85 * s, 0), m.soot, x, phi * cs, -0.6 * s, x);
       sc.scale.set(1.8, 0.6, 1.1);
     }
+
+    this.buildLaserHits();
   }
+
+  /**
+   * Laser hits, from before the crash: four along the middle of the sloped
+   * upper flank facing the viewer, from one strafing pass (the break in its
+   * back and the portholes lie between them). Each is a small pit melted into the
+   * plating, a charred ring round it, a halo of soot with streaks splashed out
+   * from it, and runs of molten metal that dripped down the flank. Two still
+   * glow faintly at the rim.
+   */
+  private buildLaserHits() {
+    const m = this.hull;
+    const cs = this.cs;
+    const COOL = [0x3a1810, 0x6a2a14, 0x9a4418];
+    const smoke = toonMaterial({ dark: 0x5e5750, mid: 0x837b70, light: 0xa39b8e, litAt: 0.55, outline: 0, highlight: 0.3 });
+    const hits: [number, number, number, boolean][] = [
+      [-4.35, 1.01, 0.8, true],
+      [-2.35, 0.99, 0.68, false],
+      [4.55, 1.0, 0.7, true],
+      [6.35, 0.98, 0.55, false],
+    ];
+    hits.forEach(([x, phi0, s, warm], n) => {
+      const phi = phi0 * cs;
+      // the stations are about 2.4 wide: an offset along the surface, as an angle
+      const across = (d: number) => (d / 2.3) * cs;
+      // the burn on the plating, darkening toward the hit: smoke-stained, charred, sooted black
+      const disc = (r: number, mat: Material, lift: number, sides: number, spin: number) => {
+        const d = this.onHull(new CylinderGeometry(r, r * 1.08, 0.02, sides), mat, x, phi, lift, spin);
+        d.scale.set(1.2, 1, 0.95);
+        return d;
+      };
+      disc(0.72 * s, smoke, 0.002, 9, n * 1.3);
+      disc(0.52 * s, m.charred, 0.006, 8, n * 2.1);
+      disc(0.36 * s, m.soot, 0.01, 7, n * 0.7);
+      // soot splashed out from the hit in thin streaks
+      for (let k = 0; k < 6; k++) {
+        const a = n * 1.7 + k * ((Math.PI * 2) / 6) + Math.sin(k * 3.1 + n) * 0.35;
+        const r = (0.62 + 0.14 * Math.sin(k * 2.3 + n)) * s;
+        const len = (0.34 + 0.18 * Math.cos(k * 1.9 + n)) * s;
+        this.onHull(
+          new BoxGeometry(len, 0.02, 0.035 * s + 0.015),
+          k % 2 ? m.charred : smoke,
+          x + Math.cos(a) * r,
+          phi + across(Math.sin(a) * r * 0.8),
+          0.004,
+          -a,
+        );
+      }
+      // the charred ring, and the melted pit in it
+      this.onHull(new CylinderGeometry(0.16 * s, 0.2 * s, 0.03, 7), m.hole, x, phi, 0.016, n * 0.5);
+      // a lip of slag round the pit, still dully glowing on the warm ones
+      const rimMat = warm
+        ? toonMaterial({ dark: COOL[1], mid: COOL[1], light: COOL[1], unlit: true, outline: 0 })
+        : m.metal;
+      if (warm) this.emberMats.push({ mat: rimMat as ShaderMaterial, seed: n * 3.7 });
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2 + n;
+        const r = 0.2 * s;
+        this.onHull(new BoxGeometry(0.07 * s + 0.02, 0.03, 0.05), rimMat, x + Math.cos(a) * r, phi + across(Math.sin(a) * r), 0.022, -a);
+      }
+      // molten runs down the flank (toward the ground, away from the top)
+      for (let k = 0; k < 2 + (n % 2); k++) {
+        const dx = (k - 0.8) * 0.13 * s;
+        const len = (0.35 + 0.18 * ((k + n) % 3)) * s;
+        const run = this.onHull(new BoxGeometry(0.035, 0.02, len), m.charred, x + dx, phi + across(0.3 * s + len / 2), 0.012);
+        run.scale.x = 1 + 0.4 * (k % 2);
+      }
+    });
+    this.emberCool = COOL.map((c) => rgb(c));
+  }
+
+  private emberCool: Vector3[] = [];
 
   private flame(parent: Object3D, at: Vector3, size: number) {
     const mat = this.flameMats[this.flames.length % this.flameMats.length];
@@ -1201,6 +1275,12 @@ export class Ship {
       const ph = ((time / n.period + n.phase) % 1 + 1) % 1;
       const on = ph < 0.08 && noise1(time * 0.3, n.period) > -0.6;
       (n.mat.uniforms.uLight.value as Vector3).copy(on ? n.on : n.off);
+    }
+
+    // ---- the laser hits' rims glow dully, brightening and fading
+    for (const e of this.emberMats) {
+      const v = 0.5 + 0.5 * noise1(time * 0.35 + e.seed, e.seed) + this.flare * 0.4;
+      (e.mat.uniforms.uLight.value as Vector3).copy(this.emberCool[v > 0.72 ? 2 : v > 0.35 ? 1 : 0]);
     }
 
     // ---- flames lick and gutter; they flare with every blast
