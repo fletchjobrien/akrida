@@ -17,6 +17,8 @@ const STROBE_OFF = rgb(0x1a1c20);
 /** How long it stalks the creature before it locks on, and how long it holds the lock. */
 const STALK_TIME = 15;
 const LOCK_TIME = 2.4;
+/** The mark of those who sent it: a hollow red triangle, its point forward, and red bands on its arms. */
+const MARK_RED = { dark: 0x5e0a0a, mid: 0x9c1212, light: 0xd01c1c };
 
 function faceted(g: BufferGeometry) {
   const f = g.index ? g.toNonIndexed() : g;
@@ -63,6 +65,8 @@ export class Drone {
   private dartTimer = 2;
   private inspectTimer = 5;
   private inspecting = 0;
+  private diveSpeed = 0;
+  private lastDist = Infinity;
   private beepTimer = 0;
   private chirpTimer = 1;
   private lockFrom = new Vector3();
@@ -94,6 +98,12 @@ export class Drone {
     body.scale.set(1, 0.55, 1);
     add(F, new BoxGeometry(0.16, 0.05, 0.2), metal, 0, 0.045, -0.02);
     add(F, new BoxGeometry(0.1, 0.04, 0.12), hull, 0, -0.02, 0.17).rotation.x = 0.35;
+    // their mark on its back: a hollow red triangle pointing the way it flies
+    const red = toonMaterial({ ...MARK_RED, litAt: 0.5, midAt: -0.2, outline: 0.5, highlight: 0.3 });
+    const tri = add(F, new CylinderGeometry(0.1, 0.1, 0.012, 3), red, 0, 0.074, -0.01, false);
+    tri.rotation.y = Math.PI;
+    const hollow = add(F, new CylinderGeometry(0.045, 0.045, 0.014, 3), metal, 0, 0.076, -0.01, false);
+    hollow.rotation.y = Math.PI;
     // a whip antenna and the strobe that blinks on its tail
     add(F, new CylinderGeometry(0.006, 0.006, 0.22, 3), metal, -0.04, 0.14, -0.14, false).rotation.x = -0.35;
     add(F, new BoxGeometry(0.03, 0.02, 0.03), this.strobeMat, 0.04, 0.06, -0.16, false);
@@ -106,6 +116,8 @@ export class Drone {
     ]) {
       const arm = add(F, new BoxGeometry(0.035, 0.025, 0.3), hull, sx * 0.13, 0.01, sz * 0.13);
       arm.rotation.y = Math.atan2(sx, sz);
+      const bandMesh = add(F, new BoxGeometry(0.04, 0.03, 0.05), red, sx * 0.17, 0.012, sz * 0.17, false);
+      bandMesh.rotation.y = Math.atan2(sx, sz);
       const mx = sx * 0.24;
       const mz = sz * 0.24;
       add(F, new CylinderGeometry(0.035, 0.04, 0.07, 6), metal, mx, 0.03, mz);
@@ -191,9 +203,9 @@ export class Drone {
 
     if (this.phase === 'approach') {
       // straight in, high, then down toward it
-      this.want.set(chest.x - (dx / flat) * 4, chest.y + 2.4, chest.z - (dz / flat) * 4);
+      this.want.set(chest.x - (dx / flat) * 8, chest.y + 3.5, chest.z - (dz / flat) * 8);
       maxSpeed = 13;
-      if (flat < 6) {
+      if (flat < 11) {
         this.phase = 'stalk';
         this.t = 0;
       }
@@ -206,21 +218,22 @@ export class Drone {
         if (Math.random() < 0.3) this.orbitDir = -this.orbitDir;
       }
       this.orbit += dt * 0.35 * this.orbitDir;
-      const r = 3.2 + Math.sin(this.t * 0.7) * 0.9;
-      this.want.set(chest.x + Math.cos(this.orbit) * r, chest.y + 1.6 + Math.sin(this.t * 1.3) * 0.45, chest.z + Math.sin(this.orbit) * r);
+      // well off, watching, never letting it out of sight
+      const r = 8 + Math.sin(this.t * 0.5) * 1.5;
+      this.want.set(chest.x + Math.cos(this.orbit) * r, chest.y + 3 + Math.sin(this.t * 1.1) * 0.6, chest.z + Math.sin(this.orbit) * r);
       // keep up with it
       this.want.addScaledVector(cvel, 0.5);
       // closing in to study it: right up to its face, the eye flaring, the turret whirring
       this.inspectTimer -= dt;
       if (this.inspectTimer <= 0 && this.inspecting <= 0) {
-        this.inspecting = 1.6;
-        this.inspectTimer = 4 + Math.random() * 2.5;
+        this.inspecting = 2;
+        this.inspectTimer = 7 + Math.random() * 3;
         this.audio.droneChirp(this.level(listener) * 0.9);
       }
       if (this.inspecting > 0) {
         this.inspecting -= dt;
         const a = Math.atan2(-dz, -dx);
-        this.want.set(chest.x + Math.cos(a) * 1.25, chest.y + 0.35, chest.z + Math.sin(a) * 1.25);
+        this.want.set(chest.x + Math.cos(a) * 3.5, chest.y + 1.2, chest.z + Math.sin(a) * 3.5);
         eye = 0.9 + 0.1 * Math.sin(time * 30);
         maxAcc = 30;
       }
@@ -234,7 +247,7 @@ export class Drone {
         this.t = 0;
         this.inspecting = 0;
         // back and up, away from it
-        this.lockFrom.set(chest.x - (dx / flat) * 5.5, chest.y + 4.2, chest.z - (dz / flat) * 5.5);
+        this.lockFrom.set(chest.x - (dx / flat) * 9, chest.y + 5.5, chest.z - (dz / flat) * 9);
         this.audio.droneLock(this.level(listener));
       }
     } else if (this.phase === 'lock') {
@@ -251,29 +264,65 @@ export class Drone {
       if (this.t > LOCK_TIME) {
         this.phase = 'dive';
         this.t = 0;
+        this.diveSpeed = this.vel.length();
+        this.lastDist = Infinity;
         this.audio.droneDive(this.level(listener));
       }
     } else if (this.phase === 'dive') {
-      // straight at its chest, as hard as it can
-      this.want.copy(chest);
-      maxAcc = 70;
-      maxSpeed = 30;
+      this.dive(dt, chest, cvel, ground);
+      if (this.hit) return;
       eye = 1;
-      if (P.distanceTo(chest) < 0.5 || this.t > 3) {
-        this.hit = true;
-        this.hitAt.copy(P);
-        this.hitDir.copy(this.vel).normalize();
-        this.phase = 'idle';
-        this.root.visible = false;
-        this.laser.visible = false;
-        this.eyeGlow.strength = 0;
-        this.audio.setDrone(0, 0, 0, 0);
-        return;
-      }
     }
+    if (this.phase !== 'dive') this.hover(dt, maxAcc, maxSpeed, avoid, time, ground);
+    this.pose(dt, chest, eye, time, listener);
+  }
 
+  /**
+   * The dive: like a guided missile, not a hovering thing. It drops its nose
+   * and accelerates flat out along a line that leads the creature's movement,
+   * turning hard but never looping; its fuze goes off as it passes closest,
+   * or on the ground, never letting it fly by.
+   */
+  private dive(dt: number, chest: Vector3, cvel: Vector3, ground: number) {
+    const P = this.root.position;
+    this.diveSpeed = Math.min(26, this.diveSpeed + 55 * dt);
+    const d = P.distanceTo(chest);
+    // aim where it will be
+    const tti = Math.min(0.6, d / Math.max(this.diveSpeed, 4));
+    this.tmp.copy(chest).addScaledVector(cvel, tti).sub(P).normalize();
+    // turn toward it, fast, and faster the closer it gets
+    const cur = this.vel.lengthSq() > 0.01 ? this.vel.clone().normalize() : this.tmp.clone();
+    const ang = cur.angleTo(this.tmp);
+    const turn = (7 + 10 / Math.max(d, 1)) * dt;
+    if (ang > 1e-4) cur.lerp(this.tmp, Math.min(1, turn / ang)).normalize();
+    const prev = this.vel.clone();
+    this.vel.copy(cur).multiplyScalar(this.diveSpeed);
+    this.acc.subVectors(this.vel, prev).divideScalar(Math.max(dt, 1e-3)).addScaledVector(cur, 30);
+    P.addScaledVector(this.vel, dt);
+    const nd = P.distanceTo(chest);
+    const passing = nd > this.lastDist && nd < 2.2;
+    const grounded = P.y < ground + 0.12;
+    this.lastDist = nd;
+    if (nd < 0.7 || passing || grounded || this.t > 2.5) {
+      this.hit = true;
+      // it goes off at its closest to the creature
+      if (nd < 0.7) this.hitAt.copy(P);
+      else this.hitAt.copy(P).sub(chest).setLength(Math.min(nd, 0.45)).add(chest);
+      this.hitAt.y = Math.max(this.hitAt.y, ground + 0.15);
+      this.hitDir.copy(this.vel).normalize();
+      this.phase = 'idle';
+      this.root.visible = false;
+      this.laser.visible = false;
+      this.eyeGlow.strength = 0;
+      this.audio.setDrone(0, 0, 0, 0);
+    }
+  }
+
+  /** Hover toward `want`: a damped spring, its push and speed limited, twitching a little. */
+  private hover(dt: number, maxAcc: number, maxSpeed: number, avoid: Vector3 | null, time: number, ground: number) {
+    const P = this.root.position;
     // never below head height over the ground, and clear over the station
-    if (this.phase !== 'dive') {
+    {
       this.want.y = Math.max(this.want.y, terrainHeight(this.want.x, this.want.z) + 1.3);
       if (avoid && Math.hypot(this.want.x - avoid.x, this.want.z - avoid.z) < 9) this.want.y = Math.max(this.want.y, avoid.y + 4.4);
     }
@@ -283,13 +332,20 @@ export class Drone {
     this.want.y += noise1(time * 2.1, 5) * jit * 0.7;
     this.want.z += noise1(time * 1.9, 7) * jit;
 
-    // fly to it: a stiff spring, its push limited, its speed limited
-    this.acc.subVectors(this.want, P).multiplyScalar(this.phase === 'dive' ? 60 : 9).addScaledVector(this.vel, this.phase === 'dive' ? -1 : -5.5);
+    // fly to it: a damped spring, its push limited, its speed limited
+    this.acc.subVectors(this.want, P).multiplyScalar(9).addScaledVector(this.vel, -5.5);
     if (this.acc.length() > maxAcc) this.acc.setLength(maxAcc);
     this.vel.addScaledVector(this.acc, dt);
     if (this.vel.length() > maxSpeed) this.vel.setLength(maxSpeed);
     P.addScaledVector(this.vel, dt);
-    if (this.phase !== 'dive') P.y = Math.max(P.y, ground + 0.6);
+    P.y = Math.max(P.y, ground + 0.6);
+  }
+
+  /** Face the prey, tip into the push, spin the props, light the eye, play the whine. */
+  private pose(dt: number, chest: Vector3, eye: number, time: number, listener: Vector3) {
+    const P = this.root.position;
+    const dx = chest.x - P.x;
+    const dz = chest.z - P.z;
 
     // facing its prey, tipped into the way it is pushing, like any quadcopter
     const wantYaw = Math.atan2(dx, dz);
@@ -301,7 +357,11 @@ export class Drone {
     const s = Math.sin(this.yaw);
     const fwd = this.acc.x * s + this.acc.z * c;
     const side = this.acc.x * c - this.acc.z * s;
-    this.frame.rotation.set(Math.max(-0.7, Math.min(0.7, fwd * 0.035)), 0, Math.max(-0.6, Math.min(0.6, -side * 0.035)));
+    if (this.phase === 'dive') {
+      // nose down along its line, wings level
+      const pitch = Math.atan2(-this.vel.y, Math.hypot(this.vel.x, this.vel.z));
+      this.frame.rotation.set(Math.max(0, Math.min(1.3, pitch + 0.45)), 0, 0);
+    } else this.frame.rotation.set(Math.max(-0.7, Math.min(0.7, fwd * 0.035)), 0, Math.max(-0.6, Math.min(0.6, -side * 0.035)));
     // props spin; the turret tracks its target's face
     for (const [i, r] of this.rotors.entries()) r.rotation.y += dt * (i % 2 ? -1 : 1) * (70 + this.vel.length() * 3);
     this.root.updateMatrixWorld(true);

@@ -480,19 +480,22 @@ something comes for it.
 
 - **What it is:** a loitering munition. It is a small, matte, angular
   quadcopter with a warhead slung under its belly and a stencilled yellow
-  band round the warhead. It has one red sensor eye in a turret under its
+  band round the warhead. On its back is the mark of those who sent it: a
+  hollow red triangle, its point forward, with red bands on its four arms. It has one red sensor eye in a turret under its
   nose, a whip antenna and a tail strobe.
 - **How it comes:** you hear the whine of its props before you see it. A low,
   dissonant chord swells. It comes in high over the ridge behind the station
   and drops to hang round your creature.
-- **How it hunts:** it circles, twitching and hunting in the air, now one way
-  and now the other, and it keeps pace however you run. Now and then it darts
-  in to hover a hand's breadth from your creature's face: the eye flares,
-  the turret whirs and its sensor chirps. Your creature cannot take its eyes
+- **How it hunts:** it circles well off (about 8 units away and 3 up),
+  twitching and hunting in the air, now one way and now the other, and it
+  keeps pace however you run. Now and then it drops closer to study your
+  creature: the eye flares, the turret whirs and its sensor chirps. Your creature cannot take its eyes
   off it. While it hunts, the airlock will not let you back in.
 - **The end:** it pulls back and up and stops dead. A red line reaches from
   its eye to your creature's chest, and a tone climbs faster and faster. Then
-  it dives, its props screaming.
+  it dives, its props screaming: nose down, flat out, like a guided missile,
+  leading your creature's movement. It does not loop or fly past: its fuze
+  goes off at its closest pass, or on the ground.
 - **The strike:**
   - A white flash; the fireball blooms, boils and blackens into smoke.
   - Shrapnel, sparks and the drone's pieces spray out, some of them burning.
