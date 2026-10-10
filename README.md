@@ -427,12 +427,13 @@ modules banded in orange, dark metal and glass.
   - The first time you come near, a low, sad chord swells and your creature
     turns to look at them.
 - **The locusts:** a swarm of carrion locusts is eating the three. They are
-  big alien hoppers, bronze and olive, with glowing amber compound eyes,
+  small alien hoppers (each a little smaller than a hand), bronze and olive, with glowing amber compound eyes,
   smoky veined wings folded along their backs, long feelers, and the great
   kinked hind legs of their kind.
-  - They crawl over the bodies and the blood. Heads jerk down to tear, jaws
-    work, abdomens pulse. Now and then one climbs down and scuttles across
-    the sand to another body in jerky bursts, stopping dead, feelers
+  - They cling to the bodies and the blood. Heads jerk down to tear, jaws
+    work, abdomens pulse. A feeding locust keeps its place and does not turn
+    about. Now and then one climbs down and scuttles across the sand to
+    another body in jerky bursts, stopping dead, feelers
     twitching, then on, leaving fine tracks. You hear a dry, busy clicking
     of jaws, now and then wet, and little chirring chitters through the
     swarm.
@@ -475,7 +476,8 @@ doorway (or click it) to leave.
   kind, a chair spun away from the desk, papers across the deck, a rack of
   blinking lights in the corner, and a torn cable that sparks.
 - **The lab**, through the short tube: a specimen tank glowing in the middle
-  with one of the creature's kind curled up in it and bubbles rising past it;
+  with a malformed thing curled up in it, turning slowly on its tube, and
+  bubbles rising past it;
   a second tank smashed open, its fluid spilled across the deck among the
   glass; a bench with a microscope and racks of vials; a cold cabinet; a
   console; and cables over the floor.
@@ -523,18 +525,42 @@ doorway (or click it) to leave.
 - **The release:** when all three are in, the reader chimes and a relay
   clunks.
   - Pumps start and the tank drains in gulps and glugs, the fluid swirling
-    away. The figure in it sinks to lie curled on the tank's floor, and it
-    gasps.
+    away. The thing in it sinks to lie curled on the tank's floor, and it
+    gurgles as it breathes air.
   - The tank's door unseals with a pop and a long hiss, and slides round in a
-    gust of steam.
-  - The thing inside uncurls and drags itself out: one of your creature's
-    own kind, bleached and stunted by the tank, with a swollen head, a
-    withered arm, growths on its back and a cut feeding tube. It shakes,
-    gasps and mewls, dripping, and leaves a wet trail as it hauls itself
-    along the cord, through the tube and the habitat.
-  - It goes out of the airlock, tumbles down the steps, and drags itself on
-    across the sand, ploughing a furrow, until the drone finds it. The drone
-    locks on and dives, and the thing is blown apart.
+    gust of steam. The cold air makes it jerk and shriek.
+  - **What it is:** a homunculus, not much like your creature's kind any
+    more. It has a swollen, lopsided, hairless skull with one bulging
+    milk-white eye and one sunken black slit, and a hanging jaw of needle
+    teeth. Its skin is raw and veined, its hunched spine is a ridge of knobs,
+    and its belly is a distended, bruised sac. It has one long clawed arm and
+    one withered stub with two nubs of fingers, and wasted legs (one shorter
+    and twisted out). Its feeding tube still hangs from its belly and drags
+    behind it.
+  - **How it moves:** it uncurls in fits and drags itself out on its one long
+    arm. The arm swings out ahead and the claws smack down. Then it hauls,
+    its back bowing and its jaw gaping, its dead legs dragging. Then it
+    slumps, its head lolling over. It shakes all the time. Between hauls it
+    has fits:
+    - it seizes, bowed and thrashing, the stub clawing at the air;
+    - its arm gives and it flops onto its side, twitching, then levers itself
+      back over;
+    - it retches: its back heaves twice and bile gushes out of it onto the
+      floor.
+    The longer it is out on the sand, the slower and weaker it gets and the
+    more often it has fits.
+  - **How it sounds:** gurgling, bubbling breaths; broken whimpers that climb
+    and crack; ragged, rasping shrieks of pain; choking hurks and a wet
+    spatter when it retches; and a wet slap each time its hand or its body
+    hits the floor, sometimes with a joint cracking.
+  - It leaves a wet trail as it hauls itself along the cord, through the
+    tube and the habitat, and drips as it goes. It goes out of the airlock,
+    falls down the steps in a wet heap, and drags itself on across the sand
+    away from the station, ploughing a furrow. After about 18 seconds out on
+    the sand (a good few body lengths from the steps), the drone locks on and
+    dives. The thing bursts: its head, limbs and pieces of its body are flung
+    across the sand, bleeding where they land, among splashes of blood and
+    bile.
   - After that, the drone never comes for your creature again.
 
 ### The drone
@@ -588,6 +614,11 @@ something comes for it.
 - **Checkpoint:** reaching the mountain's peak (near the station) is a
   checkpoint. After the strike your creature wakes there, whole, as if none
   of it had happened. Leave the station again, and the drone comes again.
+- **Progress resets on death:** everything done since the checkpoint is
+  undone. Every data card goes back where it lay (including any in your
+  creature's hand or already in the reader), the reader's slots go dark, and
+  the tank is full and shut again with the thing floating in it, all its
+  trails and stains gone.
 
 **Code:**
 - The ground and the path are in `src/world/highlands.ts`. The ground's
@@ -608,9 +639,15 @@ something comes for it.
   lighting (`roomLight` in `src/render/shared.ts`) that lights only what is
   inside the station's walls.
 - The locusts are in `src/story/Locusts.ts`.
-- The data cards are in `src/story/DataCards.ts`; the thing in the tank and its release in
-  `src/story/Specimen.ts`. Glass and fluid are drawn see-through with a dither
-  (`src/render/dither.ts`).
+- The data cards are in `src/story/DataCards.ts`; the thing in the tank, its
+  release, its body, its crawl and its fits in `src/story/Specimen.ts`. Its
+  body is its own model (not the creature's rig): faceted lumps and blocks on
+  a chain of joints, posed each frame from a set of named postures, with a
+  fine noise shake over every joint. Its long arm reaches its planted hand
+  with two-bone inverse kinematics, and its feeding tube is a rope of
+  segments (Verlet integration) that drags on the floor. Glass and fluid are
+  drawn see-through with a dither (`src/render/dither.ts`). Both reset on
+  death (`reset()`).
 - The drone is in `src/story/Drone.ts`; the strike (explosion, the body,
   the death) in `src/story/Strike.ts`. The checkpoints and the respawn are in
   `src/main.ts` (`saveCheckpoint`, `respawn`).

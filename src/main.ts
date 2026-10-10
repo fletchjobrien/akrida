@@ -45,7 +45,7 @@ import { Drone } from './story/Drone';
 import { Strike } from './story/Strike';
 import { Locusts } from './story/Locusts';
 import { DataCards } from './story/DataCards';
-import { Specimen } from './story/Specimen';
+import { PREY_AFTER, Specimen } from './story/Specimen';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const pr = new PixelRenderer(canvas);
@@ -87,6 +87,7 @@ let droneDone = false;
 // the data cards, and the specimen they let out of its tank
 let cards: DataCards | null = null;
 let specimen: Specimen | null = null;
+const spAt = new Vector3();
 /** Stooping to take a card: seconds left, and what it is looking at. */
 let grabT = 0;
 const grabAt = new Vector3();
@@ -214,6 +215,14 @@ function respawn() {
   creature.releaseScript();
   creature.panic = 0;
   huntT = 0;
+  // what was done since the checkpoint is undone: the cards back where they lay, the reader
+  // empty, the thing back in its tank
+  npcStrike.clear();
+  droneDone = false;
+  grabT = 0;
+  insertT = 0;
+  cards?.reset();
+  specimen?.reset();
   const cp = checkpoint;
   if (cp?.inside && station) {
     inside = false;
@@ -488,7 +497,7 @@ function* buildStation(): Generator<unknown, void, unknown> {
   const l = new Locusts(f.feedPoints, () => rocks.nearby, dust, audio);
   yield compile(l.group);
   const dc = new DataCards(st, creature, dust, audio);
-  const sp = new Specimen(st, world, audio, dust);
+  const sp = new Specimen(st, audio, dust);
   dc.addTo(scene);
   sp.addTo(scene);
   cards = dc;
@@ -923,7 +932,7 @@ function update(dt: number, now: number) {
     // it cannot look away from it
     look = lookPoint.copy(drone.position);
     if (droneBehind) creature.glance = 1;
-  } else if (specimen?.creature && specimen.alive && specimen.creature.pos.distanceTo(creature.pos) < 9) {
+  } else if (specimen?.at && specimen.at.distanceTo(creature.pos) < 9) {
     // the thing from the tank
     look = specimen.chest(lookPoint);
   } else if (padMode) {
@@ -1081,8 +1090,8 @@ function update(dt: number, now: number) {
     // keep it in view
     focusTarget.lerp(drone.position, 0.3);
   }
-  if (specimen?.creature && specimen.phase !== 'dead' && specimen.creature.pos.distanceTo(creature.pos) < 10) {
-    focusTarget.lerp(specimen.creature.pos, 0.25);
+  if (specimen?.at && specimen.at.distanceTo(creature.pos) < 10) {
+    focusTarget.lerp(specimen.at, 0.25);
   }
   if (stranger && stranger.weight > 0) {
     // the encounter draws the camera in between the two of them
@@ -1100,7 +1109,7 @@ function update(dt: number, now: number) {
  * it goes for it instead, and then it is done.
  */
 function updateDrone(dt: number) {
-  const prey = !!specimen && specimen.phase === 'outside' && specimen.outside > 0.5;
+  const prey = !!specimen && specimen.phase === 'outside' && specimen.outside > PREY_AFTER;
   if (droneWait > 0 && !droneDone) {
     droneWait -= dt;
     // it waits for the creature to come out again
@@ -1123,10 +1132,10 @@ function updateDrone(dt: number) {
   drone.update(dt, chest, prey ? zero : creature.vel, creature.pos, station ? station.center : null, allow, prey);
   if (drone.hit) {
     drone.hit = false;
-    if (drone.prey && specimen?.creature) {
+    if (drone.prey && specimen) {
       // it takes the thing from the tank instead; the creature is safe from it now
-      specimen.kill();
-      npcStrike.begin(drone.hitAt, drone.hitDir, specimen.creature, 'other');
+      specimen.kill(drone.hitDir);
+      npcStrike.blast(drone.hitAt, drone.hitDir);
       droneDone = true;
       droneWait = -1;
     } else {
@@ -1219,7 +1228,6 @@ function finishFrame(dt: number, target: Vector3) {
   // reaching the mountain's peak is a checkpoint
   if (!checkpoint && station && !inside && !wake.active && Math.hypot(creature.pos.x - HIGH.x, creature.pos.z - HIGH.z) < 16) saveCheckpoint('peak');
   npcStrike.update(dt);
-  if (npcStrike.active && specimen) specimen.follow();
   if (fallen && !fallenSeen && !wake.active && Math.hypot(creature.pos.x - fallen.lookPoint.x, creature.pos.z - fallen.lookPoint.z) < 10) {
     // the three of them, lined up against the wall
     fallenSeen = true;
@@ -1253,7 +1261,7 @@ function finishFrame(dt: number, target: Vector3) {
   audio.duck(1 - 0.45 * eS - 0.3 * eP - 0.2 * eD - 0.15 * eK - 0.3 * eH);
   const focus = camDyn.update(dt, debugFocus ?? target);
   // a blast at the ship shakes the ground
-  const npcShake = npcStrike.active && specimen?.creature ? npcStrike.shake * 1.4 / (1 + specimen.creature.pos.distanceTo(creature.pos) * 0.15) : 0;
+  const npcShake = npcStrike.active && specimen ? (npcStrike.shake * 1.4) / (1 + specimen.chest(spAt).distanceTo(creature.pos) * 0.15) : 0;
   const shake = Math.max(ship ? ship.shake : 0, strike.shake * 1.8, npcShake);
   if (shake > 0.01) {
     shaken.copy(focus);

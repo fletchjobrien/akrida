@@ -2726,7 +2726,7 @@ export class AudioEngine {
    * The thing from the tank: small, wet, in pain. A ragged gasp, a thin mewling
    * cry that cracks and wavers, or a wet rattle in its chest.
    */
-  specimenVoice(kind: 'gasp' | 'mewl' | 'rattle', level: number, pan: number) {
+  specimenVoice(kind: 'gasp' | 'mewl' | 'rattle' | 'gurgle' | 'whimper' | 'retch' | 'shriek', level: number, pan: number) {
     const ctx = this.ctx;
     if (!ctx || level < 0.005) return;
     const now = ctx.currentTime;
@@ -2745,6 +2745,61 @@ export class AudioEngine {
       src.connect(g).connect(p);
       src.start(at);
     };
+    if (kind === 'gurgle') {
+      // a breath drawn through fluid: a wet rattle and a run of bubbles bursting in its throat
+      play(this.gargles, 1.1 + Math.random() * 0.2, level * 1.2);
+      let t = now + 0.05;
+      const end = now + 0.5 + Math.random() * 0.5;
+      while (t < end) {
+        const f = 380 + Math.random() * 500;
+        this.burst(t, 0.03 + Math.random() * 0.04, f, f * 0.5, 7, level * 0.35 * (0.4 + Math.random() * 0.6), p);
+        t += 0.025 + Math.random() * 0.06;
+      }
+      this.cry(now + 0.1, 210 + Math.random() * 40, 0.5, 0.6, level * 0.5, p);
+      return;
+    }
+    if (kind === 'whimper') {
+      // short broken cries, each higher and more desperate than the last
+      const n = 2 + Math.floor(Math.random() * 3);
+      let t = now;
+      for (let i = 0; i < n; i++) {
+        const d = 0.14 + Math.random() * 0.14;
+        this.cry(t, 520 + i * 70 + Math.random() * 90, d, 0.35, level * (0.7 + i * 0.12), p);
+        play(this.inhales, 1.8 + Math.random() * 0.3, level * 0.5, t + d);
+        t += d + 0.12 + Math.random() * 0.12;
+      }
+      return;
+    }
+    if (kind === 'retch') {
+      // it heaves: two dry, choking hurks, then fluid coming up and spattering
+      for (let i = 0; i < 2; i++) {
+        const t = now + i * 0.32;
+        this.cry(t, 120 + Math.random() * 30, 0.2, 1, level * 0.9, p);
+        this.burst(t, 0.18, 900, 260, 1.4, level * 0.45, p);
+        this.burst(t + 0.02, 0.02, 2400, 1600, 4, level * 0.3, p);
+      }
+      play(this.gargles, 0.9, level * 1.3, now + 0.62);
+      if (this.sprays.length) {
+        const src = ctx.createBufferSource();
+        src.buffer = this.any(this.sprays);
+        src.playbackRate.value = 0.8;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(level * 0.6, now + 0.7);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+        src.connect(g).connect(p);
+        src.start(now + 0.7, 0, 0.6);
+      }
+      for (let i = 0; i < 6; i++) this.burst(now + 0.75 + i * (0.04 + Math.random() * 0.06), 0.03, 1400, 500, 5, level * 0.3, p);
+      return;
+    }
+    if (kind === 'shriek') {
+      // a scream of pain that tears and breaks off into sobbing breaths
+      const d = 0.6 + Math.random() * 0.3;
+      this.cry(now, 780 + Math.random() * 200, d, 0.8, level * 1.2, p, 1.6);
+      play(this.inhales, 1.6, level * 0.9, now + d + 0.05);
+      this.cry(now + d + 0.3, 520, 0.22, 0.5, level * 0.5, p);
+      return;
+    }
     if (kind === 'gasp') play(this.inhales, 1.5 + Math.random() * 0.2, level * 1.4);
     else if (kind === 'rattle') play(this.gargles, 1.45 + Math.random() * 0.2, level * 1.1);
     else {
@@ -2779,6 +2834,81 @@ export class AudioEngine {
       o.stop(now + d + 0.05);
       vib.stop(now + d + 0.05);
       play(this.exhales, 1.55, level * 0.7, now + 0.02);
+    }
+  }
+
+  /**
+   * A small, cracked voice: a buzzing source (a sawtooth with a little
+   * irregular wobble for a ragged throat) through two vocal formants, its
+   * pitch jumping up as it strains and sagging as it breaks. `rough` adds the
+   * rasp; `rise` is how far it climbs.
+   */
+  private cry(at: number, f: number, d: number, rough: number, level: number, to: AudioNode, rise = 1.35) {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(f, at);
+    o.frequency.linearRampToValueAtTime(f * rise, at + d * 0.3);
+    o.frequency.setValueAtTime(f * rise * 0.82, at + d * 0.55);
+    o.frequency.linearRampToValueAtTime(f * 0.7, at + d);
+    // the rasp: a fast, uneven wobble in pitch and loudness
+    const jit = ctx.createOscillator();
+    jit.type = 'square';
+    jit.frequency.value = 23 + Math.random() * 14;
+    const jg = ctx.createGain();
+    jg.gain.value = f * 0.06 * rough;
+    jit.connect(jg).connect(o.frequency);
+    const am = ctx.createGain();
+    am.gain.value = 1 - rough * 0.35;
+    const ag = ctx.createGain();
+    ag.gain.value = rough * 0.35;
+    jit.connect(ag).connect(am.gain);
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, at);
+    out.gain.exponentialRampToValueAtTime(level * 0.09, at + 0.03);
+    out.gain.setValueAtTime(level * 0.09, at + d * 0.5);
+    out.gain.linearRampToValueAtTime(level * 0.015, at + d * 0.56);
+    out.gain.linearRampToValueAtTime(level * 0.07, at + d * 0.64);
+    out.gain.exponentialRampToValueAtTime(0.0001, at + d);
+    for (const [ff, q, g] of [
+      [900, 3, 1],
+      [2300, 5, 0.5],
+    ]) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = ff * (0.9 + Math.random() * 0.2);
+      bp.Q.value = q;
+      const bg = ctx.createGain();
+      bg.gain.value = g;
+      o.connect(bp).connect(bg).connect(am);
+    }
+    am.connect(out).connect(to);
+    this.burst(at, d, 2400, 1600, 1.2, level * 0.05 * (0.5 + rough), out);
+    o.start(at);
+    jit.start(at);
+    o.stop(at + d + 0.05);
+    jit.stop(at + d + 0.05);
+  }
+
+  /** A wet slap: its hand smacking down, or its body flopping onto the deck or the sand; `crack` adds a joint popping. */
+  specimenSlap(level: number, pan: number, metal: boolean, crack = false) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(this.master);
+    const r = this.roomBus();
+    if (r && this.indoor > 0.5) p.connect(r.echo);
+    // the smack of wet skin, and the squelch after it
+    this.burst(now, 0.035, 2200, 900, 1.6, level * 0.7, p);
+    this.tone(now, metal ? 140 : 90, 0.07, level * 0.5, p);
+    this.burst(now + 0.03, 0.12, 700, 1500, 3, level * 0.25, p);
+    if (metal) this.burst(now + 0.005, 0.05, 3200, 2600, 6, level * 0.2, p);
+    if (crack) {
+      // a knuckle or a rib giving: two sharp dry clicks
+      this.burst(now + 0.05, 0.006, 5200, 4200, 6, level * 0.8, p);
+      this.burst(now + 0.075, 0.005, 3800, 3000, 6, level * 0.6, p);
     }
   }
 

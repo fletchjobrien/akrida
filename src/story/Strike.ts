@@ -204,6 +204,26 @@ export class Strike {
     scene.add(this.group, this.flash, this.fireGlow);
   }
 
+  /** The blast alone, with no body thrown by it (what it hits takes care of itself). */
+  blast(at: Vector3, dir: Vector3) {
+    this.victim = 'other';
+    this.clear();
+    this.active = true;
+    this.done = false;
+    this.t = 0;
+    this.real = 0;
+    this.shake = 1;
+    this.creature = null;
+    this.at.copy(at);
+    this.dir.set(dir.x, 0, dir.z);
+    if (this.dir.lengthSq() < 0.01) this.dir.set(0, 0, 1);
+    this.dir.normalize();
+    this.beats = [];
+    this.bleedTimer = 0;
+    this.explode();
+    this.audio.blast(1);
+  }
+
   /** The blast at `at`, the drone having come along `dir`; `creature` is caught in it. */
   begin(at: Vector3, dir: Vector3, creature: Creature, victim: 'player' | 'other' = 'player') {
     this.victim = victim;
@@ -340,8 +360,8 @@ export class Strike {
       this.dust.spawn(A.x + Math.cos(a) * 0.4, ground + 0.1, A.z + Math.sin(a) * 0.4, Math.cos(a) * s, 0.4 + Math.random() * 1.5, Math.sin(a) * s, 0.8 + Math.random() * 0.8, SAND, 2, { g: 2, drag: 3, windK: 0.3, c2: SAND_FADE, soft: true });
     }
     // blood and flesh sprayed from where it caught the creature
-    const c = this.creature!.pos;
-    for (let i = 0; i < 80; i++) {
+    const c = this.creature ? this.creature.pos : this.at;
+    for (let i = 0; i < (this.creature ? 80 : 0); i++) {
       const v = new Vector3(Math.random() - 0.5, Math.random() * 0.9, Math.random() - 0.5).multiplyScalar(5).addScaledVector(this.dir, 4 + Math.random() * 5);
       this.dust.spawn(c.x, c.y + 0.5, c.z, v.x, v.y + 1, v.z, 0.7 + Math.random() * 0.8, i % 5 === 0 ? GORE : BLOOD, i % 7 === 0 ? 2 : 1, { g: 11, drag: 0.4, windK: 0, c2: BLOOD_FADE });
     }
@@ -395,7 +415,7 @@ export class Strike {
 
   /** Run the strike on `dt` of real time. */
   update(dt: number) {
-    if (!this.active || !this.creature) return;
+    if (!this.active) return;
     this.real += dt;
     // time all but stops at the blast, then crawls back
     this.timeScale = this.real < 0.12 ? 0.04 : Math.min(1, 0.12 + (this.real - 0.12) * 0.55);
@@ -408,7 +428,7 @@ export class Strike {
 
     this.updateBalls(g);
     this.updatePieces(g);
-    this.updateBody(g);
+    if (this.creature) this.updateBody(g);
 
     // smoke keeps rising from the blast, thinning out
     this.smokeTimer -= g;
@@ -424,7 +444,7 @@ export class Strike {
       });
       // and from the body
       this.chestSmoke.getWorldPosition(this.tmp);
-      if (Math.random() < 0.6) {
+      if (this.creature && Math.random() < 0.6) {
         this.dust.spawn(this.tmp.x, this.tmp.y, this.tmp.z, (Math.random() - 0.5) * 0.15, 0.4 + Math.random() * 0.3, (Math.random() - 0.5) * 0.15, 2 + Math.random() * 1.5, SMOKE, 2, {
           g: -0.3,
           drag: 0.8,
@@ -441,7 +461,7 @@ export class Strike {
       if (this.victim === 'player') this.audio.heartbeat(0.25 * (n / 5));
       this.bleedTimer = 0.25;
     }
-    if (this.bleedTimer > 0) {
+    if (this.bleedTimer > 0 && this.creature) {
       this.bleedTimer -= g;
       this.stump.getWorldPosition(this.tmp);
       for (let i = 0; i < 3; i++) {

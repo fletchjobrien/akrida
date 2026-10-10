@@ -266,8 +266,8 @@ export class Locusts {
         legs.push({ hip, side, set: (set0 + (side > 0 ? 1 : 0)) % 2, hind });
       }
     }
-    // a touch bigger than life, so it reads at this scale
-    root.scale.setScalar(1.75);
+    // a touch bigger than life, so it reads at this scale, but still small beside the dead
+    root.scale.setScalar(1.15);
     this.group.add(root);
     return {
       root,
@@ -427,12 +427,8 @@ export class Locusts {
         const tx = p.x + (Math.random() - 0.5) * 0.14;
         const tz = p.z + (Math.random() - 0.5) * 0.14;
         const total = Math.hypot(tx - b.pos.x, tz - b.pos.z);
-        if (total > 0.15) {
-          b.walk = { x: tx, z: tz, y: p.y, from: b.perch, total, pause: 0, burst: 0.3 + Math.random() * 0.5 };
-        } else {
-          // just a shuffle round on the spot
-          b.yaw += (Math.random() - 0.5) * 1.5;
-        }
+        // only ever over to another of the dead; on the one it is on, it stays put and eats
+        if (total > 0.4) b.walk = { x: tx, z: tz, y: p.y, from: b.perch, total, pause: 0, burst: 0.3 + Math.random() * 0.5 };
       }
     }
   }
@@ -458,17 +454,26 @@ export class Locusts {
       w.burst = 0.25 + Math.random() * 0.6;
       if (Math.random() < 0.55) w.pause = 0.1 + Math.random() * 0.45;
     }
-    // a little wander in its line, and turning sharply toward where it is going
-    const want = Math.atan2(dx, dz) + noise1(time * 4, b.seed) * 0.5;
-    let dy = want - b.yaw;
-    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    b.yaw += dy * Math.min(1, dt * 12);
+    // a little wander in its line, and turning sharply toward where it is going (but not
+    // when it is right on top of it, where the way to it swings about)
+    if (d > 0.08) {
+      const want = Math.atan2(dx, dz) + noise1(time * 4, b.seed) * 0.2 * Math.min(1, d / 0.4);
+      let dy = want - b.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      b.yaw += dy * Math.min(1, dt * 9);
+    }
     const speed = 1.1 + Math.sin(time * 13 + b.seed) * 0.25;
     const step = Math.min(d, speed * dt);
     const ox = b.pos.x;
     const oz = b.pos.z;
-    b.pos.x += Math.sin(b.yaw) * step;
-    b.pos.z += Math.cos(b.yaw) * step;
+    if (d > 0.08) {
+      b.pos.x += Math.sin(b.yaw) * step;
+      b.pos.z += Math.cos(b.yaw) * step;
+    } else {
+      // the last bit straight in, facing as it is
+      b.pos.x += (dx / Math.max(d, 1e-4)) * step;
+      b.pos.z += (dz / Math.max(d, 1e-4)) * step;
+    }
     // down off the body at the start, up onto the next at the end
     const gone = w.total - d;
     const g = terrainHeight(b.pos.x, b.pos.z);

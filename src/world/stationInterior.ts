@@ -735,14 +735,7 @@ export class StationInterior {
     const sp = new Group();
     sp.position.set(tx, DECK + 1.1, tz);
     R.add(sp);
-    this.add(sp, new BoxGeometry(0.26, 0.22, 0.38), M.fur, 0, 0, 0).rotation.x = 0.5;
-    this.add(sp, new BoxGeometry(0.2, 0.18, 0.18), M.fur, 0, 0.12, 0.2).rotation.x = 0.9;
-    for (const sx of [-1, 1]) {
-      this.add(sp, new BoxGeometry(0.04, 0.1, 0.06), M.fur, sx * 0.07, 0.24, 0.16);
-      this.add(sp, new BoxGeometry(0.06, 0.18, 0.06), M.fur, sx * 0.1, -0.1, 0.14).rotation.x = -1.1;
-      this.add(sp, new BoxGeometry(0.06, 0.18, 0.06), M.fur, sx * 0.1, -0.12, -0.12).rotation.x = 1.2;
-    }
-    this.add(sp, new BoxGeometry(0.04, 0.04, 0.3), M.fur, 0, -0.05, -0.28).rotation.x = -0.6;
+    // (the body itself is the specimen's: story/Specimen.ts hangs it here)
     this.add(sp, new BoxGeometry(0.02, 0.4, 0.02), m.metal, 0, 0.35, 0);
     this.specimen = sp;
     this.keep.push(sp);

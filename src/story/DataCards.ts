@@ -119,6 +119,28 @@ export class DataCards {
     scene.add(this.group);
   }
 
+  /** Every card back where it was found, the reader empty, the hand empty (after a death). */
+  reset() {
+    if (this.held) this.creature.carrying = false;
+    this.held = null;
+    this.complete = false;
+    this.justCompleted = false;
+    for (const c of this.cards) {
+      this.group.add(c.mesh);
+      c.mesh.scale.setScalar(1);
+      c.state = 'lying';
+      c.t = 0;
+      c.slot = -1;
+      c.vel.set(0, 0, 0);
+    }
+    for (let i = 0; i < 3; i++) {
+      this.filled[i] = false;
+      this.station.interior.setLed(i, 'dim');
+    }
+    this.place();
+    this.nudged = false;
+  }
+
   /** Where they lie: seven inside, four spilled by the crates, and the green one off on its own. */
   private place() {
     const I = this.station.interior.root;
