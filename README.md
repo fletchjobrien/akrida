@@ -580,9 +580,10 @@ something comes for it.
   through it. A moment later it drops whatever it holds (the tracker or a
   data card), and it cannot pick anything up while the drone hunts it.
 - **Getting away:** if your creature gets back inside the station, the drone
-  gives up: it climbs away over the ridge and never hunts your creature
-  again. While your creature is inside, the camera and its eyes leave the
-  drone alone.
+  leaves it alone and climbs away over the ridge. While your creature is
+  inside, the camera and its eyes leave the drone alone. But each time your
+  creature comes back out, the drone comes for it again. It is only safe
+  outside once the drone has killed the thing from the tank.
 - **Checkpoint:** reaching the mountain's peak (near the station) is a
   checkpoint. After the strike your creature wakes there, whole, as if none
   of it had happened. Leave the station again, and the drone comes again.

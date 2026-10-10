@@ -171,7 +171,14 @@ export class Drone {
     return this.phase !== 'idle';
   }
 
-  /** Give up on its prey: climb away over the ridge and go. */
+  /** It was flying off, and turns round to hunt again. */
+  comeBack() {
+    if (this.phase !== 'leave') return;
+    this.phase = 'approach';
+    this.t = 0;
+  }
+
+  /** Leave its prey alone: climb away over the ridge and go. */
   leave() {
     if (this.phase === 'idle' || this.phase === 'leave') return;
     this.phase = 'leave';

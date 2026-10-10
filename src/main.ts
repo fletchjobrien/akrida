@@ -95,8 +95,6 @@ let glanceT = 0;
 let glanceWait = 2;
 /** Reaching into the reader with a card: seconds left. */
 let insertT = 0;
-/** The drone gave up on the creature (it went back inside): it never hunts it again. */
-let droneSpares = false;
 /** How long the drone has been hunting the creature (it panics, then drops what it holds). */
 let huntT = 0;
 let heartT = 0;
@@ -192,16 +190,13 @@ function setInside(on: boolean) {
     creature.setYaw(Math.atan2(-d.x, -d.z));
   }
   camDyn.reset(new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
-  // back inside, out of its reach: the drone gives up on the creature for good
+  // back inside, out of its reach: the drone leaves the creature alone and goes off
   if (on) {
     droneWait = -1;
-    if (drone.active && !drone.prey) {
-      drone.leave();
-      droneSpares = true;
-    }
+    if (drone.active && !drone.prey) drone.leave();
   }
-  // coming back out, something is waiting
-  if (!on && wasInside && !drone.active && !strike.active && !droneDone && !droneSpares) droneWait = 4;
+  // coming back out, it comes again (until it has had the thing from the tank instead)
+  if (!on && wasInside && !strike.active && !droneDone && (!drone.active || drone.phase === 'leave')) droneWait = 4;
 }
 
 function saveCheckpoint(name: string) {
@@ -1110,7 +1105,11 @@ function updateDrone(dt: number) {
     droneWait -= dt;
     // it waits for the creature to come out again
     if (droneWait <= 0 && inside) droneWait = 0.5;
-    else if (droneWait <= 0 && station) droneLaunch();
+    else if (droneWait <= 0 && station) {
+      // still flying off: it turns round; gone: it comes back over the ridge
+      if (drone.phase === 'leave') drone.comeBack();
+      else if (!drone.active) droneLaunch();
+    }
   }
   // the thing on the sand draws it in, whether it was already out or not
   if (prey && !drone.active && !droneDone && station) droneLaunch();
