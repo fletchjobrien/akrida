@@ -26,6 +26,7 @@ import { clamp, noise1, rng, smoothstep } from '../core/math';
 import { toonMaterial } from '../render/shared';
 import { rgb } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
+import { bakeStatic } from '../render/bake';
 import { SHIP_LENGTH, SHIP_TRENCH, SITE3 } from './crater';
 import { terrainHeight } from './terrain';
 import { footprintOf, type Rocks } from './rocks';
@@ -339,7 +340,7 @@ export class Ship {
   private readonly doorSparkFrom = new Object3D();
   private readonly statusMat: ShaderMaterial;
   private readonly emergencyMat: ShaderMaterial;
-  private readonly padPanel: Mesh;
+  private padPanel!: Mesh;
   private readonly buttons: Button[] = [];
   private readonly glyphs = glyphTexture();
   private readonly ray = new Raycaster();
@@ -373,7 +374,7 @@ export class Ship {
   private readonly padSparkFrom = new Object3D();
 
   constructor(
-    rocks: Rocks,
+    private readonly rocks: Rocks,
     private readonly dust: Dust,
     private readonly audio: AudioEngine,
   ) {
@@ -404,15 +405,26 @@ export class Ship {
     this.group.position.set(SITE3.x, ground + RIDE, SITE3.z);
     this.group.rotation.set(0, yaw, 0.012 * this.cs);
     this.center.set(SITE3.x, ground + RIDE, SITE3.z);
+  }
 
+  /**
+   * Build it a part at a time (see core/builder.ts), then merge everything
+   * that never moves into one mesh per material.
+   */
+  *build(): Generator<unknown, void, unknown> {
     this.buildHull();
+    yield;
     this.buildDamage();
+    yield;
     this.group.updateMatrixWorld(true);
     // the hull blocks the way: aft and bow halves as two outlines, so the break is not a wall
-    for (const part of this.hullParts) rocks.addStatic(footprintOf(part, 3));
-
-    this.buildDebris(rocks);
+    for (const part of this.hullParts) this.rocks.addStatic(footprintOf(part, 3));
+    this.buildDebris(this.rocks);
+    yield;
     this.padPanel = this.buildDoor();
+    yield;
+    // the door slides, the keypad's buttons are pressed and picked by the mouse, the flames flicker
+    bakeStatic(this.group, [this.doorPanel, this.padPanel, ...this.buttons.map((b) => b.group), ...this.flames.map((f) => f.mesh)]);
   }
 
   // ------------------------------------------------------------------ build

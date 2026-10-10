@@ -1,4 +1,4 @@
-import { Scene, Vector2, Vector3 } from 'three';
+import { Scene, Vector2, Vector3, type Object3D } from 'three';
 import { PixelRenderer } from './render/PixelRenderer';
 import { shared } from './render/shared';
 import { Terrain, terrainHeight } from './world/terrain';
@@ -37,6 +37,7 @@ import { HIGH, highlandMask } from './world/highlands';
 import { Highlands } from './world/highlandLife';
 import { Station } from './world/station';
 import { Fallen } from './story/Fallen';
+import { Builder } from './core/builder';
 import { Tracker } from './world/tracker';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
@@ -261,10 +262,9 @@ function layoutWorld() {
       shared.uHighOn.value = 1;
       highlands = new Highlands(dust, audio, rocks);
       highlands.addTo(scene);
-      station = new Station(rocks, dust, audio);
-      station.addTo(scene);
-      fallen = new Fallen(world, station.wallRow, station.rowDir, station.rowOut, rocks, (p, o) => pr.snapDelta(p, o));
-      fallen.addTo(scene);
+      terrain.addHighlands(scene);
+      // the station on the summit, and the three shot outside it, made as the creature nears
+      later(HIGH.x, HIGH.z, 90, buildStation);
     }
   }
   rocks.refresh();
@@ -273,37 +273,90 @@ function layoutWorld() {
   // a stray scrap of the pod, a few steps from where the creature wakes, toward the crash
   scene.add(strayDebris(START.x + 6.5, START.y + 0.7, 0.6, rocks));
   peek = new PeekScene(creature, world, audio);
-  if (plan) {
-    site2 = new CrashSite(rocks, dust, audio, 'second');
-    scene.add(site2.group);
-    const axis = { x: plan.axis.x, z: plan.axis.y };
-    stranger = new Stranger(world, SITE2.ex, SITE2.ez, axis, rocks, dust, audio, (p, o) => pr.snapDelta(p, o));
-    scene.add(stranger.creature.rig.root);
-    // keep the dunes and rocks off the trail where it actually bends
-    const path = stranger.trailPath(site2.hatchGround);
-    SITE2.mx = path.mid.x;
-    SITE2.mz = path.mid.z;
-    shared.uSite2Trail.value.set(SITE2.mx, SITE2.mz, SITE2.ex, SITE2.ez);
-    rocks.refresh();
-    // the map of blood and marks covers the trail and the body
-    const xs = [site2.hatchGround.x, path.control.x, path.end.x, SITE2.ex];
-    const zs = [site2.hatchGround.z, path.control.z, path.end.z, SITE2.ez];
-    const minX = Math.min(...xs) - 3;
-    const minZ = Math.min(...zs) - 3;
-    const size = Math.max(Math.max(...xs) + 3 - minX, Math.max(...zs) + 3 - minZ);
-    const stains = new StainMap(minX, minZ, size);
-    stranger.paint(stains, site2.hatchGround);
-    if (SITE3.on) {
-      ship = new Ship(rocks, dust, audio);
-      ship.addTo(scene);
-      doorScene = new DoorScene(creature, world, ship, audio, dust);
-      tracker = new Tracker(ship, dust, audio, rocks.nearby);
-      tracker.addTo(scene);
-      pickup = new PickupScene(creature, world, tracker, audio);
-      rocks.refresh();
+  // the second pod and its survivor, then the ship, made as the creature heads their way
+  if (plan) later(SITE2.x, SITE2.z, 55, () => buildSecondPod(plan));
+  if (SITE3.on) later(SITE3.x, SITE3.z, 60, buildShip);
+}
+
+/** Builds things a few milliseconds at a time (see core/builder.ts). */
+const builder = new Builder();
+/** Things to make only when the creature comes within `r` of them. */
+const pending: { x: number; z: number; r: number; make: () => Generator<unknown, void, unknown> }[] = [];
+function later(x: number, z: number, r: number, make: () => Generator<unknown, void, unknown>) {
+  pending.push({ x, z, r, make });
+}
+/** Start making whatever the creature is now near enough to. */
+function streamWorld() {
+  for (let i = pending.length - 1; i >= 0; i--) {
+    const p = pending[i];
+    if (Math.hypot(creature.pos.x - p.x, creature.pos.z - p.z) < p.r) {
+      pending.splice(i, 1);
+      builder.add(p.make());
     }
   }
+  builder.run(4);
 }
+/** Compile an object's shaders in the background (the browser does it off the main thread where it can). */
+const compile = (o: Object3D) => pr.renderer.compileAsync(o, pr.camera, scene);
+
+function* buildSecondPod(plan: SecondPodLayout): Generator<unknown, void, unknown> {
+  const s2 = new CrashSite(rocks, dust, audio, 'second');
+  yield;
+  const axis = { x: plan.axis.x, z: plan.axis.y };
+  const st = new Stranger(world, SITE2.ex, SITE2.ez, axis, rocks, dust, audio, (p, o) => pr.snapDelta(p, o));
+  yield;
+  // keep the dunes and rocks off the trail where it actually bends
+  const path = st.trailPath(s2.hatchGround);
+  SITE2.mx = path.mid.x;
+  SITE2.mz = path.mid.z;
+  shared.uSite2Trail.value.set(SITE2.mx, SITE2.mz, SITE2.ex, SITE2.ez);
+  rocks.refresh();
+  // the map of blood and marks covers the trail and the body
+  const xs = [s2.hatchGround.x, path.control.x, path.end.x, SITE2.ex];
+  const zs = [s2.hatchGround.z, path.control.z, path.end.z, SITE2.ez];
+  const minX = Math.min(...xs) - 3;
+  const minZ = Math.min(...zs) - 3;
+  const size = Math.max(Math.max(...xs) + 3 - minX, Math.max(...zs) + 3 - minZ);
+  const stains = new StainMap(minX, minZ, size);
+  yield* st.paint(stains, s2.hatchGround);
+  yield compile(s2.group);
+  yield compile(st.creature.rig.root);
+  scene.add(s2.group);
+  scene.add(st.creature.rig.root);
+  site2 = s2;
+  stranger = st;
+}
+
+function* buildShip(): Generator<unknown, void, unknown> {
+  const s = new Ship(rocks, dust, audio);
+  yield* s.build();
+  yield compile(s.group);
+  s.addTo(scene);
+  const t = new Tracker(s, dust, audio, rocks.nearby);
+  yield;
+  for (const o of t.parts) yield compile(o);
+  t.addTo(scene);
+  rocks.refresh();
+  ship = s;
+  doorScene = new DoorScene(creature, world, s, audio, dust);
+  tracker = t;
+  pickup = new PickupScene(creature, world, t, audio);
+}
+
+function* buildStation(): Generator<unknown, void, unknown> {
+  const st = new Station(rocks, dust, audio);
+  yield* st.build();
+  const f = new Fallen(world, st.wallRow, st.rowDir, st.rowOut, rocks, dust, (p, o) => pr.snapDelta(p, o));
+  yield* f.build();
+  yield compile(st.group);
+  yield compile(f.group);
+  st.addTo(scene);
+  f.addTo(scene);
+  rocks.refresh();
+  station = st;
+  fallen = f;
+}
+
 /** Seconds left of the creature staring at something it has just noticed. */
 let noticeTime = 0;
 let noticeWhat: { lookPoint: Vector3 } | 'stranger' | null = null;
@@ -523,11 +576,14 @@ function frame(now: number) {
   last = now;
   if (!paused) update(dt, now);
   draw(now);
-  requestAnimationFrame(frame);
+  // compile every shader the opening needs in the background first (the screen
+// stays dark meanwhile), so the first frame never stalls the page
+pr.precompile(scene).finally(() => requestAnimationFrame(frame));
 }
 
 function update(dt: number, now: number) {
   elapsed += dt;
+  streamWorld();
   shared.uTime.value = elapsed;
 
   // wind drives sound, sand and clouds
@@ -765,6 +821,7 @@ function finishFrame(dt: number, target: Vector3) {
     }
   }
   if (station) station.update(dt, elapsed, creature.pos);
+  if (fallen) fallen.update(dt, creature.pos);
   if (fallen && !fallenSeen && !wake.active && Math.hypot(creature.pos.x - fallen.lookPoint.x, creature.pos.z - fallen.lookPoint.z) < 10) {
     // the three of them, lined up against the wall
     fallenSeen = true;
@@ -876,6 +933,15 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     get highlands() {
       return highlands;
+    },
+    /** Make everything at once, now (for tests): resolves when all of it is in the scene. */
+    async buildAll() {
+      for (const p of pending.splice(0)) builder.add(p.make());
+      while (builder.busy) {
+        builder.run(50);
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      highlands?.place(60000);
     },
     get station() {
       return station;

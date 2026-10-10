@@ -601,9 +601,10 @@ export class Stranger {
    * its body and its broken leg, clawing forward with its hands and shoving
    * with its good hoof, stopping more and more often. Blood fell from the
    * wound in sparse drips and pooled where it rested. The oldest marks, near
-   * the pod, are half filled in by blown sand.
+   * the pod, are half filled in by blown sand. Done a stride at a time (see
+   * core/builder.ts).
    */
-  paint(stains: StainMap, from: Vector3) {
+  *paint(stains: StainMap, from: Vector3): Generator<unknown, void, unknown> {
     const rand = rng(7731);
     const path = this.trailPath(from);
     const { end, control } = path;
@@ -728,7 +729,9 @@ export class Stranger {
     let stop = 0;
     let stride = 0;
     let hand = 1;
+    yield;
     for (let q = crawlStart; q < total - 1.2; ) {
+      yield;
       const u = (q - crawlStart) / crawlLen;
       // weaker and weaker: the pulls get shorter
       const step = (0.58 - 0.26 * u) * (0.85 + rand() * 0.3);
@@ -812,6 +815,7 @@ export class Stranger {
       this.bodyToWorld((rand() - 0.6) * 1.5, (rand() - 0.5) * 1.7, _v);
       drop(_v.x, _v.z, 0.012 + rand() * 0.022, 0.75);
     }
+    yield;
     stains.commit();
   }
 }

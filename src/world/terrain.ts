@@ -1,6 +1,7 @@
 import {
   GLSL3,
   Mesh,
+  type Object3D,
   PlaneGeometry,
   ShaderMaterial,
   Vector2,
@@ -9,7 +10,7 @@ import {
 import { fbm, gnoise, NOISE_GLSL } from './noise';
 import { STAIN_GLSL } from './stains';
 import { CRATER_GLSL, craterHeight, siteMask } from './crater';
-import { HIGHLAND_GLSL, highlandHeight, highlandMask } from './highlands';
+import { HIGH, HIGH_MESH, HIGHLAND_GLSL, highlandGeometry, highlandHeight, highlandMask } from './highlands';
 import { LIGHTING_GLSL, shared } from '../render/shared';
 import { glslRgb, PALETTE } from '../render/palette';
 
@@ -41,15 +42,20 @@ export function duneField(x: number, z: number): number {
   return smooth(-0.06, 0.16, fbm(x * 0.0065 - 7.1, z * 0.0065 + 3.3, 2)) * (1 - siteMask(x, z)) * (1 - highlandMask(x, z));
 }
 
-export function terrainHeight(x: number, z: number): number {
+/** The desert without the highlands (they are added on top, see highlands.ts). */
+function baseHeight(x: number, z: number): number {
   const swell = fbm(x * 0.011 + 31.7, z * 0.011 - 12.3, 3) * 7.0;
-  const hummock = fbm(x * 0.09 + 3.1, z * 0.09 - 8.4, 2) * 0.22;
+  const hummock = fbm(x * 0.09 + 3.1, z * 0.09 - 8.4, 2) * 0.22 * (1 - highlandMask(x, z));
   const field = duneField(x, z);
   const warp = fbm(x * 0.016 + 5.2, z * 0.016 + 9.1, 2) * 1.3;
   const t = (x * DUNE_DX + z * DUNE_DZ) / DUNE_WAVELENGTH + warp;
   const amp = Math.min(1.4, Math.max(0.2, 0.75 + 0.9 * gnoise(x * 0.03 + 1.3, z * 0.03 + 7.7))) * 1.9 * field;
   const dune = duneProfile(t - Math.floor(t)) * amp;
-  return swell + hummock + dune + craterHeight(x, z) + highlandHeight(x, z);
+  return swell + hummock + dune + craterHeight(x, z);
+}
+
+export function terrainHeight(x: number, z: number): number {
+  return baseHeight(x, z) + highlandHeight(x, z);
 }
 
 const _n = new Vector3();
@@ -75,15 +81,17 @@ float duneProfile(float u) {
 float duneField(vec2 p) {
   return smoothstep(-0.06, 0.16, fbm(p * 0.0065 + vec2(-7.1, 3.3), 2)) * (1.0 - siteMask(p)) * (1.0 - highlandMask(p));
 }
-float terrainHeight(vec2 p) {
+// The desert without the highlands. The GPU only ever works this out: the
+// highlands are worked out once, on the CPU, and drawn as a mesh of their own.
+float baseHeight(vec2 p) {
   float swell = fbm(p * 0.011 + vec2(31.7, -12.3), 3) * 7.0;
-  float hummock = fbm(p * 0.09 + vec2(3.1, -8.4), 2) * 0.22;
+  float hummock = fbm(p * 0.09 + vec2(3.1, -8.4), 2) * 0.22 * (1.0 - highlandMask(p));
   float field = duneField(p);
   float warp = fbm(p * 0.016 + vec2(5.2, 9.1), 2) * 1.3;
   float t = dot(p, DUNE_DIR) / ${DUNE_WAVELENGTH.toFixed(4)} + warp;
   float amp = clamp(0.75 + 0.9 * gnoise(p * 0.03 + vec2(1.3, 7.7)), 0.2, 1.4) * 1.9 * field;
   float dune = duneProfile(fract(t)) * amp;
-  return swell + hummock + dune + craterHeight(p) + highlandHeight(p);
+  return swell + hummock + dune + craterHeight(p);
 }
 `;
 
@@ -94,19 +102,11 @@ ${NOISE_GLSL}
 ${TERRAIN_GLSL}
 uniform vec2 uGridOffset;
 out vec3 vWorldPos;
-out float vSteep;
 void main() {
+  // the grid is flat; the highland mesh brings the height the highlands add
   vec2 p = position.xz + uGridOffset;
-  vec3 wp = vec3(p.x, terrainHeight(p), p.y);
+  vec3 wp = vec3(p.x, position.y + baseHeight(p), p.y);
   vWorldPos = wp;
-  // how steep the ground is at large (not its fine detail), for where bare rock shows
-  vSteep = 0.0;
-  if (highlandMask(p) > 0.0) {
-    float e = 0.45;
-    vec3 mn = normalize(vec3(terrainHeight(p - vec2(e, 0.0)) - terrainHeight(p + vec2(e, 0.0)), 2.0 * e,
-                             terrainHeight(p - vec2(0.0, e)) - terrainHeight(p + vec2(0.0, e))));
-    vSteep = 1.0 - mn.y;
-  }
   gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }
 `;
@@ -145,18 +145,10 @@ float rippleHeight(vec2 p) {
   return prof * 0.022 * mask;
 }
 
-// Fractured, pitted rock in the highlands (shading only), as much as gRock says.
-float gRock = 0.0;
-float rockDetail(vec2 p) {
-  float r1 = 1.0 - abs(gnoise(p * 1.4 + 7.0)) * 2.0;
-  return r1 * r1 * 0.16 + gnoise(p * 3.1) * 0.07 + gnoise(p * 7.3 + 3.1) * 0.025;
-}
-
 float detailHeight(vec2 p) {
   // dragged, clawed and churned sand (shading only), which also wipes out the ripples
   vec4 st = stainAt(p);
-  float hm = highlandMask(p);
-  return terrainHeight(p) + rippleHeight(p) * (1.0 - st.a) * (1.0 - gRock) * (1.0 - 0.4 * hm) + stainHeight(st) + rockDetail(p) * gRock;
+  return baseHeight(p) + rippleHeight(p) * (1.0 - st.a) + stainHeight(st);
 }
 
 vec3 sandNormal(vec2 p) {
@@ -187,46 +179,27 @@ layout(location = 1) out vec4 outInfo;
 ${LIGHTING_GLSL}
 ${SAND_GLSL}
 in vec3 vWorldPos;
-in float vSteep;
-
-// The highland rock: the desert's own grey-brown stone, in five light steps.
-vec3 rockBand(int i) {
-  if (i <= 0) return ${glslRgb(0xd3c7bb)};
-  if (i == 1) return ${glslRgb(PALETTE.rockLight)};
-  if (i == 2) return ${glslRgb(0x9a8d84)};
-  if (i == 3) return ${glslRgb(PALETTE.rockMid)};
-  return ${glslRgb(PALETTE.rockDark)};
-}
-
-vec3 rockColor(vec3 wp, vec3 n, float d, float steep) {
-  vec2 p = wp.xz;
-  // soft wrapped light, so faces turned from the sun still read as rock
-  float ndl = dot(n, uSunDir);
-  float sh = shadowAt(wp, n);
-  float l = (ndl * 0.55 + 0.45) * mix(0.55, 1.0, sh) + (d - 0.5) * 0.08;
-  int band = l > 0.88 ? 0 : (l > 0.68 ? 1 : (l > 0.48 ? 2 : (l > 0.3 ? 3 : 4)));
-  // faint bedding, here and there
-  float bed = fract(wp.y * 0.45 + gnoise(p * 0.06) * 0.8);
-  if (bed < 0.05 && gnoise(p * 0.2 + 9.0) > 0.0) band = min(band + 1, 4);
-  // weathering stains run down the steepest faces
-  float streak = gnoise(vec2(dot(p, vec2(0.71, -0.71)) * 2.4, wp.y * 0.22 + 5.0));
-  if (steep > 0.5 && streak > 0.28 + (d - 0.5) * 0.1) band = min(band + 1, 4);
-  // grit caught in the cracks
-  float g = hash01(floor(p / uPixelWorld) + vec2(77.0, -19.0));
-  if (g < 0.02) band = min(band + 1, 4);
-  vec3 c = rockBand(band);
-  // patches of warmer and cooler stone
-  float tint = gnoise(p * 0.05 + 1.3);
-  return c * mix(vec3(1.0), tint > 0.0 ? vec3(1.04, 1.0, 0.95) : vec3(0.97, 0.99, 1.03), abs(tint) * 1.6);
-}
+uniform float uCut;
 
 void main() {
   vec2 p = vWorldPos.xz;
+  // the grid leaves the highlands to their own mesh
+  if (length(p - uHigh.xy) < uCut) discard;
   float d = worldDither();
-  float hm = highlandMask(p);
-  // bare rock where the ground is steep at large: cliffs, crags, the flanks of buttes
-  gRock = hm * smoothstep(0.06, 0.2, vSteep) * (1.0 - highlandRoad(p));
   vec3 n = sandNormal(p);
+  // The highlands are shaded by the mesh's own flat facets, as the boulders are:
+  // broad smooth faces meeting at sharp edges.
+  vec3 fn = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
+  if (fn.y < 0.0) fn = -fn;
+  float hm = highlandMask(p);
+  float rock = 0.0;
+  if (hm > 0.0) {
+    n = normalize(mix(n, fn, smoothstep(0.0, 0.3, hm)));
+    // bare rock on every face more than gently steep: whole faces, edged sharp
+    // (sand lies only on the near-level faces)
+    float steep = 1.0 - fn.y;
+    rock = step(0.5, hm) * step(0.045, steep) * step(highlandRoad(p), 0.5);
+  }
   int band = sandBandIndex(vWorldPos, n, d, 0.0);
 
   // Pixel-sized pebbles and grit, locked to a world grid of screen-pixel size.
@@ -270,19 +243,30 @@ void main() {
 
   vec3 col = sandBand(band);
 
-  // The highlands: bare rock on the steep ground, and the station's graded road.
+  vec4 info = vec4(0.5, 1.0, 0.0, 0.0);
   if (hm > 0.0) {
-    float rd = highlandRoad(p);
-    if (rd > 0.5 + (d - 0.5) * 0.3) {
-      // packed down by wheels: a shade darker, with two faint ruts and gravel
-      float ru = hash01(floor(cell) + vec2(3.0, 61.0));
-      band = clamp(band + 1, 2, 4);
-      if (ru < 0.05) band = min(band + 1, 4);
-      col = sandBand(band);
+    // the trail: worn in patches where feet and wheels kept to it, with faint ruts and gravel
+    float across;
+    float tr = highlandTrail(p, across);
+    if (tr > 0.3) {
+      float worn = tr * smoothstep(-0.35, 0.1, gnoise(p * 0.3 + 2.0));
+      bool rut = abs(abs(across) - 0.45) < 0.08 && gnoise(p * 0.8) > -0.1;
+      if (worn > 0.45 + (d - 0.5) * 0.3 || (rut && tr > 0.6)) {
+        band = clamp(band + 1, 2, 4);
+        if (hash01(floor(cell) + vec2(3.0, 61.0)) < 0.06) band = min(band + 1, 4);
+        col = sandBand(band);
+      }
     }
-    // the edge of the bare rock wanders, as scree and drifted sand would leave it
-    float edgeN = gnoise(p * 1.3 + 5.5) * 0.3 + gnoise(p * 4.1) * 0.12;
-    if (gRock > 0.5 + (d - 0.5) * 0.4 + edgeN) col = rockColor(vWorldPos, n, d, max(vSteep, 1.0 - n.y));
+    // bare rock, lit exactly as the boulders are, with their outlines and crease highlights
+    if (rock > 0.5) {
+      float ndl = dot(fn, uSunDir);
+      float sh = shadowAt(vWorldPos, fn);
+      float cl = cloudShadowAt(p, d);
+      float l = ndl * sh * (1.0 - 0.5 * cl);
+      col = l > 0.62 ? ${glslRgb(PALETTE.rockLight)} : (l > 0.05 ? ${glslRgb(PALETTE.rockMid)} : ${glslRgb(PALETTE.rockDark)});
+      vec3 vn = normalize(mat3(viewMatrix) * fn);
+      info = vec4(vn.xy * 0.5 + 0.5, 0.55, 1.0);
+    }
   }
 
   // Burnt sand and fused glass where the pod came down.
@@ -306,7 +290,7 @@ void main() {
   }
 
   outColor = vec4(col, 1.0);
-  outInfo = vec4(0.5, 1.0, 0.0, 0.0);
+  outInfo = info;
 }
 `;
 
@@ -314,20 +298,35 @@ export class Terrain {
   readonly mesh: Mesh;
   readonly cell: number;
   private offset = new Vector2();
+  private readonly mat: ShaderMaterial;
 
   constructor(size = 128, segments = 224) {
     const geo = new PlaneGeometry(size, size, segments, segments);
     geo.rotateX(-Math.PI / 2);
     this.cell = size / segments;
-    const mat = new ShaderMaterial({
+    this.mat = new ShaderMaterial({
       glslVersion: GLSL3,
-      uniforms: { ...shared, uGridOffset: { value: this.offset } },
+      uniforms: { ...shared, uGridOffset: { value: this.offset }, uCut: { value: 0 } },
       vertexShader: TERRAIN_VERT,
       fragmentShader: TERRAIN_FRAG,
     });
-    this.mesh = new Mesh(geo, mat);
+    this.mesh = new Mesh(geo, this.mat);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -1;
+  }
+
+  /**
+   * The highlands, drawn with a mesh cut along the faces of the rock (the same
+   * shading, so the same shader program); the grid stands aside for it.
+   */
+  addHighlands(scene: Object3D) {
+    if (!HIGH.on) return;
+    const mat = this.mat.clone();
+    mat.uniforms = { ...shared, uGridOffset: { value: new Vector2() }, uCut: { value: 0 } };
+    const mesh = new Mesh(highlandGeometry(), mat);
+    mesh.renderOrder = -1;
+    scene.add(mesh);
+    this.mat.uniforms.uCut.value = HIGH_MESH - 1;
   }
 
   /** Keep the grid centred on the view, snapped so vertices never swim. */

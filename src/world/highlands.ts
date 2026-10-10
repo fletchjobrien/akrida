@@ -1,3 +1,4 @@
+import { BufferGeometry, Float32BufferAttribute } from 'three';
 import { fbm, gnoise } from './noise';
 
 /**
@@ -31,7 +32,7 @@ export const PEAK = 22;
 /** The levelled summit's radius. */
 export const SUMMIT = 14;
 /** The road: half its width, and how far it runs from the summit's edge down to the desert. */
-const ROAD_W = 2.4;
+const ROAD_W = 1.6;
 const ROAD_LEN = 66;
 /**
  * Rocky hills around the mountain, in the summit's frame: distance toward the
@@ -57,12 +58,27 @@ const ridge = (x: number, z: number) => {
   const r = Math.max(0, 1 - Math.abs(gnoise(x, z)) * 2);
   return r * r;
 };
-const rugged = (x: number, z: number) =>
-  ridge(x * 0.045 + 2.1, z * 0.045 - 6.3) * 0.55 + ridge(x * 0.11 - 9.4, z * 0.11 + 1.7) * 0.3 + ridge(x * 0.26 + 4.4, z * 0.26 + 7.7) * 0.15;
+/** Big ridges and spurs only, so the rock reads as broad faces meeting at sharp edges. */
+const rugged = (x: number, z: number) => ridge(x * 0.045 + 2.1, z * 0.045 - 6.3) * 0.65 + ridge(x * 0.11 - 9.4, z * 0.11 + 1.7) * 0.35;
 
-/** Where the road's middle runs across (it winds a little), at distance `a` out from the summit. */
+/** Where the trail's middle runs across (it wanders), at distance `a` out from the summit. */
 export function roadCentre(a: number) {
-  return Math.sin(a * 0.07) * 5 * smooth(SUMMIT, SUMMIT + 12, a);
+  return (Math.sin(a * 0.07) * 5 + Math.sin(a * 0.19 + 1) * 1.6) * smooth(SUMMIT - 4, SUMMIT + 10, a);
+}
+
+/** The trail's half-width at distance `a`: worn wider and narrower as it goes. */
+function trailWidth(a: number) {
+  return ROAD_W + 0.6 * gnoise(a * 0.09, 3.3);
+}
+
+/** The summit's ragged rim: how far the levelled ground reaches at (x, z). */
+function summitRim(x: number, z: number) {
+  return SUMMIT + fbm(x * 0.09 + 4.4, z * 0.09 - 1.7, 2) * 7;
+}
+
+/** The levelled ground's height: undulating gently, more so toward its rim. */
+function summitLevel(x: number, z: number, r: number) {
+  return PEAK + (0.08 + 0.32 * smooth(6, SUMMIT, r)) * (gnoise(x * 0.12, z * 0.12) * 2 + gnoise(x * 0.5 + 3, z * 0.5) * 0.4);
 }
 
 /** The road's height over the desert at distance `a` out from the summit. */
@@ -70,9 +86,8 @@ function roadHeight(a: number) {
   return PEAK * (1 - smooth(SUMMIT - 2, SUMMIT + ROAD_LEN, a));
 }
 
-/** Height the highlands add to the desert. */
-export function highlandHeight(x: number, z: number): number {
-  if (!HIGH.on) return 0;
+/** The highlands' shape before it is cut into faces: mountain, hills, and the ridge the trail climbs. */
+function highlandShape(x: number, z: number): number {
   const dx = x - HIGH.x;
   const dz = z - HIGH.z;
   const r = Math.hypot(dx, dz);
@@ -85,26 +100,188 @@ export function highlandHeight(x: number, z: number): number {
   const profile = Math.pow(1 - t, 1.25);
   const rough = rugged(x, z);
   let h = PEAK * profile * (0.62 + 0.55 * rough) * (0.85 + 0.3 * smooth(-0.6, 0.8, north));
-  // crags and broken outcrops, rougher toward the top
-  h += ridge(x * 0.55 + 1.3, z * 0.55 - 2.9) * 1.1 * Math.min(1, profile * 2.5);
   // rocky hills around it
   for (const [ha, hb, hr, hh] of HILLS) {
     const d = Math.hypot(a - ha, b - hb) / (hr + gnoise(x * 0.08 + ha, z * 0.08 + hb) * 3);
     if (d < 1) h = Math.max(h, hh * Math.pow(1 - d, 1.5) * (0.6 + 0.7 * rough));
   }
-  // the spur the road climbs, and the road itself, graded smooth
+  // a broad ridge, rough-flanked, that the trail follows up
   const rh = roadHeight(a);
   const off = Math.abs(b - roadCentre(a));
+  const w = trailWidth(a);
   const along = smooth(SUMMIT - 4, SUMMIT, a) * (1 - smooth(SUMMIT + ROAD_LEN, SUMMIT + ROAD_LEN + 8, a));
-  // a broad ridge, rough-flanked, that the road follows up
-  h = Math.max(h, rh * smooth(ROAD_W + 26, ROAD_W + 2, off) * (0.8 + 0.4 * rough * smooth(ROAD_W + 2, ROAD_W + 10, off)) * along);
-  const road = smooth(ROAD_W + 4, ROAD_W, off) * along;
-  h += (rh + gnoise(x * 0.4, z * 0.4) * 0.08 - h) * road;
-  // the summit, levelled for the station, crags rising round it to the north
-  const level = PEAK + 0.15 * gnoise(x * 0.2, z * 0.2);
-  const flat = smooth(SUMMIT + 3, SUMMIT - 2, r);
-  h += (level - h) * flat;
+  return Math.max(h, rh * smooth(w + 26, w + 2, off) * (0.8 + 0.4 * rough * smooth(w + 2, w + 10, off)) * along);
+}
+
+/** Size of the faces the rock is cut into. The ground is laid on a lattice of half that. */
+const FACET = 2.6;
+const STEP = FACET / 2;
+const F2 = (Math.sqrt(3) - 1) / 2;
+const G2 = (3 - Math.sqrt(3)) / 6;
+/** How far from the summit the highland ground (and the mesh that draws it) reaches. */
+export const HIGH_MESH = 114;
+
+/** A point of the lattice, in the world. */
+const latX = (a: number, b: number) => (a - (a + b) * G2) * STEP;
+const latZ = (a: number, b: number) => (b - (a + b) * G2) * STEP;
+
+/** The trail and the levelled summit, worn smoothly into the faces of the rock. */
+function carve(x: number, z: number, h: number) {
+  const dx = x - HIGH.x;
+  const dz = z - HIGH.z;
+  const r = Math.hypot(dx, dz);
+  const a = dx * HIGH.ox + dz * HIGH.oz;
+  const b = -dx * HIGH.oz + dz * HIGH.ox;
+  // the trail: worn into the ridge, not graded flat, so the ground keeps some of its lie
+  const along = smooth(SUMMIT - 4, SUMMIT, a) * (1 - smooth(SUMMIT + ROAD_LEN, SUMMIT + ROAD_LEN + 8, a));
+  if (along > 0) {
+    const off = Math.abs(b - roadCentre(a));
+    const w = trailWidth(a);
+    const trail = smooth(w + 3, w - 0.5, off) * along;
+    if (trail > 0) h += (roadHeight(a) + gnoise(x * 0.35, z * 0.35) * 0.25 - h) * trail * 0.8;
+  }
+  // the summit, levelled for the station inside a ragged rim, the rock rising past it
+  if (r < SUMMIT + 16) {
+    const rim = summitRim(x, z);
+    const levelled = smooth(rim + 4, rim - 3, r);
+    h += (summitLevel(x, z, r) - h) * levelled * 0.95;
+  }
   return h;
+}
+
+interface Table {
+  key: string;
+  a0: number;
+  b0: number;
+  na: number;
+  nb: number;
+  h: Float32Array;
+}
+let table: Table | null = null;
+
+/**
+ * The height the highlands add, worked out once at every point of the lattice.
+ * The shape is taken at the corners of the big faces and laid flat across
+ * them, so the rock is made of broad flat faces meeting at sharp edges, like
+ * the boulders; then the trail and the summit are worn in at every point.
+ */
+function heights(): Table {
+  const key = `${HIGH.x},${HIGH.z},${HIGH.ox},${HIGH.oz}`;
+  if (table && table.key === key) return table;
+  const R = HIGH_MESH + 4;
+  const toA = (x: number, z: number) => (x + (x + z) * F2) / STEP;
+  let a0 = Infinity;
+  let a1 = -Infinity;
+  let b0 = Infinity;
+  let b1 = -Infinity;
+  for (const [x, z] of [
+    [HIGH.x - R, HIGH.z - R],
+    [HIGH.x + R, HIGH.z - R],
+    [HIGH.x - R, HIGH.z + R],
+    [HIGH.x + R, HIGH.z + R],
+  ]) {
+    a0 = Math.min(a0, toA(x, z));
+    a1 = Math.max(a1, toA(x, z));
+    b0 = Math.min(b0, toA(z, x));
+    b1 = Math.max(b1, toA(z, x));
+  }
+  // start on a corner of a big face
+  a0 = 2 * Math.floor(a0 / 2) - 2;
+  b0 = 2 * Math.floor(b0 / 2) - 2;
+  const na = Math.ceil(a1) - a0 + 4;
+  const nb = Math.ceil(b1) - b0 + 4;
+  // the shape at the corners of the big faces
+  const ca = (na >> 1) + 1;
+  const cb = (nb >> 1) + 1;
+  const shape = new Float32Array(ca * cb);
+  for (let i = 0; i < ca; i++) {
+    for (let j = 0; j < cb; j++) {
+      const x = latX(a0 + 2 * i, b0 + 2 * j);
+      const z = latZ(a0 + 2 * i, b0 + 2 * j);
+      if (Math.hypot(x - HIGH.x, z - HIGH.z) < R) shape[i * cb + j] = highlandShape(x, z);
+    }
+  }
+  const S = (i: number, j: number) => shape[i * cb + j];
+  const h = new Float32Array(na * nb);
+  for (let ia = 0; ia < na; ia++) {
+    for (let ib = 0; ib < nb; ib++) {
+      const x = latX(a0 + ia, b0 + ib);
+      const z = latZ(a0 + ia, b0 + ib);
+      if (Math.hypot(x - HIGH.x, z - HIGH.z) > R - 2) continue;
+      // every point lies on a corner or the middle of an edge of a big face
+      const i = ia >> 1;
+      const j = ib >> 1;
+      const oa = ia & 1;
+      const ob = ib & 1;
+      const s = oa && ob ? (S(i, j) + S(i + 1, j + 1)) / 2 : oa ? (S(i, j) + S(i + 1, j)) / 2 : ob ? (S(i, j) + S(i, j + 1)) / 2 : S(i, j);
+      h[ia * nb + ib] = carve(x, z, s);
+    }
+  }
+  return (table = { key, a0, b0, na, nb, h });
+}
+
+/** Height the highlands add to the desert: laid flat across each triangle of the lattice. */
+export function highlandHeight(x: number, z: number): number {
+  if (!HIGH.on) return 0;
+  const dx = x - HIGH.x;
+  const dz = z - HIGH.z;
+  if (dx * dx + dz * dz > HIGH_MESH * HIGH_MESH) return 0;
+  const t = heights();
+  const u = x / STEP;
+  const v = z / STEP;
+  const sk = (u + v) * F2;
+  const fa = u + sk;
+  const fb = v + sk;
+  const a = Math.floor(fa);
+  const b = Math.floor(fb);
+  const s = fa - a;
+  const w = fb - b;
+  const k = (a - t.a0) * t.nb + (b - t.b0);
+  const H = t.h;
+  const h00 = H[k];
+  const h11 = H[k + t.nb + 1];
+  return s > w ? h00 + s * (H[k + t.nb] - h00) + w * (h11 - H[k + t.nb]) : h00 + w * (H[k + 1] - h00) + s * (h11 - H[k + 1]);
+}
+
+/**
+ * The mesh the highlands are drawn with: the lattice itself, so every edge of
+ * the rock is a true edge of the mesh. Its height is only what the highlands
+ * add; the desert under it is added on the GPU, as for the rest of the ground.
+ */
+export function highlandGeometry(): BufferGeometry {
+  const t = heights();
+  const index = new Int32Array(t.na * t.nb).fill(-1);
+  const pos: number[] = [];
+  let n = 0;
+  for (let ia = 0; ia < t.na; ia++) {
+    for (let ib = 0; ib < t.nb; ib++) {
+      const x = latX(t.a0 + ia, t.b0 + ib);
+      const z = latZ(t.a0 + ia, t.b0 + ib);
+      if (Math.hypot(x - HIGH.x, z - HIGH.z) > HIGH_MESH + 1.5) continue;
+      index[ia * t.nb + ib] = n++;
+      pos.push(x, t.h[ia * t.nb + ib], z);
+    }
+  }
+  const tri: number[] = [];
+  for (let ia = 0; ia < t.na - 1; ia++) {
+    for (let ib = 0; ib < t.nb - 1; ib++) {
+      const k = ia * t.nb + ib;
+      const p00 = index[k];
+      const p10 = index[k + t.nb];
+      const p01 = index[k + 1];
+      const p11 = index[k + t.nb + 1];
+      if (p00 < 0 || p11 < 0) continue;
+      if (p10 >= 0) tri.push(p00, p11, p10);
+      if (p01 >= 0) tri.push(p00, p01, p11);
+    }
+  }
+  const geo = new BufferGeometry();
+  geo.setAttribute('position', new Float32BufferAttribute(pos, 3));
+  geo.setIndex(tri);
+  geo.computeBoundingSphere();
+  // the desert under it rises and falls a little
+  geo.boundingSphere!.radius += 10;
+  return geo;
 }
 
 /** 0..1: how much this is highland ground (no dunes, rock, cliffs that stop you). */
@@ -130,44 +307,11 @@ const float HIGH_REACH = ${f(HIGH_REACH)};
 const vec4 HILLS[${HILLS.length}] = vec4[${HILLS.length}](
   ${HILLS.map((h) => `vec4(${h.map(f).join(', ')})`).join(',\n  ')}
 );
-float hRidge(vec2 p) {
-  float r = max(0.0, 1.0 - abs(gnoise(p)) * 2.0);
-  return r * r;
-}
-float hRugged(vec2 p) {
-  return hRidge(p * 0.045 + vec2(2.1, -6.3)) * 0.55 + hRidge(p * 0.11 + vec2(-9.4, 1.7)) * 0.3 + hRidge(p * 0.26 + vec2(4.4, 7.7)) * 0.15;
-}
 float roadCentre(float a) {
-  return sin(a * 0.07) * 5.0 * smoothstep(${f(SUMMIT)}, ${f(SUMMIT + 12)}, a);
+  return (sin(a * 0.07) * 5.0 + sin(a * 0.19 + 1.0) * 1.6) * smoothstep(${f(SUMMIT - 4)}, ${f(SUMMIT + 10)}, a);
 }
-float highlandHeight(vec2 p) {
-  if (uHighOn < 0.5) return 0.0;
-  vec2 d = p - uHigh.xy;
-  float r = length(d);
-  if (r > HIGH_REACH) return 0.0;
-  float a = dot(d, uHigh.zw);
-  float b = dot(d, vec2(-uHigh.w, uHigh.z));
-  float north = -d.y / max(r, 1.0);
-  float t = clamp(r / (${f(RM)} + fbm(p * 0.03 + vec2(17.3, -4.1), 2) * 18.0), 0.0, 1.0);
-  float profile = pow(1.0 - t, 1.25);
-  float rough = hRugged(p);
-  float h = ${f(PEAK)} * profile * (0.62 + 0.55 * rough) * (0.85 + 0.3 * smoothstep(-0.6, 0.8, north));
-  h += hRidge(p * 0.55 + vec2(1.3, -2.9)) * 1.1 * min(1.0, profile * 2.5);
-  for (int i = 0; i < ${HILLS.length}; i++) {
-    vec4 hl = HILLS[i];
-    float dd = length(vec2(a, b) - hl.xy) / (hl.z + gnoise(p * 0.08 + hl.xy) * 3.0);
-    if (dd < 1.0) h = max(h, hl.w * pow(1.0 - dd, 1.5) * (0.6 + 0.7 * rough));
-  }
-  float rh = ${f(PEAK)} * (1.0 - smoothstep(${f(SUMMIT - 2)}, ${f(SUMMIT + ROAD_LEN)}, a));
-  float off = abs(b - roadCentre(a));
-  float along = smoothstep(${f(SUMMIT - 4)}, ${f(SUMMIT)}, a) * (1.0 - smoothstep(${f(SUMMIT + ROAD_LEN)}, ${f(SUMMIT + ROAD_LEN + 8)}, a));
-  h = max(h, rh * smoothstep(${f(ROAD_W + 26)}, ${f(ROAD_W + 2)}, off) * (0.8 + 0.4 * rough * smoothstep(${f(ROAD_W + 2)}, ${f(ROAD_W + 10)}, off)) * along);
-  float road = smoothstep(${f(ROAD_W + 4)}, ${f(ROAD_W)}, off) * along;
-  h += (rh + gnoise(p * 0.4) * 0.08 - h) * road;
-  float level = ${f(PEAK)} + 0.15 * gnoise(p * 0.2);
-  float levelled = smoothstep(${f(SUMMIT + 3)}, ${f(SUMMIT - 2)}, r);
-  h += (level - h) * levelled;
-  return h;
+float trailWidth(float a) {
+  return ${f(ROAD_W)} + 0.6 * gnoise(vec2(a * 0.09, 3.3));
 }
 float highlandMask(vec2 p) {
   if (uHighOn < 0.5) return 0.0;
@@ -183,21 +327,30 @@ float highlandMask(vec2 p) {
   }
   return m;
 }
-/** 0..1: the graded road and the levelled summit (kept clear of rock and boulders). */
-float highlandRoad(vec2 p) {
+/** 0..1: the worn trail (its middle), and how far across it (-1..1, for ruts). */
+float highlandTrail(vec2 p, out float across) {
+  across = 0.0;
   if (uHighOn < 0.5) return 0.0;
   vec2 d = p - uHigh.xy;
-  float r = length(d);
-  if (r > HIGH_REACH) return 0.0;
+  if (length(d) > HIGH_REACH) return 0.0;
   float a = dot(d, uHigh.zw);
   float b = dot(d, vec2(-uHigh.w, uHigh.z));
-  float along = smoothstep(${f(SUMMIT - 4)}, ${f(SUMMIT)}, a) * (1.0 - smoothstep(${f(SUMMIT + ROAD_LEN)}, ${f(SUMMIT + ROAD_LEN + 8)}, a));
-  float road = smoothstep(${f(ROAD_W + 1.5)}, ${f(ROAD_W - 0.5)}, abs(b - roadCentre(a))) * along;
-  return max(road, smoothstep(${f(SUMMIT + 1)}, ${f(SUMMIT - 2)}, r));
+  float w = trailWidth(a);
+  float along = smoothstep(${f(SUMMIT - 2)}, ${f(SUMMIT + 2)}, a) * (1.0 - smoothstep(${f(SUMMIT + ROAD_LEN)}, ${f(SUMMIT + ROAD_LEN + 8)}, a));
+  float off = b - roadCentre(a);
+  across = off / w;
+  return smoothstep(w + 0.4, w - 0.6, abs(off)) * along;
+}
+/** 0..1: kept clear of bare rock and boulders: the trail, and the ground the station stands on. */
+float highlandRoad(vec2 p) {
+  float across;
+  float t = highlandTrail(p, across);
+  if (uHighOn < 0.5) return 0.0;
+  return max(t, smoothstep(11.0, 8.0, length(p - uHigh.xy)));
 }
 `;
 
-/** 0..1: the graded road and the levelled summit (kept clear of boulders). */
+/** 0..1: kept clear of boulders: the trail, and the ground the station stands on. */
 export function highlandRoad(x: number, z: number): number {
   if (!HIGH.on) return 0;
   const dx = x - HIGH.x;
@@ -206,7 +359,8 @@ export function highlandRoad(x: number, z: number): number {
   if (r > HIGH_REACH) return 0;
   const a = dx * HIGH.ox + dz * HIGH.oz;
   const b = -dx * HIGH.oz + dz * HIGH.ox;
-  const along = smooth(SUMMIT - 4, SUMMIT, a) * (1 - smooth(SUMMIT + ROAD_LEN, SUMMIT + ROAD_LEN + 8, a));
-  const road = smooth(ROAD_W + 1.5, ROAD_W - 0.5, Math.abs(b - roadCentre(a))) * along;
-  return Math.max(road, smooth(SUMMIT + 1, SUMMIT - 2, r));
+  const w = trailWidth(a);
+  const along = smooth(SUMMIT - 2, SUMMIT + 2, a) * (1 - smooth(SUMMIT + ROAD_LEN, SUMMIT + ROAD_LEN + 8, a));
+  const trail = smooth(w + 1.2, w - 0.6, Math.abs(b - roadCentre(a))) * along;
+  return Math.max(trail, smooth(11, 8, r));
 }

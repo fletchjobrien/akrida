@@ -505,6 +505,20 @@ export class PixelRenderer {
     return out;
   }
 
+  /**
+   * Compile every shader the scene and the post passes need, in the
+   * background where the browser can (KHR_parallel_shader_compile), so the
+   * first frame does not stall the page.
+   */
+  precompile(scene: Scene) {
+    const r = this.renderer;
+    return Promise.all([
+      r.compileAsync(scene, this.camera),
+      r.compileAsync(this.postScene, this.quadCam),
+      r.compileAsync(this.blitScene, this.quadCam),
+    ]).then(() => undefined);
+  }
+
   render(scene: Scene) {
     const r = this.renderer;
 

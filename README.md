@@ -354,16 +354,18 @@ summit is a research station. It is the place the tracker leads to.
   ridges, spurs and crags, steep near the top and spreading at its foot, higher
   toward the north so it never hides the creature. Its summit, about 22 units
   up, was levelled for the station.
-- **The road:** a graded road, packed darker by wheels, runs out into the
-  desert and climbs a broad ridge to the summit, winding a little. It is the
-  way up.
-- **Rock and sand:** the rock is the desert's own grey-brown stone, and the
-  sand between is the desert's sand, so the mountain grows out of the land
-  around it. Bare rock shows wherever the ground is more than gently steep,
-  crunchy and broken, with faint bedding, weathering stains down the steepest
-  faces, and patches of warmer and cooler stone. Sand lies in the hollows and
-  on the gentler ground. Boulders of the same stone as the desert rocks lie at
-  the feet of the steeper faces; the road and the summit are clear.
+- **The trail:** a sandy trail runs out into the desert and winds up a broad
+  ridge to the summit. It is not graded flat: it keeps some of the lie of the
+  ground, its width changes, and it is worn darker in patches, with faint ruts
+  and grit where feet and wheels kept to it. It is the way up.
+- **The summit:** levelled for the station inside a ragged rim of rock. The
+  rock rises past the rim, and the level ground undulates a little.
+- **Rock and sand:** the rock is cut like the desert's boulders: broad, flat
+  faces that meet at sharp edges, lit in the boulders' three tones of grey,
+  with their dark outlines and light crease highlights. Sand lies only on the
+  near-level faces and in the hollows, and it is the desert's own sand, so the
+  mountain grows out of the land around it. Boulders of the same stone lie at
+  the feet of the steeper faces; the trail and the summit are clear.
 - **Walking:** the creature cannot climb anything steeper than about 49
   degrees. It walks up the road (or any gentle slope) and can explore the
   ledges and the foot of every face.
@@ -387,28 +389,39 @@ modules banded in orange, dark metal and glass.
   and conduits, and an airlock reached by two steps.
 - A domed lab at its end, joined by a tube, its glass dome on a frame of ribs.
 - A lattice comms mast with a dish and a red light that blinks slowly at the
-  top, two fuel tanks on cradles, a row of solar panels on posts, a raised
-  landing pad with an orange ring and markings, cargo crates, and lamp posts.
+  top, two fuel tanks on cradles, a row of solar panels on posts, cargo
+  crates, and lamp posts.
 - **It was raided:** the airlock door is forced half open, two windows are
   smashed (torn wiring sparks in one), a wedge of the dome is smashed through
   and its glass lies on the ground, a solar panel lies flat, crates are knocked
-  over and spilled, and the landing pad is scorched. One lamp flickers. A
+  over and spilled. One lamp flickers. A
   broken alarm chirps now and then, a loose panel creaks in the wind, and the
   station hums.
 - **The three:** against the wall left of the airlock lie three of the
   creature's own kind, shot by a firing squad: one husky green, one husky blue,
-  and one the husky rust of the creature itself, but redder. One was thrown
-  back onto the ground, arms flung out; one slid down the wall and sits slumped
-  against it; one pitched forward onto its face. Their grey-blue blood has
-  dried in pools under them, and the wall behind them is pocked with laser
-  burns at chest and head height. The first time you come near, a low, sad
-  chord swells and your creature turns to look at them.
+  and one the husky rust of the creature itself, but redder.
+  - Their hands are tied behind them with cord, and two are blindfolded.
+  - One was thrown back onto the ground; one slid down the wall and sits
+    slumped against it; one pitched forward onto its face.
+  - Each has charred laser wounds through the fur, with a dull ember at the
+    heart of each. Faint smoke still rises from them when you are near.
+  - Their grey-blue blood has dried in pools under them, with drips leading
+    off. Sand has drifted against them on the windward side.
+  - The wall behind them is pocked with laser burns (charred, sooty, holed)
+    and spattered with blood, with drips running down it and a smear where
+    the middle one slid down.
+  - The first time you come near, a low, sad chord swells and your creature
+    turns to look at them.
 - The tracker burns solid green once you are on the summit.
 
 **Code:**
-- The mountain's shape (height, mask and the road) is in
-  `src/world/highlands.ts`, on the CPU and the GPU (uniforms `uHigh` and
-  `uHighOn`). The rock and road shading is in `src/world/terrain.ts`.
+- The mountain's shape is in `src/world/highlands.ts`. Its height is worked
+  out once, on the CPU, at every point of a triangular lattice (faces 2.6
+  units across, each cut in four). The ground the creature walks on and the
+  mesh that draws the highlands both read that one table, so they always
+  agree. The trail and summit masks are also on the GPU (uniforms `uHigh` and
+  `uHighOn`). The rock and trail shading is in `src/world/terrain.ts`; the
+  rock takes its normal from the mesh's own faces.
 - The boulders, falling pebbles, sound levels and first sight are in
   `src/world/highlandLife.ts`. The boulders are placed a few milliseconds at
   a time after start-up, so loading never stalls.
@@ -474,10 +487,42 @@ To add server logic later (saves, story state), add a `main` script to
   so it does not crawl when the camera moves.
 - **Edge pass.** A post pass reads depth and normals. It darkens the outer
   edges of rocks and adds light highlights on their creases.
+- **Two ground meshes.** The desert is a grid that follows the camera; the
+  GPU adds the dunes to it. The highlands have their own mesh, cut along the
+  faces of the rock, so every edge of the rock is a true, sharp edge. Both
+  use the same shader program; the grid discards its pixels where the
+  highland mesh lies.
 - **Procedural desert.** Dunes with gentle windward slopes and steep slip
   faces, wind ripples, pebbles, sun glints, drifting cloud shadows and veils
   of blowing sand. The CPU and GPU use the same integer hash, so the ground
   that the creature walks on is the ground that you see.
+
+## Start-up and performance
+
+The browser must compile every shader before it can draw with it, and this is
+the biggest cost at start-up. These steps keep the game smooth:
+
+- **Compile before the first frame, in the background.** All the shaders
+  that the first view needs are compiled with three.js `compileAsync` before
+  the first frame. Where the browser supports the `KHR_parallel_shader_compile`
+  extension, this does not block the page.
+- **Build the world in pieces, over many frames.** Only the first crash site
+  is built at start-up. The second pod, the ship, and the research station
+  (with the three dead) are each built when the creature comes within reach
+  of them. A job queue (`src/core/builder.ts`) builds them a few milliseconds
+  per frame, and compiles their new shaders in the background.
+- **Fewer draw calls.** When a model is complete, its static parts are merged
+  into one mesh per material (`src/render/bake.ts`). The ship, for example,
+  went from hundreds of meshes to a few dozen. Parts that move or that you
+  can click stay separate. The boulders and pebbles are instanced meshes.
+- **Low render resolution.** The scene renders at about 300 rows (see
+  "How the rendering works"), at a pixel ratio of 1.
+- **Less work per pixel.** The ground's shader works out only the desert's
+  base height. The highland height is in the mesh, not in the shader.
+
+In a headless test with a software renderer, these changes cut the time to
+the first frame from 3.5 s to 1.8 s, and the frame time by about half. A
+real GPU is much faster than that renderer, but the proportions are similar.
 
 ## How the animation works
 

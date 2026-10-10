@@ -169,9 +169,10 @@ export class Highlands {
 
   update(dt: number, listener: Vector3, wind: Wind) {
     this.justDiscovered = false;
-    this.place(3);
     if (!HIGH.on) return;
     const dc = Math.hypot(listener.x - HIGH.x, listener.z - HIGH.z);
+    // the boulders are only placed once the creature is on its way
+    if (dc < 180) this.place(3);
     // first sight: the nearest cliffs rising over the dunes
     if (!this.discovered && (dc < 82 || highlandMask(listener.x, listener.z) > 0.05)) {
       this.discovered = true;

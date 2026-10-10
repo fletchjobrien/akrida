@@ -220,8 +220,13 @@ export class Tracker {
     add(new BoxGeometry(0.05, 0.1, 0.012), metal, 0, 0.01, -D / 2 - 0.006, false);
   }
 
+  /** Everything it adds to the scene. */
+  get parts(): Object3D[] {
+    return [this.group, this.tipGlow, this.ledGlow, this.pool];
+  }
+
   addTo(scene: Object3D) {
-    scene.add(this.group, this.tipGlow, this.ledGlow, this.pool);
+    scene.add(...this.parts);
   }
 
   /** Lying on its back, its antenna along the ground direction `h`. */

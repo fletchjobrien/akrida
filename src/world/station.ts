@@ -1,4 +1,6 @@
 import {
+  Matrix4,
+  Raycaster,
   BoxGeometry,
   BufferGeometry,
   CylinderGeometry,
@@ -16,6 +18,7 @@ import { toonMaterial } from '../render/shared';
 import { rgb } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
 import { Glow } from '../render/glow';
+import { bakeStatic } from '../render/bake';
 import { HIGH } from './highlands';
 import { terrainHeight } from './terrain';
 import { footprintOf, type Rocks } from './rocks';
@@ -41,7 +44,7 @@ const LAMP_OFF = rgb(0x3a3630);
  * the ship and its pods: off-white plated modules banded in orange, dark
  * metal and glass. A long habitat with a row of windows and an airlock, a
  * domed lab joined to it by a tube, a lattice comms mast with a dish and a
- * slow red light, fuel tanks, a solar array, a landing pad and stacked cargo.
+ * slow red light, fuel tanks, a solar array, and stacked cargo.
  *
  * It has been raided: the airlock is forced half open, windows are smashed,
  * the dome is cracked, a solar panel lies on the ground, crates are spilled,
@@ -80,7 +83,7 @@ export class Station {
   private readonly tmp = new Vector3();
 
   constructor(
-    rocks: Rocks,
+    private readonly rocks: Rocks,
     private readonly dust: Dust,
     private readonly audio: AudioEngine,
   ) {
@@ -106,21 +109,30 @@ export class Station {
     this.group.rotation.y = this.yaw;
     this.center.set(HIGH.x, ground, HIGH.z);
 
-    const blockers: Object3D[] = [];
-    blockers.push(this.buildHab(), this.buildLab(), this.buildTanks());
-    this.buildMast();
-    blockers.push(...this.buildSolar(), ...this.buildCrates());
-    this.buildPad();
-    this.buildLamps();
-    this.group.updateMatrixWorld(true);
-    for (const b of blockers) rocks.addStatic(footprintOf(b, 2));
-    // the tower's legs stand together as one obstacle
-    rocks.addStatic(footprintOf(this.mastBase, 3));
-
     // the wall where they were shot: left of the airlock, seen from the road
+    this.group.updateMatrixWorld(true);
     this.group.localToWorld(this.wallRow.set(-3.6, 0, 0.75));
     this.rowDir.set(1, 0, 0).applyAxisAngle(new Vector3(0, 1, 0), this.yaw);
     this.rowOut.set(0, 0, 1).applyAxisAngle(new Vector3(0, 1, 0), this.yaw);
+  }
+
+  /** Build it a part at a time (see core/builder.ts), then merge it into one mesh per material. */
+  *build(): Generator<unknown, void, unknown> {
+    const blockers: Object3D[] = [];
+    blockers.push(this.buildHab());
+    yield;
+    blockers.push(this.buildLab(), this.buildTanks());
+    yield;
+    this.buildMast();
+    blockers.push(...this.buildSolar(), ...this.buildCrates());
+    yield;
+    this.buildLamps();
+    this.group.updateMatrixWorld(true);
+    for (const b of blockers) this.rocks.addStatic(footprintOf(b, 2));
+    // the tower's legs stand together as one obstacle
+    this.rocks.addStatic(footprintOf(this.mastBase, 3));
+    yield;
+    bakeStatic(this.group);
   }
 
   /** Put a part's group at (x, z) in the station's frame, sitting on the highest ground under it (within r). */
@@ -161,6 +173,33 @@ export class Station {
     return this.add(parent, g, mat, x, y, z);
   }
 
+  private habHull!: Mesh;
+  private readonly ray = new Raycaster();
+
+  /**
+   * A flat mark laid on the habitat's front wall where it really is (the wall
+   * slopes in toward its foot): found by casting a ray at the hull from in
+   * front. Size w by h, turned by `spin`, lifted `lift` off the surface.
+   */
+  private wallMark(G: Object3D, x: number, y: number, w: number, h: number, mat: Material, spin: number, lift = 0.002) {
+    // the parts are new: bring their place in the world up to date before casting at them
+    this.habHull.updateWorldMatrix(true, false);
+    const origin = G.localToWorld(new Vector3(x, y, 5));
+    const dir = new Vector3(0, 0, -1).transformDirection(G.matrixWorld);
+    this.ray.set(origin, dir);
+    const hit = this.ray.intersectObject(this.habHull, false)[0];
+    if (!hit || !hit.face) return;
+    const n = hit.face.normal.clone().transformDirection(this.habHull.matrixWorld);
+    const p = hit.point.clone().addScaledVector(n, lift);
+    const mark = new Mesh(new BoxGeometry(w, h, 0.006), mat);
+    G.add(mark);
+    mark.position.copy(G.worldToLocal(p));
+    // face along the wall's normal, then turn about it
+    const ln = n.clone().transformDirection(new Matrix4().copy(G.matrixWorld).invert());
+    mark.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), ln);
+    mark.rotateZ(spin);
+  }
+
   /** A laser hit on a wall facing +z (local), at (x, y) on the face at depth z: a ragged burn round a hole. */
   private scorch(parent: Object3D, x: number, y: number, z: number, s: number) {
     const m = this.m;
@@ -196,7 +235,7 @@ export class Station {
       for (const z of [-1.7, 1.7]) this.add(G, new BoxGeometry(0.22, 0.5, 0.22), m.metal, x, 0.25, z);
     }
     this.add(G, new BoxGeometry(L + 0.2, 0.12, W - 0.4), m.metal, 0, 0.42, 0);
-    this.prism(G, L, W, H, m.hull, 0, y0, 0);
+    this.habHull = this.prism(G, L, W, H, m.hull, 0, y0, 0);
     // end caps a shade darker, and bands of the orange round it
     this.prism(G, 0.3, W + 0.08, H + 0.08, m.panel, -L / 2, y0, 0);
     this.prism(G, 0.3, W + 0.08, H + 0.08, m.panel, L / 2, y0, 0);
@@ -237,16 +276,34 @@ export class Station {
     // steps up to it
     this.add(G, new BoxGeometry(1.4, 0.15, 0.6), m.metal, dx, 0.08, face + 0.4);
     this.add(G, new BoxGeometry(1.4, 0.15, 0.4), m.metal, dx, 0.25, face + 0.2);
-    // the wall where they were shot: laser hits at chest and head height, close together
+    // the wall where they were shot: laser burns and grey-blue blood, at the heights of
+    // their chests and heads, a smear where one slid down it, drips running from the spatter
+    G.updateMatrixWorld(true);
+    const blood = toonMaterial({ dark: 0x1e2630, mid: 0x28323e, light: 0x34414f, litAt: 0.6, outline: 0, highlight: 0 });
     for (const [x, y, s] of [
-      [-5.05, 1.2, 0.75],
-      [-3.85, 1.45, 0.9],
-      [-3.3, 0.95, 0.6],
-      [-2.35, 1.3, 0.8],
-      [-4.4, 1.75, 0.55],
+      [-5.15, 1.75, 0.8],
+      [-3.75, 1.95, 0.9],
+      [-3.3, 1.6, 0.6],
+      [-2.2, 1.85, 0.85],
+      [-4.5, 2.2, 0.55],
     ]) {
-      this.scorch(G, x, y, face, s);
+      this.wallMark(G, x, y, 0.2 * s, 0.16 * s, m.charred, x * 7);
+      this.wallMark(G, x, y, 0.11 * s, 0.09 * s, m.soot, x * 3 + 1, 0.006);
+      this.wallMark(G, x, y, 0.05 * s, 0.05 * s, m.hole, 0, 0.012);
+      this.wallMark(G, x + 0.02, y + 0.2 * s, 0.09 * s, 0.28 * s, m.charred, 0.12, 0.003);
     }
+    for (const bx of [-5.05, -3.6, -2.15]) {
+      for (let k = 0; k < 9; k++) {
+        const a = k * 2.4 + bx;
+        const r = 0.12 + (k % 4) * 0.1;
+        const sz = 0.03 + ((k * 7) % 5) * 0.022;
+        this.wallMark(G, bx + Math.cos(a) * r, 1.6 + Math.sin(a) * r * 0.8, sz * 1.3, sz, blood, a, 0.008);
+      }
+      // drips run down from it
+      for (let k = 0; k < 3; k++) this.wallMark(G, bx - 0.15 + k * 0.14, 1.32 - k * 0.06, 0.025, 0.34 + k * 0.12, blood, 0, 0.009);
+    }
+    // where the middle one slid down the wall
+    this.wallMark(G, -3.6, 1.25, 0.22, 0.7, blood, 0.04, 0.01);
     // roof: vents, a hatch, conduits, a small antenna
     const top = 0.45 + H;
     for (const [x, z, w, d] of [
@@ -404,26 +461,6 @@ export class Station {
       this.add(G, new BoxGeometry(0.2, 0.12, 0.3), k % 2 ? m.metal : m.glass, -1.8 + k * 0.25, 0.06, 1.7 + (k % 3) * 0.2, false).rotation.y = k;
     }
     return [G];
-  }
-
-  /** The landing pad: a low round deck with an orange ring and markings, scorched. */
-  private buildPad() {
-    const m = this.m;
-    const G = new Group();
-    this.seat(G, -8.0, 2.6, 2.6);
-    this.group.add(G);
-    // the deck, with a skirt down into the ground so it never floats
-    this.add(G, new CylinderGeometry(2.7, 2.8, 0.6, 12), m.pad, 0, -0.16, 0);
-    this.add(G, new TorusGeometry(2.25, 0.07, 3, 12).rotateX(Math.PI / 2), m.accent, 0, 0.15, 0, false);
-    for (const [x, z, w, d] of [
-      [-0.5, 0, 0.16, 1.3],
-      [0.5, 0, 0.16, 1.3],
-      [0, 0, 1.0, 0.16],
-    ]) {
-      this.add(G, new BoxGeometry(w, 0.02, d), m.hull, x, 0.15, z, false);
-    }
-    const burn = this.add(G, new CylinderGeometry(1.1, 1.2, 0.02, 9), m.soot, 0.7, 0.15, -0.5, false);
-    burn.scale.set(1.2, 1, 0.8);
   }
 
   /** Lamp posts round the summit; one of them flickers. */
