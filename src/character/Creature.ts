@@ -43,7 +43,12 @@ export type StaminaCue = 'warn' | 'warn-late' | 'exhausted';
 export interface World {
   height(x: number, z: number): number;
   rocks: RockInfo[];
+  /** Where slopes too steep to climb stop the creature (cliffs), if anywhere. */
+  cliffs?: (x: number, z: number) => boolean;
 }
+
+/** Steeper than this (rise over run) is a cliff: it cannot be walked up. */
+const CLIFF = 1.15;
 
 const WALK_SPEED = 1.85;
 const SPRINT_SPEED = 6.3;
@@ -292,8 +297,31 @@ export class Creature {
     this.vel.x = damp(this.vel.x, tvx, rate, dt);
     this.vel.z = damp(this.vel.z, tvz, rate, dt);
 
+    const ox = this.pos.x;
+    const oz = this.pos.z;
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
+    // a cliff: the part of the step that would climb it is taken back
+    if (world.cliffs?.(this.pos.x, this.pos.z)) {
+      const e = 0.2;
+      const gx = (world.height(this.pos.x + e, this.pos.z) - world.height(this.pos.x - e, this.pos.z)) / (2 * e);
+      const gz = (world.height(this.pos.x, this.pos.z + e) - world.height(this.pos.x, this.pos.z - e)) / (2 * e);
+      const s = Math.hypot(gx, gz);
+      if (s > CLIFF) {
+        const nx = gx / s;
+        const nz = gz / s;
+        const up = (this.pos.x - ox) * nx + (this.pos.z - oz) * nz;
+        if (up > 0) {
+          this.pos.x -= up * nx;
+          this.pos.z -= up * nz;
+          const vu = this.vel.x * nx + this.vel.z * nz;
+          if (vu > 0) {
+            this.vel.x -= vu * nx;
+            this.vel.z -= vu * nz;
+          }
+        }
+      }
+    }
 
     // rocks push us out; a few passes settle corners between rocks
     for (let pass = 0; pass < 3; pass++) {

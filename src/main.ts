@@ -33,6 +33,8 @@ import { DoorScene } from './story/DoorScene';
 import { PickupScene } from './story/PickupScene';
 import { PeekScene } from './story/PeekScene';
 import { strayDebris } from './world/strayDebris';
+import { HIGH, highlandMask } from './world/highlands';
+import { Highlands } from './world/highlandLife';
 import { Tracker } from './world/tracker';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
@@ -52,7 +54,7 @@ scene.add(streaks.mesh);
 const dust = new Dust(1800);
 scene.add(dust.mesh);
 
-const world: World = { height: terrainHeight, rocks: rocks.nearby };
+const world: World = { height: terrainHeight, rocks: rocks.nearby, cliffs: (x, z) => highlandMask(x, z) > 0.05 };
 const START = new Vector2(-46, 11);
 /** How far right of the start the first pod's crater lies (its trench reaches back toward the start). */
 const CRASH_DISTANCE = 38;
@@ -75,6 +77,8 @@ let doorScene: DoorScene | null = null;
 let padMode = false;
 let padWeight = 0;
 let stranger: Stranger | null = null;
+// the highlands the tracker leads to
+let highlands: Highlands | null = null;
 // the tracker left in the ship's doorway, and taking it up
 let tracker: Tracker | null = null;
 let pickup: PickupScene | null = null;
@@ -118,6 +122,8 @@ const TRAIL_LENGTH = 22;
  * the screen, out of sight from there, its trench running back past the trail.
  */
 const SHIP_OFFSET = new Vector2(32, -12);
+/** How far the highlands' heart lies from the ship, to the north-east (a long walk). */
+const HIGHLAND_DISTANCE = 130;
 
 /**
  * Lay out the second pod and its survivor around the crater (crater at 0, 0),
@@ -236,6 +242,19 @@ function layoutWorld() {
       SITE3.on = true;
       shared.uSite3.value.set(SITE3.x, SITE3.z, SITE3.dx, SITE3.dz);
       shared.uSite3On.value = 1;
+      // the highlands, far off to the north-east of the ship, opening toward it
+      HIGH.x = SITE3.x + HIGHLAND_DISTANCE * Math.SQRT1_2;
+      HIGH.z = SITE3.z - HIGHLAND_DISTANCE * Math.SQRT1_2;
+      const ox = SITE3.x - HIGH.x;
+      const oz = SITE3.z - HIGH.z;
+      const ol = Math.hypot(ox, oz);
+      HIGH.ox = ox / ol;
+      HIGH.oz = oz / ol;
+      HIGH.on = true;
+      shared.uHigh.value.set(HIGH.x, HIGH.z, HIGH.ox, HIGH.oz);
+      shared.uHighOn.value = 1;
+      highlands = new Highlands(dust, audio, rocks);
+      highlands.addTo(scene);
     }
   }
   rocks.refresh();
@@ -735,6 +754,14 @@ function finishFrame(dt: number, target: Vector3) {
       noticeWhat = ship;
     }
   }
+  if (highlands) {
+    highlands.update(dt, creature.pos, wind);
+    if (highlands.justDiscovered && !wake.active) {
+      audio.vista();
+      noticeTime = 3.5;
+      noticeWhat = highlands;
+    }
+  }
   if (doorScene && !doorScene.active) doorScene.update(dt); // eases the camera back out
   if (pickup && !pickup.active) pickup.update(dt);
   if (peek && !peek.active) peek.update(dt);
@@ -829,6 +856,10 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     get pickup() {
       return pickup;
     },
+    get highlands() {
+      return highlands;
+    },
+    HIGH,
     get peek() {
       return peek;
     },

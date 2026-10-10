@@ -21,16 +21,12 @@ import { SHADOW_LAYER } from '../render/PixelRenderer';
 import { Glow } from '../render/glow';
 import { terrainHeight } from './terrain';
 import { pushOutOfRock, type RockInfo } from './rocks';
+import { HIGH } from './highlands';
 import type { Ship } from './ship';
 import type { Dust } from './particles';
 import type { AudioEngine } from '../audio/AudioEngine';
 import type { Creature } from '../character/Creature';
 
-/**
- * Where the tracker leads, from the ship's centre: 50 units to the north-east
- * (screen up and right: +x, -z).
- */
-export const TRACK_OFFSET = new Vector2(50 * Math.SQRT1_2, -50 * Math.SQRT1_2);
 /** Within this angle of the way to go it holds a solid light; it lets go a little wider (hysteresis). */
 const HOT_IN = (26 * Math.PI) / 180;
 const HOT_OUT = (34 * Math.PI) / 180;
@@ -156,7 +152,8 @@ export class Tracker {
     private readonly audio: AudioEngine,
     private readonly rocks: RockInfo[],
   ) {
-    this.target.set(ship.center.x + TRACK_OFFSET.x, 0, ship.center.z + TRACK_OFFSET.y);
+    // it leads to the heart of the highlands, far to the north-east
+    this.target.set(HIGH.x, 0, HIGH.z);
     this.target.y = terrainHeight(this.target.x, this.target.z);
     this.ledMat = toonMaterial({ dark: 0x0c1a10, mid: 0x0c1a10, light: 0x0c1a10, unlit: true, outline: 0 });
     this.tipMat = toonMaterial({ dark: 0x0c1a10, mid: 0x0c1a10, light: 0x0c1a10, unlit: true, outline: 0 });

@@ -16,6 +16,7 @@ import {
 import { hash01, hashU } from './noise';
 import { duneField, terrainHeight } from './terrain';
 import { siteMask } from './crater';
+import { highlandMask } from './highlands';
 import { toonMaterial } from '../render/shared';
 import { PALETTE } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
@@ -128,7 +129,7 @@ export function pushOutOfRock(rock: RockInfo, p: { x: number; z: number }, r: nu
 
 const VARIANTS = 6;
 
-function makeRockGeometry(seed: number): BufferGeometry {
+export function makeRockGeometry(seed: number): BufferGeometry {
   const rand = rng(seed * 9973 + 17);
   const base = new IcosahedronGeometry(1, seed % 2);
   const pos = base.getAttribute('position') as BufferAttribute;
@@ -247,6 +248,8 @@ export class Rocks {
       const sy = size * (0.7 + rand() * 0.6);
       const sz = size * (0.8 + rand() * 0.5);
       const h = terrainHeight(wx, wz);
+      // the highlands have their own red boulders (see highlandLife.ts)
+      if (highlandMask(wx, wz) > 0.2) return;
       e.set((rand() - 0.5) * 0.3, rand() * Math.PI * 2, (rand() - 0.5) * 0.3);
       q.setFromEuler(e);
       p.set(wx, h - sy * 0.12, wz);

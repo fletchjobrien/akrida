@@ -65,6 +65,7 @@ wakes. Walk right:
 | The second pod | 64 |
 | The dying stranger | 86 |
 | The ship (centre, a little up the screen) | 118 |
+| The heart of the highlands (far up the screen) | about 210 (and 104 up) |
 
 A few steps from where the creature wakes lies the first hint: a small curved
 scrap of the pod's white shell with a strip of its orange band, tipped up and
@@ -303,8 +304,8 @@ doorway, and it pulses softly.
    in both hands and look down at it. The camera leans in, and the world goes a
    little quieter. While you hold it out, your creature turns on the spot to
    face the cursor, so you can sweep the device round to find the way.
-3. **Hot or cold.** The device knows where something lies, 50 units north-east
-   of the ship (up and to the right on screen):
+3. **Hot or cold.** The device leads to the heart of the highlands, 130 units
+   north-east of the ship (up and to the right on screen; see below):
    - **Wrong way:** the light, its halo and its glow on the ground throb red,
      very slowly (one throb in about 2.3 to 3.4 seconds, a little quicker the
      nearer you point). Each throb comes with a deep, soft pulse of sound and
@@ -323,12 +324,12 @@ doorway, and it pulses softly.
    it casts a faint pool of its colour on the ground. Click it again to walk over and
    pick it up.
 
-Nothing lies at the place yet.
+Nothing lies at its heart yet.
 
 **Code:**
 - The ship, its effects, the keypad and the door are in `src/world/ship.ts`.
 - The tracker (model, light, hot or cold, falling, sound levels) is in
-  `src/world/tracker.ts`. Its target is `TRACK_OFFSET` from the ship's centre.
+  `src/world/tracker.ts`. Its target is the centre of the highlands (`HIGH`).
 - Picking it up is a scripted pose sequence in `src/story/PickupScene.ts`.
   Holding it out is a blend in the creature's normal update (`holdOut` in
   `src/character/Creature.ts`): both arms reach by IK to a point in front of
@@ -340,6 +341,48 @@ Nothing lies at the place yet.
 - The pull is a scripted pose sequence, in `src/story/DoorScene.ts`.
 - Each glyph is a 7x7 pixel pattern drawn by a small shader on its button.
 - With `?debug`, `__akrida.ship.press(i)` presses button `i`.
+
+## The highlands
+
+Far to the north-east of the ship, 130 units on (about a minute's walk), a
+rocky plateau rises out of the desert. It is the place the tracker leads to.
+
+- **Shape:** the dunes die away and the sand turns red as the ground rises.
+  Buttes stand out in the desert around it. The plateau climbs toward the
+  north in rugged ridges and spurs, up to about 26 units high.
+  - Its cliffs face south-west, toward you, so their rock layers always show,
+    and the high ground is to the north, where it never hides the creature.
+  - At its heart is an amphitheatre: a round basin walled by sheer, banded
+    cliffs. It is open to the south-west by a valley whose sandy floor ramps
+    gently up into it. The tracker leads to the middle of the basin.
+- **Rock:** bare rock shows wherever the ground is steep. It is layered
+  sandstone, orange, rust, cream, red-brown and salmon, in level beds that
+  continue from cliff to cliff, with thin dark partings between them. Dark
+  streaks of desert varnish run down the steepest faces. The cliffs step back
+  in uneven ledges, and the edge between rock and sand wanders like scree.
+  Red sandstone boulders lie at the cliff feet, thickest close under them; the
+  basin's heart and the valley floor are clear.
+- **Walking:** the creature cannot climb the cliffs (anything steeper than
+  about 49 degrees stops it). It walks up the valley into the basin, and can
+  explore the ledges and the foot of every cliff.
+- **Sound:** all of it echoes off the rock.
+  - Wind moans through the openings in the rock: three narrow resonances that
+    drift and gust, louder in strong wind, with a thin whistle off a sharp edge.
+  - Now and then pebbles skitter down a cliff near you. You see them bounce
+    down the face in a thin veil of red dust.
+  - Rarely, far off, a slab lets go with a long low rumble and a clatter.
+  - Near the heart of the basin, a low hum rises: two low notes slowly beating,
+    with a faint high glint over them.
+- **First sight:** when the cliffs come into view, a wide, open chord swells
+  slowly, and your creature turns to look up at them.
+
+**Code:**
+- The shape (height and mask) is in `src/world/highlands.ts`, on the CPU and
+  the GPU (uniforms `uHigh` and `uHighOn`). The rock shading is in
+  `src/world/terrain.ts`.
+- The boulders, falling pebbles, sound levels and first sight are in
+  `src/world/highlandLife.ts`. The boulders are placed a few milliseconds at
+  a time after start-up, so loading never stalls.
 
 ## Stamina
 
@@ -462,7 +505,7 @@ src/
   render/                 pixel renderer, palette, shared lighting
   world/                  terrain, noise, rocks, wind, particles, footprints,
                           crater, pods and ship, stain map (blood, drag marks),
-                          the tracker
+                          the tracker, the highlands
   character/              creature rig and procedural animation
   audio/                  synthesised sound, the stranger's voice
   story/                  the opening, the stranger, the tune,

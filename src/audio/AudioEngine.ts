@@ -433,6 +433,14 @@ export class AudioEngine {
     hot: GainNode;
     fizz: GainNode | null;
   } | null = null;
+  // the highlands: wind moaning through the rock, a thin whistle, and the hum at their heart
+  private high: {
+    bus: GainNode;
+    moan: GainNode;
+    whistle: GainNode;
+    heart: GainNode;
+    level: number;
+  } | null = null;
   /** 0..1 multiplier on the surroundings (wind, the wreck), lowered for close moments. */
   private envLevel = 1;
 
@@ -1488,6 +1496,207 @@ export class AudioEngine {
     }
   }
 
+  // --------------------------------------------------------------- highlands
+
+  private highBus() {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return null;
+    if (this.high) return this.high;
+    const bus = ctx.createGain();
+    bus.gain.value = 0;
+    bus.connect(this.master);
+    // everything out there echoes off the rock
+    const send = ctx.createGain();
+    send.gain.value = 1.1;
+    bus.connect(send).connect(this.reverbSend);
+    const lfo = (f: number, depth: number, to: AudioParam) => {
+      const o = ctx.createOscillator();
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.value = depth;
+      o.connect(g).connect(to);
+      o.start();
+    };
+    // wind across the openings in the rock: two narrow, drifting resonances that gust
+    const moan = ctx.createGain();
+    moan.gain.value = 0;
+    moan.connect(bus);
+    for (const [f, q, drift, rate, g] of [
+      [205, 14, 26, 0.061, 7],
+      [318, 17, 34, 0.093, 5],
+      [143, 11, 15, 0.047, 6],
+    ]) {
+      const src = this.loop(ctx, this.white);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f;
+      bp.Q.value = q;
+      lfo(rate, drift, bp.frequency);
+      const gust = ctx.createGain();
+      gust.gain.value = g * 0.6;
+      lfo(rate * 1.7 + 0.03, g * 0.4, gust.gain);
+      src.connect(bp).connect(gust).connect(moan);
+    }
+    // a thin whistle off a sharp edge, coming and going
+    const whistle = ctx.createGain();
+    whistle.gain.value = 0;
+    whistle.connect(bus);
+    {
+      const src = this.loop(ctx, this.white);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1240;
+      bp.Q.value = 38;
+      lfo(0.07, 90, bp.frequency);
+      const g = ctx.createGain();
+      g.gain.value = 3;
+      lfo(0.11, 2.6, g.gain);
+      src.connect(bp).connect(g).connect(whistle);
+    }
+    // at the heart of the place: a low hum, two notes slowly beating, and a faint high glint over them
+    const heart = ctx.createGain();
+    heart.gain.value = 0;
+    const hlp = ctx.createBiquadFilter();
+    hlp.type = 'lowpass';
+    hlp.frequency.value = 420;
+    hlp.connect(heart).connect(bus);
+    for (const [f, g, type] of [
+      [49, 0.5, 'sine'],
+      [49.35, 0.35, 'sine'],
+      [73.4, 0.3, 'triangle'],
+      [98.3, 0.12, 'sine'],
+      [587.3, 0.025, 'sine'],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(f > 400 ? heart : hlp);
+      o.start();
+    }
+    this.high = { bus, moan, whistle, heart, level: 0 };
+    return this.high;
+  }
+
+  /** How far into the highlands (0..1), how near their heart (0..1), and the wind (0..1). */
+  setHighlands(level: number, heart: number, wind: number) {
+    const ctx = this.ctx;
+    if (!ctx || (level <= 0 && !this.high)) return;
+    const h = this.highBus();
+    if (!h) return;
+    const now = ctx.currentTime;
+    h.level = level;
+    h.bus.gain.setTargetAtTime(level * this.envLevel, now, 0.5);
+    h.moan.gain.setTargetAtTime(0.05 * (0.35 + 0.65 * wind), now, 0.8);
+    h.whistle.gain.setTargetAtTime(0.012 * wind * wind, now, 0.8);
+    h.heart.gain.setTargetAtTime(0.06 * heart, now, 1.2);
+  }
+
+  /** A trickle of pebbles skittering down a rock face somewhere near, echoing. */
+  highlandPebbles(level: number, pan: number) {
+    const ctx = this.ctx;
+    const h = this.highBus();
+    if (!ctx || !h || !this.ticks.length) return;
+    const now = ctx.currentTime;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(h.bus);
+    const n = 5 + Math.floor(Math.random() * 7);
+    let t = now;
+    for (let k = 0; k < n; k++) {
+      t += 0.04 + Math.random() * 0.12 * (1 - k / n);
+      const src = ctx.createBufferSource();
+      src.buffer = this.any(this.ticks);
+      src.playbackRate.value = 1.1 + Math.random() * 1.6;
+      const g = ctx.createGain();
+      g.gain.value = level * (1 - k / (n + 2)) * (0.5 + Math.random() * 0.5);
+      src.connect(g).connect(p);
+      src.start(t);
+    }
+    const pour = ctx.createBufferSource();
+    pour.buffer = this.any(this.pours);
+    pour.playbackRate.value = 1.3;
+    const pg = ctx.createGain();
+    pg.gain.setValueAtTime(level * 0.25, now);
+    pg.gain.setTargetAtTime(0.0001, now + 0.6, 0.2);
+    pour.connect(pg).connect(p);
+    pour.start(now, 0, 1.5);
+  }
+
+  /** Far off, a slab lets go: a long low rumble, a clatter, and the echo coming back. */
+  highlandRockfall(level: number, pan: number) {
+    const ctx = this.ctx;
+    const h = this.highBus();
+    if (!ctx || !h || !this.white) return;
+    const now = ctx.currentTime;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(h.bus);
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(260, now);
+    lp.frequency.exponentialRampToValueAtTime(90, now + 2.6);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level * 2.4, now + 0.25);
+    g.gain.setTargetAtTime(0.0001, now + 0.9, 0.7);
+    src.connect(lp).connect(g).connect(p);
+    src.start(now, Math.random(), 3.5);
+    for (let k = 0; k < 9; k++) {
+      const c = ctx.createBufferSource();
+      c.buffer = this.any(k % 3 === 0 ? this.clanks : this.ticks);
+      c.playbackRate.value = 0.5 + Math.random() * 0.6;
+      const cg = ctx.createGain();
+      cg.gain.value = level * 0.4 * (1 - k / 11);
+      const lp2 = ctx.createBiquadFilter();
+      lp2.type = 'lowpass';
+      lp2.frequency.value = 1400;
+      c.connect(lp2).connect(cg).connect(p);
+      c.start(now + 0.15 + k * (0.08 + Math.random() * 0.14));
+    }
+  }
+
+  /** The highlands come into view: a wide, open chord, slowly swelling. */
+  vista() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.linearRampToValueAtTime(0.13, now + 3.2);
+    out.gain.setValueAtTime(0.13, now + 5);
+    out.gain.linearRampToValueAtTime(0.0001, now + 11);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(300, now);
+    lp.frequency.linearRampToValueAtTime(1500, now + 3.6);
+    lp.frequency.linearRampToValueAtTime(400, now + 11);
+    lp.connect(out).connect(this.master);
+    out.connect(this.reverbSend);
+    // open fifths on D, stacked wide, the top voices a hair apart so they shimmer
+    for (const [f, type, g] of [
+      [73.42, 'triangle', 0.5],
+      [110, 'sine', 0.4],
+      [146.83, 'triangle', 0.26],
+      [220, 'sine', 0.2],
+      [220.6, 'sine', 0.14],
+      [329.63, 'sine', 0.09],
+      [440.9, 'sine', 0.04],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(lp);
+      o.start(now);
+      o.stop(now + 11.5);
+    }
+  }
+
   stinger() {
     const ctx = this.ctx;
     if (!ctx) return;
@@ -1583,6 +1792,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     if (!ctx) return;
     for (const n of this.sites) n.bus.gain.setTargetAtTime(n.level * level, ctx.currentTime, 0.4);
+    if (this.high) this.high.bus.gain.setTargetAtTime(this.high.level * level, ctx.currentTime, 0.4);
   }
 
   private playStranger(buf: Buf | undefined, level: number, rate = 1, delay = 0) {
