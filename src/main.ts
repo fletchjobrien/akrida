@@ -43,6 +43,7 @@ import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
 import { Drone } from './story/Drone';
 import { Strike } from './story/Strike';
+import { Locusts } from './story/Locusts';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const pr = new PixelRenderer(canvas);
@@ -107,6 +108,8 @@ let highlands: Highlands | null = null;
 let station: Station | null = null;
 let fallen: Fallen | null = null;
 let fallenSeen = false;
+// the carrion locusts eating them
+let locusts: Locusts | null = null;
 // the tracker left in the ship's doorway, and taking it up
 let tracker: Tracker | null = null;
 let pickup: PickupScene | null = null;
@@ -444,11 +447,15 @@ function* buildStation(): Generator<unknown, void, unknown> {
   yield* f.build();
   yield compile(st.group);
   yield compile(f.group);
+  const l = new Locusts(f.feedPoints, () => rocks.nearby, dust, audio);
+  yield compile(l.group);
   st.addTo(scene);
   f.addTo(scene);
+  l.addTo(scene);
   rocks.refresh();
   station = st;
   fallen = f;
+  locusts = l;
 }
 
 /** Seconds left of the creature staring at something it has just noticed. */
@@ -995,6 +1002,7 @@ function finishFrame(dt: number, target: Vector3) {
   if (station) station.update(dt, elapsed, creature.pos, inside ? Math.max(insideW, 0.6) : 0);
   audio.setIndoors(insideW);
   if (fallen) fallen.update(dt, creature.pos);
+  if (locusts) locusts.update(dt, creature.pos, creature.speed, !inside);
   if (fallen && !fallenSeen && !wake.active && Math.hypot(creature.pos.x - fallen.lookPoint.x, creature.pos.z - fallen.lookPoint.z) < 10) {
     // the three of them, lined up against the wall
     fallenSeen = true;
@@ -1153,6 +1161,9 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     get fallen() {
       return fallen;
+    },
+    get locusts() {
+      return locusts;
     },
     HIGH,
     get peek() {

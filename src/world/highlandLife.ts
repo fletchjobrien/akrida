@@ -11,7 +11,6 @@ import { hash01 } from './noise';
 import type { Dust } from './particles';
 import type { Wind } from './wind';
 import type { AudioEngine } from '../audio/AudioEngine';
-import { Birds } from './birds';
 
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
@@ -47,7 +46,7 @@ interface Crag {
  * Then: the first sight of the mountain, its sound (wind moaning through the
  * rock, a low hum near the station), pebbles that now and then skitter down a
  * rock near the creature, a far-off rockfall now and then, sand streaming off
- * the spires in the wind, and carrion birds circling over the station.
+ * the spires in the wind.
  */
 export class Highlands {
   justDiscovered = false;
@@ -60,7 +59,6 @@ export class Highlands {
   readonly boulders: InstancedMesh[] = [];
   private readonly crags: Crag[] = [];
   private readonly spires: Crag[] = [];
-  private readonly birds: Birds;
 
   private readonly geos = Array.from({ length: VARIANTS }, (_, i) => makeRockGeometry(i + 11));
   /** Each rock's highest and lowest point (it is placed by these). */
@@ -99,7 +97,6 @@ export class Highlands {
       mesh.layers.enable(SHADOW_LAYER);
       this.boulders.push(mesh);
     }
-    this.birds = new Birds(audio);
     this.placing = this.raise(rocks);
   }
 
@@ -108,7 +105,6 @@ export class Highlands {
 
   addTo(scene: Object3D) {
     for (const m of this.boulders) scene.add(m);
-    this.birds.addTo(scene);
   }
 
   private readonly m = new Matrix4();
@@ -354,7 +350,6 @@ export class Highlands {
     const near = smooth(HIGH_REACH + 15, 52, dc);
     const heart = smooth(26, 5, dc);
     this.audio.setHighlands(near, heart, wind.strength);
-    this.birds.update(dt, listener, dc);
     if (near <= 0) return;
 
     // pebbles let go off a rock close by

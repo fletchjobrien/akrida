@@ -134,6 +134,8 @@ export class Fallen {
   readonly group = new Group();
   /** The middle of the row, for the creature to look at. */
   readonly lookPoint = new Vector3();
+  /** Where things feeding on them settle: on their heads, chests and hips, and at their blood (world space). */
+  readonly feedPoints: Vector3[] = [];
   private readonly smokeFrom: Object3D[] = [];
   private smokeTimer = 0.5;
 
@@ -197,6 +199,11 @@ export class Fallen {
         }
       });
       rig.root.updateMatrixWorld(true);
+      for (const part of [rig.head, rig.chest, rig.pelvis]) {
+        const p = part.getWorldPosition(new Vector3());
+        p.y += 0.1;
+        this.feedPoints.push(p);
+      }
       // the cord binding the wrists, pulled between the two hands
       const a = rig.arms[0].hand.getWorldPosition(new Vector3());
       const b = rig.arms[1].hand.getWorldPosition(new Vector3());
@@ -221,6 +228,7 @@ export class Fallen {
         const pz = z + along.z * dx + out.z * dz;
         const pool = new Mesh(new CylinderGeometry(r, r * 1.1, 0.01, 7), blood);
         pool.position.set(px, terrainHeight(px, pz) + 0.008 + k * 0.001, pz);
+        if (k < 2) this.feedPoints.push(pool.position.clone().setY(pool.position.y + 0.005));
         pool.scale.set(1.35, 1, 0.85);
         pool.rotation.y = yaw + k * 1.3;
         this.group.add(pool);

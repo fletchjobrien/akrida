@@ -378,10 +378,6 @@ it, in a saddle of its ridge. It is the place the tracker leads to.
   anything steeper than about 49 degrees. It walks up the path or picks its
   way between the outcrops.
 - **Life and effects:**
-  - Three carrion birds circle slowly over the station. They glide on stiff,
-    slightly raised wings, bank into the turn, and now and then beat their
-    wings a few times. Their shadows sweep over the ground. Now and then one
-    cries: a thin, rough call that falls away and echoes.
   - Sand streams off the tops of the spires in the wind, thickest in the
     gusts.
   - Now and then pebbles skitter down a rock near you, in a thin veil of
@@ -427,6 +423,25 @@ modules banded in orange, dark metal and glass.
     the middle one slid down.
   - The first time you come near, a low, sad chord swells and your creature
     turns to look at them.
+- **The locusts:** a swarm of carrion locusts is eating the three. They are
+  big alien hoppers, bronze and olive, with glowing amber compound eyes,
+  smoky veined wings folded along their backs, long feelers, and the great
+  kinked hind legs of their kind.
+  - They crawl over the bodies and the blood. Heads jerk down to tear, jaws
+    work, abdomens pulse, and now and then one hops to a better place on a
+    buzz of wings. You hear a dry, busy clicking of jaws, now and then wet.
+  - When your creature comes near (or comes running from further off), they
+    freeze, turn to face it, feelers up and wings half lifted, and a dry
+    rattle runs through the swarm.
+  - Then they break, scattering to either side: a fast six-legged scuttle,
+    zigzagging, with buzzing hops. They veer along walls and rocks. Their
+    feet patter on the sand, leaving fine double lines of tracks and little
+    puffs of sand.
+  - Once clear, each one stops, tips its head down and digs in, wriggling
+    and paddling under in a spray of sand, with a scratching sound. It leaves
+    a small churned mound with a hole in it and a fan of darker sand behind.
+  - Long after your creature has gone (over 32 units away for 12 seconds),
+    they come back to the bodies.
 - The tracker burns solid green once you are at the station.
 
 ### Inside the station
@@ -523,13 +538,14 @@ something comes for it.
   for each big one), the sand streamers, the falling pebbles, the sound
   levels and the first sight are in `src/world/highlandLife.ts`. The rock is
   raised a few milliseconds at a time once the creature is on its way, so
-  nothing stalls. The birds are in `src/world/birds.ts`.
+  nothing stalls.
 - The station's interior (rooms, lamps, walls to bump into, and what goes on
   inside) is in `src/world/stationInterior.ts`. The parts that come away for
   the cutaway are in the station's `shell` group: they are hidden from the
   camera but still cast their shadow. The lamps are a term in the shared toon
   lighting (`roomLight` in `src/render/shared.ts`) that lights only what is
   inside the station's walls.
+- The locusts are in `src/story/Locusts.ts`.
 - The drone is in `src/story/Drone.ts`; the strike (explosion, the body,
   the death) in `src/story/Strike.ts`. The checkpoints and the respawn are in
   `src/main.ts` (`saveCheckpoint`, `respawn`).

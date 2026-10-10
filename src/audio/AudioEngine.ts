@@ -1765,51 +1765,6 @@ export class AudioEngine {
   }
 
   /**
-   * A carrion bird's cry, high over the rock: a thin, rough call that rises a
-   * little and falls away, once or twice, echoing.
-   */
-  birdCry(level: number, pan: number) {
-    const ctx = this.ctx;
-    const h = this.highBus();
-    if (!ctx || !h) return;
-    const now = ctx.currentTime;
-    const p = ctx.createStereoPanner();
-    p.pan.value = pan;
-    p.connect(h.bus);
-    p.connect(this.reverbSend);
-    const calls = Math.random() < 0.5 ? 1 : 2;
-    for (let c = 0; c < calls; c++) {
-      const t = now + c * (0.55 + Math.random() * 0.15);
-      const f0 = 1650 + Math.random() * 250;
-      const o = ctx.createOscillator();
-      o.type = 'sawtooth';
-      o.frequency.setValueAtTime(f0 * 0.92, t);
-      o.frequency.linearRampToValueAtTime(f0 * 1.05, t + 0.07);
-      o.frequency.exponentialRampToValueAtTime(f0 * 0.62, t + 0.5);
-      // a rasp in the throat
-      const vib = ctx.createOscillator();
-      vib.frequency.value = 38 + Math.random() * 8;
-      const vg = ctx.createGain();
-      vg.gain.value = f0 * 0.025;
-      vib.connect(vg).connect(o.frequency);
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = f0 * 1.1;
-      bp.Q.value = 3;
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(level, t + 0.05);
-      g.gain.setTargetAtTime(level * 0.5, t + 0.12, 0.1);
-      g.gain.setTargetAtTime(0.0001, t + 0.38, 0.06);
-      o.connect(bp).connect(g).connect(p);
-      o.start(t);
-      vib.start(t);
-      o.stop(t + 0.75);
-      vib.stop(t + 0.75);
-    }
-  }
-
-  /**
    * Indoors (0..1): the wind and the rock outside fall to a dull murmur
    * through the walls, and the room's own sound comes up: a lamp ballast's
    * buzz, an air handler's fan, a low vent drone, and the whine of the rack.
@@ -2351,6 +2306,167 @@ export class AudioEngine {
         this.ring.gain.cancelScheduledValues(now);
         this.ring.gain.setTargetAtTime(0, now, 0.3);
       }
+    }
+  }
+
+  /** A click of hard jaws, `at` seconds from now: a tiny bright tick, sometimes wet. */
+  private jawClick(at: number, level: number, pan: StereoPannerNode, wet: boolean) {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.white!;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2600 + Math.random() * 3200;
+    bp.Q.value = 3 + Math.random() * 3;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(level, at + 0.0008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.004 + Math.random() * 0.004);
+    src.connect(bp).connect(g).connect(pan);
+    src.start(at, Math.random() * 2, 0.02);
+    if (wet) {
+      // a squelch of torn flesh
+      const s2 = ctx.createBufferSource();
+      s2.buffer = this.white!;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'bandpass';
+      lp.frequency.setValueAtTime(700 + Math.random() * 500, at);
+      lp.frequency.exponentialRampToValueAtTime(260, at + 0.05);
+      lp.Q.value = 2.5;
+      const g2 = ctx.createGain();
+      g2.gain.setValueAtTime(0.0001, at);
+      g2.gain.exponentialRampToValueAtTime(level * 0.9, at + 0.006);
+      g2.gain.exponentialRampToValueAtTime(0.0001, at + 0.06);
+      s2.connect(lp).connect(g2).connect(pan);
+      s2.start(at, Math.random() * 2, 0.08);
+    }
+  }
+
+  private locustOut(pan: number) {
+    const p = this.ctx!.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(this.outside);
+    return p;
+  }
+
+  /** Jaws at work on the dead: a dry, busy clicking, now and then wet. */
+  locustChew(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = this.locustOut(pan);
+    const n = 2 + Math.floor(Math.random() * 4);
+    for (let k = 0; k < n; k++) this.jawClick(now + Math.random() * 0.1, level * (0.06 + Math.random() * 0.06), p, Math.random() < 0.18);
+  }
+
+  /** Startled: a dry rattle runs through the swarm, wings and legs scraping, rising. */
+  locustAlarm(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const p = this.locustOut(pan);
+    for (const [f, rate, delay] of [
+      [4300, 58, 0],
+      [5200, 71, 0.06],
+      [3600, 49, 0.12],
+    ]) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.white;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f;
+      bp.Q.value = 3;
+      const am = ctx.createGain();
+      am.gain.value = 0;
+      const lfo = ctx.createOscillator();
+      lfo.type = 'square';
+      lfo.frequency.setValueAtTime(rate * 0.7, now + delay);
+      lfo.frequency.linearRampToValueAtTime(rate * 1.3, now + delay + 0.7);
+      const lg = ctx.createGain();
+      lg.gain.value = 0.5;
+      lfo.connect(lg).connect(am.gain);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now + delay);
+      g.gain.exponentialRampToValueAtTime(level * 0.18, now + delay + 0.25);
+      g.gain.setTargetAtTime(0.0001, now + delay + 0.7, 0.12);
+      src.connect(bp).connect(am).connect(g).connect(p);
+      src.start(now + delay, Math.random(), 1.4);
+      lfo.start(now + delay);
+      lfo.stop(now + delay + 1.4);
+    }
+  }
+
+  /** Many small feet running over sand: a soft, quick patter. */
+  locustPatter(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = this.locustOut(pan);
+    for (let k = 0; k < 5; k++) {
+      const at = now + Math.random() * 0.03;
+      const src = ctx.createBufferSource();
+      src.buffer = this.white;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1800 + Math.random() * 2400;
+      bp.Q.value = 1.5;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(level * 0.05 * (0.5 + Math.random()), at + 0.001);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.006);
+      src.connect(bp).connect(g).connect(p);
+      src.start(at, Math.random() * 2, 0.02);
+    }
+  }
+
+  /** A hop: a short whirr of stiff wings. */
+  locustBuzz(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = this.locustOut(pan);
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.value = 140 + Math.random() * 60;
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1100 + Math.random() * 600;
+    bp.Q.value = 1.5;
+    const am = ctx.createGain();
+    am.gain.value = 0;
+    o.connect(am.gain);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level * 0.1, now + 0.03);
+    g.gain.setTargetAtTime(0.0001, now + 0.22, 0.04);
+    src.connect(bp).connect(am).connect(g).connect(p);
+    o.start(now);
+    o.stop(now + 0.45);
+    src.start(now, Math.random(), 0.45);
+  }
+
+  /** Digging in: quick scratching strokes in the sand, muffling as it goes under. */
+  locustDig(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.sprays.length || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = this.locustOut(pan);
+    for (let k = 0; k < 10; k++) {
+      const at = now + k * (0.08 + Math.random() * 0.04);
+      const src = ctx.createBufferSource();
+      src.buffer = this.any(this.sprays);
+      src.playbackRate.value = 1.3 + Math.random() * 0.5;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 5000 * (1 - k / 12) + 600;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(level * 0.12 * (1 - k / 13), at + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.07);
+      src.connect(lp).connect(g).connect(p);
+      src.start(at, Math.random() * 0.2, 0.1);
     }
   }
 
