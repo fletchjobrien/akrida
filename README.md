@@ -142,6 +142,14 @@ down differently:
      between. Its eye flares on each note and dips at the catch.
   4. Then everything eases back and you have control again. Click again to hear
      the tune again.
+- **Its death.** The tune was the last thing it had. When the keypad accepts
+  the tune, the stranger dies, out of sight behind you. It takes one last
+  breath in and a long one out, its eye catches twice and goes out, its lid
+  half closes, the glow in its wound dies, its head rolls aside, and the hand
+  on its wound slides off onto the sand. A few seconds after the door cracks,
+  a faint, muffled echo of its last note carries over the dunes. After that
+  it lies still and cannot be clicked. When you come back to it, a low, sad
+  swell plays and your creature turns to look at it.
 - **The tune** opens the ship's door (see below). `src/story/tune.ts` has the
   nine tones and the stranger's three. The nine are a stack of thirds over more
   than two octaves (G3 B3 D4 F4 A4 C5 E5 G5 B5), at least three semitones

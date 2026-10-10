@@ -84,6 +84,20 @@ const E = {
   end: 8.0,
 };
 
+/** How long it takes to die once the door is opened: a last breath, the eye going out, going limp. */
+const DEATH = {
+  /** The last breath in. */
+  inhale: 0.4,
+  /** The long last breath out. */
+  exhale: 1.5,
+  /** The eye flickers and goes out. */
+  eyeOut: 4.2,
+  eyeGone: 4.8,
+  /** The body goes slack: head rolls aside, the hand slides off the wound. */
+  slack: 3.6,
+  still: 6.5,
+};
+
 /** How close the player must be to reach the stranger, and how close it first notices them. */
 const REACH_RANGE = 2.7;
 const SIGHT_RANGE = 8.5;
@@ -115,6 +129,12 @@ export class Stranger {
   distance = Infinity;
   /** 0..1: how far the encounter has taken over the camera and sound. */
   weight = 0;
+  /** Dead (from the moment it starts to die), and seconds since it began, or -1. */
+  dead = false;
+  private deathT = -1;
+  /** Set for one frame when the player first comes back to it after it died. */
+  justFoundDead = false;
+  private foundDead = false;
   /** Seconds into the encounter, or -1. */
   private enc = -1;
   private encCount = 0;
@@ -216,6 +236,19 @@ export class Stranger {
     return this.creature.rig.head.getWorldPosition(out);
   }
 
+  /**
+   * It dies: the tune it gave was the last thing it had. Plays out over a few
+   * seconds (usually unseen, while the player is at the ship).
+   */
+  die() {
+    if (this.dead) return;
+    this.dead = true;
+    this.deathT = 0;
+    this.enc = -1;
+    this.reachT = -1;
+    this.struggle = 0;
+  }
+
   /** True while the encounter holds the player still. */
   get busy() {
     return this.enc >= 0 && this.enc < E.end;
@@ -223,14 +256,14 @@ export class Stranger {
 
   /** Whether a click at `mouse` (on the ground) from a player at `player` reaches the stranger. */
   canInteract(player: Vector3, mouse: Vector3 | null) {
-    if (this.busy || !mouse) return false;
+    if (this.busy || this.dead || !mouse) return false;
     if (Math.hypot(player.x - this.center.x, player.z - this.center.z) > REACH_RANGE) return false;
     return Math.hypot(mouse.x - this.center.x, mouse.z - this.center.z) < 0.95;
   }
 
   /** Start the encounter: the cry, then the tune. */
   interact() {
-    if (this.busy) return;
+    if (this.busy || this.dead) return;
     this.enc = 0;
     this.encCount++;
     this.notePlayed = 0;
@@ -248,9 +281,26 @@ export class Stranger {
     this.time += dt;
     const t = this.time;
     this.justSeen = false;
+    this.justFoundDead = false;
     const d = Math.hypot(player.x - this.center.x, player.z - this.center.z);
     this.distance = d;
-    if (!this.seen && d < SIGHT_RANGE) {
+    const prevDeath = this.deathT;
+    if (this.dead) this.deathT += dt;
+    const dt0 = this.deathT;
+    // its last breath, heard only from near; from far, the wind carries one faint note
+    if (this.dead) {
+      const crossed = (at: number) => prevDeath < at && dt0 >= at;
+      if (crossed(DEATH.inhale) && d < 30) this.audio.strangerBreath(0.6, true);
+      if (crossed(DEATH.exhale) && d < 30) this.audio.strangerBreath(0.55, false);
+      if (crossed(2.6) && d >= 12) this.audio.strangerFar(TUNE[2], 0.11);
+      if (!this.foundDead && dt0 > DEATH.still && d < SIGHT_RANGE * 0.7) {
+        this.foundDead = true;
+        this.justFoundDead = true;
+      }
+    }
+    const limp = this.dead ? smoothstep(DEATH.slack, DEATH.still, dt0) : 0;
+    const alive = 1 - limp;
+    if (!this.seen && !this.dead && d < SIGHT_RANGE) {
       this.seen = true;
       this.justSeen = true;
       this.reachT = 0;
@@ -294,11 +344,12 @@ export class Stranger {
     }
 
     // ---- breathing: agonal, a heaving gasp then a long ragged pause
-    this.updateBreath(dt, enc, inEnc, crying, singing);
+    if (this.dead) this.lastBreath(dt);
+    else this.updateBreath(dt, enc, inEnc, crying, singing);
 
     // ---- the eye gutters: dim, flickering, dropping out; it flares with each note
     this.eyeDropTimer -= dt;
-    if (this.eyeDropTimer <= 0) {
+    if (this.eyeDropTimer <= 0 && !this.dead) {
       this.eyeDrop = 0.05 + Math.random() * 0.14;
       this.eyeDropTimer = crying ? 0.08 + Math.random() * 0.3 : 0.6 + Math.random() * 3.2;
     }
@@ -310,6 +361,14 @@ export class Stranger {
     if (crying) eye += (Math.random() - 0.5) * 0.5;
     eye = Math.max(eye, noteAmt);
     if (this.eyeDrop > 0) eye *= 0.15;
+    if (this.dead) {
+      // it dims through the last breath, catches twice, and goes out
+      eye *= 1 - 0.45 * smoothstep(0, DEATH.eyeOut, dt0);
+      if (dt0 > DEATH.eyeOut) {
+        const u = (dt0 - DEATH.eyeOut) / (DEATH.eyeGone - DEATH.eyeOut);
+        eye = u < 1 && (u < 0.15 || (u > 0.4 && u < 0.5)) ? 0.6 : 0;
+      }
+    }
     const step = eye < 0.17 ? 0 : eye < 0.47 ? 1 : eye < 0.8 ? 2 : 3;
     const col = EYE_STEPS[step];
     for (const k of ['uDark', 'uMid', 'uLight'] as const) (this.eyeMat.uniforms[k].value as Vector3).copy(col);
@@ -324,7 +383,7 @@ export class Stranger {
     // (its left points along (cos yaw, -sin yaw) on the ground; rolling + turns its front that way)
     const toView = -Math.sin(this.yaw) >= 0 ? 1 : -1;
     let wantRoll = 0.3 * toView;
-    const watching = this.seen && d < 14;
+    const watching = this.seen && !this.dead && d < 14;
     if (watching) {
       const c = Math.cos(this.yaw);
       const s = Math.sin(this.yaw);
@@ -341,12 +400,19 @@ export class Stranger {
       const lift = smoothstep(E.lift, E.cry, enc) * (1 - smoothstep(E.sink, E.end, enc));
       wantPitch += 0.25 * lift + 0.08 * noteAmt;
     }
+    if (this.dead) {
+      // slack: the head rolls over toward the viewer and drops back
+      wantYaw = lerp(wantYaw, 0.95 * toView, limp);
+      wantPitch = lerp(wantPitch, -0.08, limp);
+      wantRoll = lerp(wantRoll, 0.38 * toView, limp);
+    }
     P.pelvisYaw = this.roll.update(dt, wantRoll);
     P.headYaw = this.lookYaw.update(dt, wantYaw);
     const pitch = this.lookPitch.update(dt, wantPitch);
     P.neckPitch = pitch * 0.55;
     P.headPitch = pitch * 0.45 - inhale * 0.12;
-    P.headRoll = crying ? noise1(t * 14, 31) * 0.12 : noise1(t * 0.7, 32) * 0.03;
+    P.headRoll = (crying ? noise1(t * 14, 31) * 0.12 : noise1(t * 0.7, 32) * 0.03) * alive + 0.12 * toView * limp;
+    P.eyeOpen = lerp(LYING.eyeOpen, 0.3, smoothstep(DEATH.eyeOut, DEATH.still, dt0));
     // gasping arches the back a little; crying racks the whole body
     P.spinePitch = LYING.spinePitch - inhale * 0.06 + (crying ? noise1(t * 9, 33) * 0.05 : 0);
     P.chestPitch = LYING.chestPitch - inhale * 0.05 + pitch * 0.15;
@@ -354,7 +420,7 @@ export class Stranger {
 
     // ---- now and then it struggles: a shudder, the good leg pushing at the sand
     this.struggleTimer -= dt;
-    if (this.struggleTimer <= 0 && !inEnc) {
+    if (this.struggleTimer <= 0 && !inEnc && !this.dead) {
       this.struggleTimer = 4 + Math.random() * 6;
       this.struggle = 1;
     }
@@ -382,12 +448,18 @@ export class Stranger {
       }
       this.audio.scuff(0.12 * saturate(1.5 - d / 8));
     }
-    P.tremble = 0.18 + this.struggle * 0.6 + (crying ? 0.75 : 0) + (singing ? 0.25 : 0) + this.reach.y * 0.35;
+    P.tremble = (0.18 + this.struggle * 0.6 + (crying ? 0.75 : 0) + (singing ? 0.25 : 0) + this.reach.y * 0.35) * alive;
 
     // ---- arms: one hand pressed to the wound, the other reaching out the first time it sees the player
     rigWound(this, _w);
     this.toBody(_w, P.handR);
     P.handR.y += 0.03;
+    if (limp > 0) {
+      // the hand slides off the wound and falls open on the sand
+      P.handR.x = lerp(P.handR.x, -0.36, limp);
+      P.handR.y = lerp(P.handR.y, 0.03, limp);
+      P.handR.z = lerp(P.handR.z, -0.12, limp);
+    }
     let reachWant = 0;
     if (this.reachT >= 0) {
       this.reachT += dt;
@@ -433,6 +505,14 @@ export class Stranger {
       if (u > 0 && u < 1) a = Math.max(a, Math.min(1, u * 8, (1 - u) * 4) * (1 - 0.8 * smoothstep(0.06, 0, Math.abs(u - 0.48))));
     }
     return a;
+  }
+
+  /** Dying: one last breath in, a long one out, and then nothing. */
+  private lastBreath(dt: number) {
+    const t = this.deathT;
+    const target = t < DEATH.inhale ? -0.3 : t < DEATH.exhale ? 1 : t < 4.5 ? -0.75 : -0.6;
+    this.breathDyn.setParams(t < DEATH.exhale ? 2.2 : 0.35, 1, 0);
+    this.breath.value = this.breathDyn.update(dt, target);
   }
 
   private updateBreath(dt: number, enc: number, inEnc: boolean, crying: boolean, singing: boolean) {

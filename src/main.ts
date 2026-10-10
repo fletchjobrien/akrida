@@ -605,9 +605,17 @@ function finishFrame(dt: number, target: Vector3) {
       noticeTime = 3;
       noticeWhat = 'stranger';
     }
+    if (stranger.justFoundDead) {
+      // back at its side, and it is gone
+      audio.sorrow();
+      noticeTime = 3.5;
+      noticeWhat = 'stranger';
+    }
   }
   if (ship) {
     ship.update(dt, elapsed, wind, creature.pos);
+    // its tune opened the door, and it was the last thing it had
+    if (ship.justSolved) stranger?.die();
     if (ship.justDiscovered && !wake.active) {
       audio.stinger();
       noticeTime = 3;

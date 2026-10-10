@@ -300,6 +300,8 @@ export class Ship {
   readonly center = new Vector3();
   justDiscovered = false;
   discovered = false;
+  /** Set for one frame when the keypad accepts the stranger's tune. */
+  justSolved = false;
   /** Distance from the listener to the nearest point of the hull's axis. */
   distance = Infinity;
   /** 0..1 shake of the ground after a blast, for the camera. */
@@ -1175,6 +1177,7 @@ export class Ship {
 
   update(dt: number, time: number, _wind: Wind, listener: Vector3) {
     this.justDiscovered = false;
+    this.justSolved = false;
     // distance to the nearest point on the hull's axis
     const ox = listener.x - SITE3.x;
     const oz = listener.z - SITE3.z;
@@ -1383,6 +1386,7 @@ export class Ship {
       if (this.verdict === 'good' && this.verdictT > 0.5 && this.verdictT - dt <= 0.5) {
         this.audio.padAccept(TUNE, 0.18);
         this.state = 'cracking';
+        this.justSolved = true;
         this.crackT = 0;
       }
       if (this.verdictT > (this.verdict === 'bad' ? 1.3 : 99)) this.verdict = 'none';

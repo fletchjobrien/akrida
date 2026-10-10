@@ -1616,6 +1616,31 @@ export class AudioEngine {
     this.playStranger(v[Math.floor(Math.random() * v.length)], level);
   }
 
+  /**
+   * One of the stranger's notes heard from far off, carried on the wind:
+   * muffled, faint, and mostly echo.
+   */
+  strangerFar(tone: number, level: number) {
+    const ctx = this.ctx;
+    const v = this.notes[tone];
+    if (!ctx || !v || !v.length) return;
+    const src = ctx.createBufferSource();
+    src.buffer = v[0];
+    src.playbackRate.value = 0.985;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 650;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = -0.5;
+    src.connect(lp).connect(g).connect(pan).connect(this.master);
+    const send = ctx.createGain();
+    send.gain.value = 2.2;
+    pan.connect(send).connect(this.reverbSend);
+    src.start();
+  }
+
   /** A low, sad swell when the stranger is first seen. */
   sorrow() {
     const ctx = this.ctx;
