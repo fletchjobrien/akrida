@@ -17,7 +17,14 @@ low resolution so that it looks like hand-made 2D pixel art.
 | Double-click | Fullscreen |
 
 The game shows no UI. A small pixel cursor shows when you move the mouse and
-hides when the mouse stops. Sound starts with the click that wakes the
+hides when the mouse stops. Over something you can use, the cursor turns pale
+blue, and four corner brackets close round it and slowly breathe in and out.
+
+**Click to use.** Click anything you can use, from up to 30 units away. Your
+creature walks over to it and starts: the escape pods, the stranger, the
+ship's keypad or door, and the tracker. If something blocks the way, it
+starts once it is close enough, or gives up. Move with the keys, or click
+the open sand, to call it off. Sound starts with the click that wakes the
 creature (see below), because browsers block audio until the page gets a user
 gesture.
 
@@ -52,16 +59,26 @@ wakes. Walk right:
 
 | Place | Units right of the start |
 | --- | --- |
+| A stray scrap of the pod, half buried | 6.5 |
 | The first pod's skid trench begins | about 18 |
 | Its crater | 38 |
 | The second pod | 64 |
 | The dying stranger | 86 |
 | The ship (centre, a little up the screen) | 118 |
 
+A few steps from where the creature wakes lies the first hint: a small curved
+scrap of the pod's white shell with a strip of its orange band, tipped up and
+half buried in the sand, with a bolt and a splinter of glass beside it.
+
 The first pod lies nose-down in its crater. Its skid trench runs off to the
 left, back toward the start, with wreckage along it and past the rim, so you
 meet the trench first and follow it to the pod. The first time the creature
 comes near, a low sound swells and it turns its head to look.
+
+**Look inside a pod.** Click either escape pod. Your creature steps up beside
+the open hatchway, braces both hands on its rim and leans right in. It looks
+round inside, one way and then the other, then down into it. It pulls back
+out, and slowly tilts its head.
 
 - **Animated:** the emergency beacon blinks (sometimes twice, sometimes not at
   all). The hatch door swings in the gusts and knocks against the hull. Sparks
@@ -132,8 +149,8 @@ down differently:
 - **First sight.** When you come near, it turns its head toward you and weakly
   reaches out a trembling arm, then lets it fall. A low, sad chord swells, and
   your creature turns to look at it. Its head follows you after that.
-- **Click it.** Walk up close: the centre of the cursor glows faint blue over
-  it. Click, and these things happen:
+- **Click it** (from up to 30 units away: your creature walks over). These
+  things happen:
   1. Your creature kneels beside it, and the camera closes in a little between
      the two of them. The wind and the wreck get about 5 dB quieter.
   2. It lifts its head and makes a gargled, static-laced cry of pain.
@@ -237,7 +254,7 @@ and keeps trying to boot: it scrambles through its buttons, the whole pad
 flashes twice, it sometimes blacks out and comes back with a flash, two
 buttons stutter, and it spits the odd spark. It calms down while you press it.
 
-1. Walk up and click the keypad. Your creature steps aside toward the door so
+1. Click the keypad or the jammed door. Your creature walks over and steps aside toward the door so
    it does not block your view, and the camera closes in, so the glyphs are
    easy to read.
 2. Click buttons. Each one hums its tone in the stranger's own voice, but
@@ -449,7 +466,8 @@ src/
   character/              creature rig and procedural animation
   audio/                  synthesised sound, the stranger's voice
   story/                  the opening, the stranger, the tune,
-                          pulling the ship's door open, picking up the tracker
+                          pulling the ship's door open, picking up the tracker,
+                          looking into the pods
 ```
 
 ## Sources

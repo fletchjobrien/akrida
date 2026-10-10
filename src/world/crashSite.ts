@@ -1,4 +1,6 @@
 import {
+  Raycaster,
+  type Camera,
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -478,6 +480,30 @@ export class CrashSite {
     const x = SITE2.x + SITE2.dx * al - SITE2.dz * ac;
     const z = SITE2.z + SITE2.dz * al + SITE2.dx * ac;
     return out.set(x, terrainHeight(x, z), z);
+  }
+
+  private readonly ray = new Raycaster();
+  private readonly ndc = new Vector2();
+
+  /** Whether the mouse (CSS pixels) is over the pod itself. */
+  podAt(mouse: Vector2, camera: Camera) {
+    this.ndc.set((mouse.x / window.innerWidth) * 2 - 1, -(mouse.y / window.innerHeight) * 2 + 1);
+    this.ray.setFromCamera(this.ndc, camera);
+    return this.ray.intersectObject(this.pod, true).length > 0;
+  }
+
+  /**
+   * The hatchway in world space: its middle, the way it faces out of the hull,
+   * the pod's long axis (toward the nose), and across the opening.
+   */
+  hatchway(out: { center: Vector3; normal: Vector3; axis: Vector3; across: Vector3 }) {
+    const P = this.pod;
+    P.updateMatrixWorld(true);
+    P.localToWorld(out.center.set(0.6, 0.02, 0));
+    out.normal.set(1, 0, 0).transformDirection(P.matrixWorld);
+    out.axis.set(0, 1, 0).transformDirection(P.matrixWorld);
+    out.across.set(0, 0, 1).transformDirection(P.matrixWorld);
+    return out;
   }
 
   /** Where the creature looks when it notices the wreck. */
