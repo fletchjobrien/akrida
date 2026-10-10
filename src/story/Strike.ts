@@ -67,7 +67,140 @@ const BROKEN: ScriptPose = {
   footR: foot(-0.12, 0.78, 0.04, -0.9, 1.0, 0.6),
 };
 
+/** Down on its back where it fell, the stump in the air, eyes wide. */
+const DOWN: ScriptPose = {
+  ...BROKEN,
+  tremble: 0.7,
+  exertion: 1,
+  eyeOpen: 1,
+  pelvisYaw: 0.3,
+  pelvisRoll: 0.05,
+  spinePitch: -0.15,
+  chestPitch: -0.1,
+  chestRoll: 0.15,
+  neckPitch: -0.3,
+  headPitch: -0.35,
+  headYaw: 0.5,
+  headRoll: 0.25,
+  handL: hand(0.42, 0.12, -0.15),
+  handR: hand(-0.38, 0.03, -0.2),
+  footL: foot(0.3, 0.55, 0, 0.5, 0.3, -0.8),
+  footR: foot(-0.26, 0.62, 0, 0.4, 0.3, -0.8),
+};
+
+/** Curled onto its side away from the stump, knees drawn up, its hand clamped over the wound. */
+const CLUTCH: ScriptPose = {
+  ...DOWN,
+  pelvisY: 0.16,
+  pelvisPitch: -1.25,
+  pelvisYaw: -1.0,
+  spinePitch: 0.45,
+  chestPitch: 0.35,
+  chestRoll: -0.2,
+  neckPitch: 0.45,
+  headPitch: 0.35,
+  headYaw: 0.4,
+  headRoll: -0.2,
+  handL: hand(0.2, 0.32, -0.1),
+  handR: hand(0.14, 0.34, -0.22),
+  footL: foot(0.2, 0.32, 0.12, 0.9, 0.9, -1),
+  footR: foot(-0.12, 0.28, 0.02, 0.9, 0.9, -1),
+};
+
+/** Thrashing on its back: the spine bowed, head thrown back, legs kicking. */
+const THRASH: ScriptPose = {
+  ...DOWN,
+  pelvisY: 0.15,
+  pelvisYaw: 0.1,
+  spinePitch: -0.45,
+  chestPitch: -0.35,
+  neckPitch: -0.6,
+  headPitch: -0.6,
+  headYaw: 0,
+  handL: hand(0.45, 0.35, -0.3),
+  handR: hand(-0.45, 0.3, -0.35),
+  footL: foot(0.28, 0.6, 0.15, 0.4, 0.3, -0.5),
+  footR: foot(-0.25, 0.55, 0.15, 0.4, 0.3, -0.5),
+};
+
+/** Trying to get up: propped on its one hand, half sat up, knees bent under it. */
+const RISE: ScriptPose = {
+  ...DOWN,
+  pelvisY: 0.2,
+  pelvisPitch: -0.75,
+  pelvisYaw: -0.15,
+  spinePitch: 0.15,
+  chestPitch: 0.2,
+  chestRoll: -0.15,
+  neckPitch: 0.25,
+  headPitch: 0.2,
+  headYaw: 0.3,
+  headRoll: 0,
+  handL: hand(0.3, 0.3, 0.05),
+  handR: hand(-0.32, 0.02, -0.12),
+  footL: foot(0.22, 0.45, 0.04, 0.5, 0.6, -0.3),
+  footR: foot(-0.2, 0.5, 0.02, 0.5, 0.6, -0.3),
+};
+
+/** Lifted on its back to look at what is left of its arm, frozen with shock. */
+const STARE: ScriptPose = {
+  ...DOWN,
+  pelvisY: 0.15,
+  pelvisPitch: -1.2,
+  pelvisYaw: 0.15,
+  spinePitch: 0.25,
+  chestPitch: 0.3,
+  neckPitch: 0.45,
+  headPitch: 0.25,
+  headYaw: 1.0,
+  headRoll: 0.2,
+  handL: hand(0.3, 0.42, -0.05),
+  handR: hand(0.02, 0.4, -0.12),
+};
+
+/** Dead: slack on its back, half turned, the head rolled aside, the eyes half open. */
+const STILL: ScriptPose = {
+  ...BROKEN,
+  tremble: 0,
+  exertion: 0,
+  eyeOpen: 0.35,
+  pelvisYaw: 0.45,
+  spinePitch: 0.05,
+  chestPitch: 0.02,
+  chestRoll: 0.25,
+  neckPitch: -0.15,
+  headPitch: -0.2,
+  headYaw: 1.2,
+  headRoll: 0.45,
+  handL: hand(0.38, 0.03, -0.2),
+  handR: hand(-0.4, 0.03, -0.3),
+  footL: foot(0.36, 0.62, 0, 0.3, 0, -1),
+  footR: foot(-0.3, 0.58, 0.02, 0.3, 0.3, -0.7),
+};
+
+type Act = 'fly' | 'land' | 'clutch' | 'thrash' | 'rise' | 'collapse' | 'stare' | 'fade' | 'dead';
+
 type Numeric = { [k: string]: number | Numeric };
+
+/** Every number in `pose` pulled toward `target` by a damped spring (stiffness `k`, damping `d`). */
+function spring(pose: Numeric, target: Numeric, vel: Numeric, dt: number, k: number, d: number) {
+  for (const key of Object.keys(target)) {
+    const t = target[key];
+    if (typeof t === 'number') {
+      const v = ((vel[key] as number) ?? 0) + ((t - (pose[key] as number)) * k - ((vel[key] as number) ?? 0) * d) * dt;
+      vel[key] = v;
+      pose[key] = (pose[key] as number) + v * dt;
+    } else {
+      if (typeof vel[key] !== 'object') vel[key] = {};
+      spring(pose[key] as Numeric, t, vel[key] as Numeric, dt, k, d);
+    }
+  }
+}
+
+const smooth = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
 function blend(out: Numeric, a: Numeric, b: Numeric, t: number) {
   for (const k of Object.keys(a)) {
     const av = a[k];
@@ -122,11 +255,15 @@ interface Piece {
  * a ring of sand blasts outward along the ground; the ground is scorched.
  *
  * Time all but stops for a heartbeat, then crawls back. The creature is
- * thrown backward, cartwheeling, a forearm torn away, burnt black where the
- * blast caught it, and lands hard, bounces, slides, and comes to rest broken.
- * Blood pumps from the stump with its last few heartbeats and pools in the
- * sand; it smokes. Its ears ring and the world is far away; the colour drains
- * out of everything, the view closes in on it, and goes dark.
+ * knocked off its feet and back a body length, a forearm torn away, burnt
+ * black where the blast caught it. It goes over backward, lands hard on its
+ * back, bounces and slides, its joints on loose springs so it flops like a
+ * rag doll. Then it is in agony for some seconds: it stares at the stump and
+ * screams, thrashes, curls round the wound, tries to rise and collapses,
+ * each time weaker, until it can only twitch and gasp, and dies with a
+ * rattle. Blood pumps from the stump with each failing heartbeat and pools
+ * in the sand; it smokes. Its ears ring and the world is far away; the colour
+ * drains out of everything, the view closes in on it, and goes dark.
  */
 export class Strike {
   active = false;
@@ -158,12 +295,18 @@ export class Strike {
   private lift = 0;
   private landed = false;
   private bounced = false;
-  private spin = 0;
   private settle = 0;
-  private landPitch: number | null = null;
   private victim: 'player' | 'other' = 'player';
-  private landTarget = 0;
   private readonly pose: ScriptPose = JSON.parse(JSON.stringify(FLUNG));
+  /** What the body is trying to do: the pose follows it on springs, loose as a rag when it is knocked about. */
+  private readonly target: ScriptPose = JSON.parse(JSON.stringify(FLUNG));
+  private readonly out: ScriptPose = JSON.parse(JSON.stringify(FLUNG));
+  private vel: Numeric = {};
+  private act: Act = 'fly';
+  private actT = 0;
+  private actDur = 0;
+  private voiceTimer = 0;
+  private breathPhase = 0;
   private smokeTimer = 0;
   private bleedTimer = 0;
   private beats: number[] = [];
@@ -243,18 +386,31 @@ export class Strike {
     if (this.dir.lengthSq() < 0.01) this.dir.set(0, 0, 1);
     this.dir.normalize();
     this.bodyPos.copy(creature.pos);
-    this.bodyVel.copy(this.dir).multiplyScalar(7.5);
-    this.bodyVel.y = 6.5;
+    // knocked off its feet and back a body length or so, not launched
+    this.bodyVel.copy(this.dir).multiplyScalar(3.2);
+    this.bodyVel.y = 3.4;
     this.lift = 0;
     this.landed = false;
     this.bounced = false;
-    this.spin = 0;
     this.settle = 0;
-    this.landPitch = null;
     blend(this.pose as unknown as Numeric, FLUNG as unknown as Numeric, FLUNG as unknown as Numeric, 0);
+    blend(this.target as unknown as Numeric, DOWN as unknown as Numeric, DOWN as unknown as Numeric, 0);
+    this.pose.pelvisPitch = -0.2;
+    this.vel = {};
+    // the blast snaps it over backward and flings its limbs about
+    this.vel.pelvisPitch = -7;
+    this.vel.spinePitch = -4;
+    this.vel.neckPitch = -6;
+    this.vel.headYaw = 5;
+    this.vel.armPitch = -8;
+    this.act = 'fly';
+    this.actT = 0;
+    this.voiceTimer = 0.35;
+    this.breathPhase = 0;
     // facing the blast, so it goes over backward
     creature.setYaw(Math.atan2(-this.dir.x, -this.dir.z));
-    this.beats = [0.9, 1.9, 3.1, 4.6, 6.4];
+    // its heart races, then falters and slows as it bleeds out
+    this.beats = [0.7, 1.15, 1.6, 2.05, 2.5, 3.0, 3.5, 4.1, 4.8, 5.6, 6.5, 7.6, 8.9];
     this.bleedTimer = 0;
     this.maim(creature);
     this.explode();
@@ -312,8 +468,8 @@ export class Strike {
     const side = new Vector3(-this.dir.z, 0, this.dir.x);
     this.pieces.push({
       mesh: limb,
-      vel: this.dir.clone().multiplyScalar(5).addScaledVector(side, 3.5).setY(7),
-      spin: new Vector3(14, 6, 9),
+      vel: this.dir.clone().multiplyScalar(2.2).addScaledVector(side, 1.6).setY(4.2),
+      spin: new Vector3(11, 5, 7),
       smoke: false,
       bleed: true,
       rest: false,
@@ -432,7 +588,7 @@ export class Strike {
 
     // smoke keeps rising from the blast, thinning out
     this.smokeTimer -= g;
-    if (this.smokeTimer <= 0 && t < 9) {
+    if (this.smokeTimer <= 0 && t < 12) {
       this.smokeTimer = 0.06 + t * 0.03;
       const ground = terrainHeight(this.at.x, this.at.z);
       this.dust.spawn(this.at.x + (Math.random() - 0.5) * 0.6, ground + 0.2, this.at.z + (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.3, 0.8 + Math.random() * 0.8, (Math.random() - 0.5) * 0.3, 3 + Math.random() * 2, SMOKE, 3, {
@@ -458,7 +614,7 @@ export class Strike {
     if (this.beats.length && t > this.beats[0]) {
       const n = this.beats.length;
       this.beats.shift();
-      if (this.victim === 'player') this.audio.heartbeat(0.25 * (n / 5));
+      if (this.victim === 'player') this.audio.heartbeat(0.25 * Math.min(1, n / 8));
       this.bleedTimer = 0.25;
     }
     if (this.bleedTimer > 0 && this.creature) {
@@ -480,9 +636,9 @@ export class Strike {
     }
 
     // the end closes in: colour gone, the edges dark, then all dark
-    this.fade = Math.min(1, Math.max(0, (t - 1.2) / 4));
-    this.dark = Math.min(1, Math.max(0, (t - 7) / 1.5));
-    if (t > 8.8) this.done = true;
+    this.fade = Math.min(1, Math.max(0, (t - 4.5) / 5.5));
+    this.dark = Math.min(1, Math.max(0, (t - 10.6) / 1.6));
+    if (t > 12.4) this.done = true;
   }
 
   private updateBalls(g: number) {
@@ -572,17 +728,16 @@ export class Strike {
       V.y -= 24 * g;
       P.addScaledVector(V, g);
       this.lift = Math.max(0, P.y - ground);
-      // cartwheeling over backward
-      this.spin -= g * (this.bounced ? 4 : 9.5);
       if (P.y <= ground) {
         P.y = ground;
         if (!this.bounced) {
-          // slams down and bounces
+          // slams down on its back and bounces a little, limbs flopping
           this.bounced = true;
-          V.y = -V.y * 0.28;
-          V.x *= 0.55;
-          V.z *= 0.55;
+          V.y = -V.y * 0.22;
+          V.x *= 0.5;
+          V.z *= 0.5;
           this.audio.thud(0.55);
+          this.knock(1);
           this.dust.kick(P.x, ground, P.z, V.x, V.z, 10, 1.2);
           for (let i = 0; i < 20; i++) {
             const a = Math.random() * Math.PI * 2;
@@ -591,11 +746,13 @@ export class Strike {
         } else {
           this.landed = true;
           this.audio.thud(0.3);
+          this.knock(0.5);
           this.dust.kick(P.x, ground, P.z, V.x, V.z, 6, 0.8);
+          this.setAct('land', 0.55);
         }
       }
     } else {
-      // sliding to a stop through the sand, leaving a smear
+      // a short slide through the sand, leaving a smear
       const sp = Math.hypot(V.x, V.z);
       if (sp > 0.05) {
         const k = Math.max(0, sp - 9 * g) / sp;
@@ -609,30 +766,25 @@ export class Strike {
         this.settle = 0.0001;
         // and it bleeds out where it lies
         const side = new Vector3(-this.dir.z, 0, this.dir.x);
-        this.pool(P.x, P.z, 0.75, 0.2);
-        this.pool(P.x + side.x * 0.45 + this.dir.x * 0.25, P.z + side.z * 0.45 + this.dir.z * 0.25, 0.42, 0.8);
-        this.pool(P.x - side.x * 0.4 - this.dir.x * 0.1, P.z - side.z * 0.4 - this.dir.z * 0.1, 0.32, 1.6);
-        this.pool(P.x + this.dir.x * 0.7, P.z + this.dir.z * 0.7, 0.2, 2.4);
+        this.pool(P.x, P.z, 0.75, 0.6);
+        this.pool(P.x + side.x * 0.45 + this.dir.x * 0.25, P.z + side.z * 0.45 + this.dir.z * 0.25, 0.42, 1.6);
+        this.pool(P.x - side.x * 0.4 - this.dir.x * 0.1, P.z - side.z * 0.4 - this.dir.z * 0.1, 0.32, 3);
+        this.pool(P.x + this.dir.x * 0.7, P.z + this.dir.z * 0.7, 0.2, 4.5);
       }
       P.y = ground;
       this.lift = 0;
     }
-    // the pose: flung while it flies, broken where it lies
-    if (this.landed) this.settle = Math.min(1, this.settle + g * 3.5);
-    const k = this.landed ? this.settle * this.settle * (3 - 2 * this.settle) : 0;
-    blend(this.pose as unknown as Numeric, FLUNG as unknown as Numeric, BROKEN as unknown as Numeric, k);
-    // the cartwheel turns on into the broken pose, by the shortest way round
-    if (this.landed) {
-      if (this.landPitch === null) {
-        this.landPitch = this.spin;
-        const turns = Math.round((this.spin - BROKEN.pelvisPitch) / (Math.PI * 2));
-        this.landTarget = BROKEN.pelvisPitch + turns * Math.PI * 2;
-      }
-      this.pose.pelvisPitch = this.landPitch + (this.landTarget - this.landPitch) * k;
-    } else this.pose.pelvisPitch = this.spin;
-    this.pose.pelvisY += this.lift;
-    this.pose.footL.lift += this.lift;
-    this.pose.footR.lift += this.lift;
+    this.agony(g);
+    // the pose: the body follows what it is trying to do, loosely while it is thrown about
+    const loose = this.act === 'fly' || this.act === 'land' || this.act === 'collapse';
+    const [k, d] = loose ? [55, 5] : this.act === 'fade' ? [30, 7] : this.act === 'dead' ? [20, 8] : [170, 11];
+    // in small steps, so the springs stay steady
+    const n = Math.max(1, Math.ceil(g / (1 / 120)));
+    for (let i = 0; i < n; i++) spring(this.pose as unknown as Numeric, this.target as unknown as Numeric, this.vel, g / n, k, d);
+    blend(this.out as unknown as Numeric, this.pose as unknown as Numeric, this.pose as unknown as Numeric, 0);
+    this.out.pelvisY += this.lift;
+    this.out.footL.lift += this.lift;
+    this.out.footR.lift += this.lift;
     // walls and rocks stop it dead: it slams into them and drops
     for (const r of this.base.rocks) {
       if (r.radius < 0.3 || !pushOutOfRock(r, P, 0.3, this.push)) continue;
@@ -644,14 +796,189 @@ export class Strike {
         V.z *= 0.3;
         if (into < -2) {
           this.audio.thud(0.5);
+          this.knock(0.7);
           for (let i = 0; i < 12; i++) this.dust.spawn(P.x, P.y + 0.5, P.z, (Math.random() - 0.5) * 2, Math.random() * 2, (Math.random() - 0.5) * 2, 0.6, BLOOD, 1, { g: 10, drag: 0.4, windK: 0 });
         }
       }
     }
     c.pos.x = P.x;
     c.pos.z = P.z;
-    c.scriptBreath = { value: 0, amp: 0 };
-    c.updateScripted(g, this.pose, this.world);
+    // its breathing: fast, ragged panting, slowing to gasps, then none
+    const rate = this.act === 'dead' ? 0 : this.act === 'fade' ? 1.4 - smooth(0, this.actDur, this.actT) * 1.1 : 1.7;
+    this.breathPhase += g * rate;
+    const amp = this.act === 'dead' ? 0 : this.act === 'fade' ? 2.2 - smooth(0, this.actDur, this.actT) * 1.4 : 2.4;
+    c.scriptBreath = { value: Math.sin(this.breathPhase * Math.PI * 2), amp };
+    c.updateScripted(g, this.out, this.world);
+  }
+
+  /** A blow to the body: every joint jolted, as a rag would be. */
+  private knock(s: number) {
+    const v = this.vel as Record<string, number | Numeric>;
+    const kick = (key: string, a: number) => (v[key] = ((v[key] as number) ?? 0) + (Math.random() - 0.5) * 2 * a * s);
+    kick('spinePitch', 6);
+    kick('chestPitch', 6);
+    kick('chestRoll', 6);
+    kick('neckPitch', 10);
+    kick('headPitch', 10);
+    kick('headYaw', 12);
+    kick('headRoll', 10);
+    kick('pelvisYaw', 4);
+    kick('pelvisRoll', 3);
+    kick('armPitch', 10);
+    kick('armOut', 8);
+    for (const f of ['footL', 'footR']) {
+      if (typeof v[f] !== 'object') v[f] = {};
+      const fv = v[f] as Record<string, number>;
+      fv.lift = (fv.lift ?? 0) + Math.random() * 2.5 * s;
+      fv.x = (fv.x ?? 0) + (Math.random() - 0.5) * 3 * s;
+      fv.z = (fv.z ?? 0) + (Math.random() - 0.5) * 3 * s;
+    }
+  }
+
+  private setAct(act: Act, dur: number) {
+    this.act = act;
+    this.actT = 0;
+    this.actDur = dur;
+  }
+
+  /**
+   * After the fall: it is alive, and knows what has happened to it. It
+   * screams, curls round its stump clutching at it, thrashes on its back,
+   * tries to get up and collapses, lifts its head to stare at the stump; all
+   * of it weaker as it bleeds out, until it can only twitch and gasp, and then
+   * it is still.
+   */
+  private agony(g: number) {
+    this.actT += g;
+    const t = this.t;
+    const T = this.target;
+    const time = this.real;
+    // how much fight is left in it
+    const w = 1 - smooth(4.2, 7.0, t);
+    const lv = this.victim === 'player' ? 1 : 0.35;
+    switch (this.act) {
+      case 'fly':
+        blend(T as unknown as Numeric, DOWN as unknown as Numeric, DOWN as unknown as Numeric, 0);
+        T.eyeOpen = 1;
+        break;
+      case 'land':
+        blend(T as unknown as Numeric, DOWN as unknown as Numeric, DOWN as unknown as Numeric, 0);
+        T.tremble = 0.4;
+        if (this.actT >= this.actDur) this.nextAgony();
+        break;
+      case 'clutch': {
+        // curled round the wound, rocking, the hand clamped on it
+        blend(T as unknown as Numeric, DOWN as unknown as Numeric, CLUTCH as unknown as Numeric, smooth(0, 0.35, this.actT));
+        T.pelvisYaw += Math.sin(time * 3.2) * 0.14 * w;
+        T.spinePitch += Math.sin(time * 3.2) * 0.1 * w;
+        T.handR.x += Math.sin(time * 17) * 0.015;
+        T.footL.z += Math.sin(time * 4.1) * 0.06 * w;
+        T.footR.z += Math.sin(time * 4.1 + 2) * 0.06 * w;
+        T.tremble = 0.5 + 0.5 * w;
+        if (this.actT >= this.actDur) this.nextAgony();
+        break;
+      }
+      case 'thrash': {
+        // on its back, bucking: the head whipping side to side, the legs kicking at nothing
+        blend(T as unknown as Numeric, DOWN as unknown as Numeric, THRASH as unknown as Numeric, smooth(0, 0.2, this.actT) * w);
+        T.headYaw += Math.sin(time * 6.5) * 1.1 * w;
+        T.headRoll += Math.sin(time * 5.1) * 0.3 * w;
+        T.spinePitch += Math.sin(time * 7.3) * 0.2 * w;
+        T.pelvisYaw += Math.sin(time * 4.3) * 0.3 * w;
+        T.footL.lift += Math.max(0, Math.sin(time * 9)) * 0.28 * w;
+        T.footR.lift += Math.max(0, Math.sin(time * 9 + Math.PI)) * 0.28 * w;
+        T.footL.z += Math.sin(time * 9) * 0.18 * w;
+        T.footR.z += Math.sin(time * 9 + Math.PI) * 0.18 * w;
+        T.handR.x += Math.sin(time * 5) * 0.15 * w;
+        T.handR.y += Math.sin(time * 6.3) * 0.12 * w;
+        T.handR.z += Math.cos(time * 5) * 0.2 * w;
+        T.handL.y += Math.sin(time * 7.7) * 0.1 * w;
+        T.tremble = 0.8 * w + 0.2;
+        if (this.actT >= this.actDur) this.nextAgony();
+        break;
+      }
+      case 'rise': {
+        // it tries to get up: rolls, plants its hand, heaves itself half up, shaking ...
+        const k = smooth(0, this.actDur * 0.75, this.actT) * (0.5 + 0.5 * w);
+        blend(T as unknown as Numeric, DOWN as unknown as Numeric, RISE as unknown as Numeric, k);
+        T.tremble = 0.6 + k * 0.6;
+        T.chestRoll += Math.sin(time * 13) * 0.05 * k;
+        if (this.actT >= this.actDur) {
+          // ... and the arm gives
+          this.setAct('collapse', 0.7);
+          this.knock(0.35);
+          this.audio.thud(0.25);
+          this.cry(lv, 'cry');
+        }
+        break;
+      }
+      case 'collapse':
+        blend(T as unknown as Numeric, DOWN as unknown as Numeric, DOWN as unknown as Numeric, 0);
+        T.tremble = 0.7;
+        if (this.actT >= this.actDur) this.nextAgony();
+        break;
+      case 'stare': {
+        // it lifts its head and sees: frozen, shaking, the hand hovering over the stump
+        blend(T as unknown as Numeric, DOWN as unknown as Numeric, STARE as unknown as Numeric, smooth(0, 0.5, this.actT) * (0.6 + 0.4 * w));
+        T.headPitch += Math.sin(time * 19) * 0.03;
+        T.handR.y += Math.sin(time * 15) * 0.02;
+        T.eyeOpen = 1;
+        T.tremble = 1;
+        if (this.actT > 0.6 && this.actT - g <= 0.6) this.cry(lv, 'scream');
+        if (this.actT >= this.actDur) this.nextAgony();
+        break;
+      }
+      case 'fade': {
+        // too weak to move: twitches, a leg that drags, the eyes closing
+        const k = smooth(0, this.actDur, this.actT);
+        blend(T as unknown as Numeric, DOWN as unknown as Numeric, STILL as unknown as Numeric, k);
+        const twitch = Math.max(0, Math.sin(time * 2.3) * Math.sin(time * 5.1) - 0.4) * (1 - k);
+        T.footL.z += twitch * 0.12;
+        T.handR.y += twitch * 0.08;
+        T.headYaw += twitch * 0.2;
+        T.tremble = 0.4 * (1 - k);
+        T.exertion = 1 - k;
+        if (this.actT >= this.actDur) {
+          this.setAct('dead', 99);
+          this.cry(lv, 'rattle');
+        }
+        break;
+      }
+      case 'dead':
+        blend(T as unknown as Numeric, STILL as unknown as Numeric, STILL as unknown as Numeric, 0);
+        break;
+    }
+    // its voice: screams at first, then sobbing and gasping, then wet gurgles
+    if (this.act !== 'fly' && this.act !== 'dead' && this.act !== 'stare') {
+      this.voiceTimer -= g;
+      if (this.voiceTimer <= 0) {
+        const kinds: ('scream' | 'cry' | 'sob' | 'gasp' | 'gurgle')[] =
+          t < 2.6 ? ['scream', 'scream', 'cry'] : t < 5 ? ['cry', 'sob', 'scream', 'gasp'] : this.act === 'fade' ? ['gasp', 'gurgle', 'gurgle'] : ['sob', 'gasp', 'gurgle', 'cry'];
+        const kind = kinds[Math.floor(Math.random() * kinds.length)];
+        this.voiceTimer = kind === 'scream' ? 1.2 + Math.random() * 0.4 : 0.6 + Math.random() * 0.8 + (this.act === 'fade' ? 0.8 : 0);
+        this.cry(lv * (this.act === 'fade' ? 0.6 : 1), kind);
+      }
+    }
+  }
+
+  /** What it does next while it still can. */
+  private nextAgony() {
+    if (this.t > 6.8) {
+      this.setAct('fade', 2.8);
+      return;
+    }
+    const r = Math.random();
+    const prev = this.act;
+    let next: Act = r < 0.3 ? 'clutch' : r < 0.55 ? 'thrash' : r < 0.8 ? 'rise' : 'stare';
+    if (next === prev) next = prev === 'thrash' ? 'clutch' : 'thrash';
+    // the first thing it does is see what has happened to it
+    if (prev === 'land') next = Math.random() < 0.5 ? 'thrash' : 'stare';
+    const dur = next === 'clutch' ? 1.2 + Math.random() * 0.8 : next === 'thrash' ? 0.9 + Math.random() * 0.7 : next === 'rise' ? 1.1 + Math.random() * 0.5 : 1.3;
+    this.setAct(next, dur);
+  }
+
+  private cry(level: number, kind: 'scream' | 'cry' | 'sob' | 'gasp' | 'gurgle' | 'rattle') {
+    this.audio.agony(kind, level * 0.6);
   }
 
   /** Where the camera looks: the blast at first, then the body. */

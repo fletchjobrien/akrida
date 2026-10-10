@@ -589,14 +589,35 @@ something comes for it.
   - A white flash; the fireball blooms, boils and blackens into smoke.
   - Shrapnel, sparks and the drone's pieces spray out, some of them burning.
     A ring of sand blasts outward, and the ground is scorched.
-  - Time all but stops, then crawls back. Your creature is thrown backward,
-    cartwheeling, a forearm torn away and its front burnt black. It slams
-    into anything in its way, lands hard, bounces, slides and comes to rest
-    broken.
-  - Blood pumps from the stump with its last few heartbeats and spreads in
-    the sand. The body smokes.
-  - Its ears ring and the world goes dull and far away. The colour drains,
-    the view closes in on the body, and everything goes dark.
+  - Time all but stops, then crawls back. The blast knocks your creature
+    off its feet and back about a body length, a forearm torn away and its
+    front burnt black. It goes over backward, slams down on its back,
+    bounces a little and slides to a stop, its limbs flopping loose (each
+    joint is on a spring, so a blow jolts the body like a rag doll). If a
+    rock is in the way, it slams into the rock and drops.
+  - **It does not die at once.** For about seven seconds it is in agony:
+    - it lifts its head and stares at its stump, frozen and shaking, then
+      screams;
+    - it thrashes on its back, its spine bowing, its head whipping side to
+      side and its legs kicking;
+    - it curls onto its side away from the stump, knees drawn up, its one
+      hand clamped over the wound, rocking;
+    - it plants its hand and heaves itself half up, shaking, and then the
+      arm gives and it falls back.
+    It breathes in fast, ragged pants. Each act is weaker than the last as
+    it bleeds out.
+  - Its voice comes from inside its head, clear over the ringing in its
+    ears: screams that tear and break, short cries, sobbing, catching breaths
+    and gasps, and then wet gurgles as blood gets into its throat.
+  - Blood pumps from the stump with each heartbeat. The heart races at
+    first, then falters and slows. The pools spread in the sand. The body
+    smokes.
+  - Then it is too weak to move: a leg twitches, the hand lifts and falls,
+    the breaths slow to gasps, the eyes half close. It lets out one long,
+    wet, rattling breath and is still.
+  - Its ears ring and the world goes dull and far away. The colour drains
+    while it dies, the view closes in on the body, and everything goes
+    dark.
 - **Running from it:** your creature glances back over its shoulder at it
   now and then while it runs. It still hunts while your creature does
   something else (picks something up, looks into a pod), but it never strikes

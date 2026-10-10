@@ -2890,6 +2890,68 @@ export class AudioEngine {
     jit.stop(at + d + 0.05);
   }
 
+  /**
+   * The creature's own voice as it dies: heard from inside its head, past the
+   * blast's deafness. A scream that tears and breaks; a short cry; sobbing,
+   * catching breaths; a ragged gasp; a wet gurgle as blood gets into its
+   * throat; and the last rattling breath.
+   */
+  agony(kind: 'scream' | 'cry' | 'sob' | 'gasp' | 'gurgle' | 'rattle', level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white || level < 0.005) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = 1;
+    out.connect(this.out);
+    const play = (bank: Buf[], rate: number, gain: number, at = now, dur?: number) => {
+      if (!bank.length) return;
+      const src = ctx.createBufferSource();
+      src.buffer = this.any(bank);
+      src.playbackRate.value = rate;
+      const g = ctx.createGain();
+      g.gain.value = gain;
+      src.connect(g).connect(out);
+      src.start(at, 0, dur);
+    };
+    if (kind === 'scream') {
+      const d = 1.0 + Math.random() * 0.45;
+      this.cry(now, 290 + Math.random() * 90, d, 0.95, level * 1.7, out, 1.6 + Math.random() * 0.3);
+      // two voices a little apart: the throat tearing
+      this.cry(now + 0.02, 450 + Math.random() * 60, d * 0.9, 1, level * 0.6, out, 1.5);
+      play(this.inhales, 1.15, level * 1.2, now + d + 0.05);
+    } else if (kind === 'cry') {
+      const d = 0.4 + Math.random() * 0.3;
+      this.cry(now, 320 + Math.random() * 80, d, 0.7, level * 1.1, out, 1.3);
+      play(this.inhales, 1.25, level * 0.8, now + d);
+    } else if (kind === 'sob') {
+      // breath catching in its throat, over and over
+      let t = now;
+      const n = 3 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < n; i++) {
+        play(this.inhales, 1.4 + Math.random() * 0.3, level * 0.7, t, 0.18);
+        if (i % 2) this.cry(t + 0.12, 300 + Math.random() * 60, 0.18, 0.6, level * 0.6, out, 1.2);
+        t += 0.17 + Math.random() * 0.1;
+      }
+      play(this.exhales, 1.1, level * 0.7, t);
+    } else if (kind === 'gasp') {
+      play(this.inhales, 1.0 + Math.random() * 0.2, level * 1.2);
+      play(this.exhales, 1.0, level * 0.7, now + 0.45);
+    } else if (kind === 'gurgle') {
+      play(this.gargles, 0.85 + Math.random() * 0.15, level * 1.1);
+      let t = now + 0.05;
+      while (t < now + 0.6) {
+        const f = 300 + Math.random() * 400;
+        this.burst(t, 0.04, f, f * 0.5, 7, level * 0.25, out);
+        t += 0.03 + Math.random() * 0.06;
+      }
+      this.cry(now + 0.1, 170, 0.45, 0.8, level * 0.4, out, 1.1);
+    } else {
+      // the last breath: long, slow and wet, and nothing after it
+      play(this.gargles, 0.62, level * 1.1, now, 1.6);
+      play(this.exhales, 0.7, level * 0.9, now + 0.1);
+    }
+  }
+
   /** A wet slap: its hand smacking down, or its body flopping onto the deck or the sand; `crack` adds a joint popping. */
   specimenSlap(level: number, pan: number, metal: boolean, crack = false) {
     const ctx = this.ctx;
