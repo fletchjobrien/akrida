@@ -41,6 +41,8 @@ interface Card {
 }
 
 const GLINT = rgb(0xfffbe8).toArray();
+/** The cards out on the sand are drawn a little bigger, to be seen. */
+const OUTSIDE_SCALE = 1.9;
 
 function faceted(g: BufferGeometry) {
   const f = g.index ? g.toNonIndexed() : g;
@@ -138,20 +140,23 @@ export class DataCards {
       I.localToWorld(c.mesh.position.set(x, y + 0.008, z));
       c.mesh.rotation.set(0, yaw + this.station.yaw, 0);
     }
-    // outside, in the station's frame: a little heap spilled from the tipped crate, and the green one alone
+    // outside, in the station's frame: spilled round the crates by the airlock, the green one
+    // a little out of the way, behind them
     const outside: [number, number, number, number][] = [
-      [2, 2.45, 5.05, 0.4], // blue
-      [10, 2.75, 5.2, 2.0], // black
-      [6, 2.55, 5.35, -0.9], // magenta
-      [11, 2.25, 5.3, 1.3], // brown
-      [1, -12.5, 4.5, -2.3], // green: out of the way, among the rocks
+      [2, 2.4, 5.0, 0.4], // blue: among the tipped crate's spilled contents
+      [10, 3.5, 4.7, 2.0], // black: in front of the stack
+      [6, 5.7, 3.9, -0.9], // magenta: off the stack's right side
+      [11, 2.0, 3.0, 1.3], // brown: beside the tipped crate
+      [1, 6.1, 1.6, -2.3], // green: behind the crates, against the habitat
     ];
     for (const [i, [k, x, z, yaw]] of outside.entries()) {
       const c = this.cards[k];
       c.inside = false;
       G.localToWorld(c.mesh.position.set(x, 0, z));
-      c.mesh.position.y = terrainHeight(c.mesh.position.x, c.mesh.position.z) + 0.012 + i * 0.012;
-      c.mesh.rotation.set(0.08 * (i % 2 ? 1 : -1), yaw + this.station.yaw, 0.06, 'YXZ');
+      c.mesh.position.y = terrainHeight(c.mesh.position.x, c.mesh.position.z) + 0.016;
+      c.mesh.rotation.set(0.06 * (i % 2 ? 1 : -1), yaw + this.station.yaw, 0.05, 'YXZ');
+      // a little bigger out on the sand, so they read against it
+      c.mesh.scale.setScalar(OUTSIDE_SCALE);
     }
   }
 
@@ -268,6 +273,7 @@ export class DataCards {
           c.mesh.rotation.set(0, c.mesh.rotation.y, 0);
           c.state = 'lying';
           c.inside = inside;
+          c.mesh.scale.setScalar(inside ? 1 : OUTSIDE_SCALE);
           this.audio.cardPickup(0.12);
         }
       } else if (c.state === 'slotting' || c.state === 'rejecting') {
@@ -304,8 +310,9 @@ export class DataCards {
     // the ones still lying about catch the light now and then
     this.glintTimer -= dt;
     if (this.glintTimer <= 0) {
-      this.glintTimer = 1 + Math.random() * 2;
-      const lying = this.cards.filter((c) => c.state === 'lying');
+      this.glintTimer = 0.5 + Math.random() * 1.2;
+      // the ones out in the sun catch it most
+      const lying = this.cards.filter((c) => c.state === 'lying' && (!c.inside || Math.random() < 0.4));
       const c = lying[Math.floor(Math.random() * lying.length)];
       if (c) {
         const p = c.mesh.position;

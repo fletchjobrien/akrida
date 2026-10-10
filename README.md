@@ -503,12 +503,13 @@ doorway (or click it) to leave.
   back through the tube to the specimen tank.
 - **The cards:** twelve little floppy-sized data cards of coloured plastic,
   each with a sliding metal shutter and a label, were spilled when the
-  station was raided. They catch the light now and then.
+  station was raided.
   - Seven are inside: on the top bunk, on the table by the cups, under the
     suit rack, among the papers, by the smashed tank, on the lab bench and by
     the lockers.
-  - Five are outside: four in a little heap spilled from the tipped crate,
-    and the green one off on its own among the rocks, out of the way.
+  - Five are outside, spilled round the crates by the airlock, the green one
+    a little out of the way behind them. Out in the sun they are a little
+    bigger and catch the light often, so they are easy to spot.
   - Only one is red, one green and one blue.
 - **Taking them:** click a card. Your creature walks to it, stoops, and
   takes it up into its right hand, holding it out as it does the tracker.
