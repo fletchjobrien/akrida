@@ -137,8 +137,9 @@ down differently:
   1. Your creature kneels beside it, and the camera closes in a little between
      the two of them. The wind and the wreck get about 5 dB quieter.
   2. It lifts its head and makes a gargled, static-laced cry of pain.
-  3. It draws a rattling breath and rasps out a three-note tune. Its eye flares
-     on each note.
+  3. It draws a rattling breath and rasps out a three-note tune. Each note
+     catches in the middle, so it comes out as two, with a short silence
+     between. Its eye flares on each note and dips at the catch.
   4. Then everything eases back and you have control again. Click again to hear
      the tune again.
 - **The tune** opens the ship's door (see below). `src/story/tune.ts` has the
@@ -228,7 +229,11 @@ buttons stutter, and it spits the odd spark. It calms down while you press it.
 2. Click buttons. Each one hums its tone in the stranger's own voice, but
    clean and steady, so you can match it against what the stranger sang. The
    order of tones on the pad is shuffled (`PAD_TONES` in `src/story/tune.ts`).
-3. Play the stranger's three tones in order. A wrong sequence buzzes and the
+   The three buttons with the stranger's tones hum twice, with the same catch
+   in the middle as the stranger's notes. The other six hum once.
+3. Play the stranger's three tones in order. (The answer, counting buttons
+   from the top left: the middle-right button, then the top-left button,
+   then the bottom-middle button.) A wrong sequence buzzes and the
    pad flashes red. The right one turns the glyphs blue and the light green.
    The lock's servo strains, bolts clunk back, and the seal breaks with a puff
    of stale air. The door jerks open a hand's width.

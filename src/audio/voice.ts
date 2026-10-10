@@ -1,5 +1,5 @@
 import { clamp, lerp, rng } from '../core/math';
-import { TONES } from '../story/tune';
+import { TONES, TUNE } from '../story/tune';
 
 /**
  * A voice for the dying stranger, synthesised sample by sample: a glottal
@@ -222,7 +222,9 @@ export function gargleSamples(sr: number, seed: number) {
  */
 export function noteSamples(sr: number, freq: number, seed: number, seconds = 0.95) {
   const r = rng(seed * 7 + 3);
-  const brk = r() < 0.6 ? 0.35 + r() * 0.3 : -1;
+  // the breath catches in the middle of every note, so each comes out as two
+  const brk = 0.44 + r() * 0.08;
+  const gap = (u: number) => 1 - 0.98 * Math.min(1, 1.6 * bell(u, brk - 0.075, brk, brk + 0.065));
   const voice = render(
     sr,
     seconds,
@@ -232,11 +234,11 @@ export function noteSamples(sr: number, freq: number, seed: number, seconds = 0.
       const a = env(t, 0, 0.09) * (1 - env(t, seconds - 0.24, seconds)) * (1 - 0.25 * u);
       const vib = 1 + Math.sin(t * 2 * Math.PI * 5.2) * 0.006 * env(t, 0.2, 0.6);
       const sag = 1 - 0.02 * env(t, seconds - 0.3, seconds);
-      const broken = brk > 0 && Math.abs(u - brk) < 0.025 ? 0.15 : 1;
+      const broken = gap(u);
       return {
         f0: freq * vib * sag,
         voice: a * broken,
-        breath: a * 2.2,
+        breath: a * 2.2 * (0.3 + 0.7 * broken),
         // the mouth opens up for the high notes, so they still ring
         f1: Math.max(360, freq * 1.15),
         f2: Math.max(860, freq * 2.3),
@@ -254,7 +256,7 @@ export function noteSamples(sr: number, freq: number, seed: number, seconds = 0.
     const t = i / sr;
     const a = env(t, 0.02, 0.12) * (1 - env(t, seconds - 0.28, seconds - 0.02));
     const vib = Math.sin(t * 2 * Math.PI * 5.2) * 0.006 * env(t, 0.2, 0.6);
-    voice[i] += Math.sin(2 * Math.PI * freq * t * (1 + vib)) * 0.3 * a;
+    voice[i] += Math.sin(2 * Math.PI * freq * t * (1 + vib)) * 0.3 * a * gap(t / seconds);
   }
   return voice;
 }
@@ -265,13 +267,18 @@ export function noteSamples(sr: number, freq: number, seed: number, seconds = 0.
  * bright blip as it starts. It is meant to be matched by ear with the
  * stranger's notes.
  */
-export function padSamples(sr: number, freq: number, seconds = 1.0) {
+export function padSamples(sr: number, freq: number, double = false) {
+  // the stranger's tones come out as two hums, like its broken notes; the rest as one
+  const seconds = double ? 1.15 : 1.0;
+  const release = double ? 0.75 : seconds * 0.55;
+  const brk = 0.45;
+  const gap = (t: number) => (double ? 1 - Math.min(1, 1.7 * bell(t, brk - 0.09, brk, brk + 0.06)) : 1);
   const voice = render(
     sr,
     seconds,
     11,
     (t) => {
-      const a = env(t, 0, 0.04) * (1 - env(t, seconds * 0.55, seconds));
+      const a = env(t, 0, 0.04) * (1 - env(t, release, seconds)) * gap(t);
       const vib = 1 + Math.sin(t * 2 * Math.PI * 5.5) * 0.005 * env(t, 0.15, 0.4);
       return {
         f0: freq * vib,
@@ -290,9 +297,10 @@ export function padSamples(sr: number, freq: number, seconds = 1.0) {
   );
   for (let i = 0; i < voice.length; i++) {
     const t = i / sr;
-    const a = env(t, 0, 0.01) * (1 - env(t, seconds * 0.5, seconds));
+    const a = env(t, 0, 0.01) * (1 - env(t, release - 0.05, seconds)) * gap(t);
     const vib = Math.sin(t * 2 * Math.PI * 5.5) * 0.005 * env(t, 0.15, 0.4);
-    const blip = Math.exp(-t / 0.03);
+    // a bright click at the start of each hum
+    const blip = Math.exp(-t / 0.03) + (double && t > brk ? Math.exp(-(t - brk - 0.02) / 0.03) * (t > brk + 0.02 ? 1 : 0) : 0);
     voice[i] +=
       Math.sin(2 * Math.PI * freq * t * (1 + vib)) * 0.4 * a +
       Math.sin(2 * Math.PI * freq * 2 * t) * 0.18 * blip +
@@ -348,7 +356,7 @@ export function buildVoices(sr: number): Voices {
     inhales: [0, 1, 2, 3].map((i) => breathSamples(sr, 400 + i, true)),
     exhales: [0, 1, 2, 3, 4].map((i) => breathSamples(sr, 500 + i, false)),
     notes: TONES.map((f, k) => [0, 1].map((v) => noteSamples(sr, f, 600 + k * 10 + v))),
-    pads: TONES.map((f) => padSamples(sr, f)),
+    pads: TONES.map((f, k) => padSamples(sr, f, (TUNE as readonly number[]).includes(k))),
   };
 }
 
@@ -363,7 +371,7 @@ export function buildVoicesSliced(sr: number, done: (v: Voices) => void) {
     ...[0, 1, 2, 3].map((i) => () => v.inhales.push(breathSamples(sr, 400 + i, true))),
     ...[0, 1, 2, 3, 4].map((i) => () => v.exhales.push(breathSamples(sr, 500 + i, false))),
     ...TONES.flatMap((f, k) => [0, 1].map((n) => () => v.notes[k].push(noteSamples(sr, f, 600 + k * 10 + n)))),
-    ...TONES.map((f) => () => v.pads.push(padSamples(sr, f))),
+    ...TONES.map((f, k) => () => v.pads.push(padSamples(sr, f, (TUNE as readonly number[]).includes(k)))),
   ];
   const step = () => {
     const job = jobs.shift();

@@ -429,7 +429,8 @@ export class Stranger {
     let a = 0;
     for (const n of E.notes) {
       const u = (enc - n) / E.noteLen;
-      if (u > 0 && u < 1) a = Math.max(a, Math.min(1, u * 8, (1 - u) * 4));
+      // each note catches in the middle and comes out as two (see noteSamples)
+      if (u > 0 && u < 1) a = Math.max(a, Math.min(1, u * 8, (1 - u) * 4) * (1 - 0.8 * smoothstep(0.06, 0, Math.abs(u - 0.48))));
     }
     return a;
   }
