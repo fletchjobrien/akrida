@@ -1659,6 +1659,51 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * A carrion bird's cry, high over the rock: a thin, rough call that rises a
+   * little and falls away, once or twice, echoing.
+   */
+  birdCry(level: number, pan: number) {
+    const ctx = this.ctx;
+    const h = this.highBus();
+    if (!ctx || !h) return;
+    const now = ctx.currentTime;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(h.bus);
+    p.connect(this.reverbSend);
+    const calls = Math.random() < 0.5 ? 1 : 2;
+    for (let c = 0; c < calls; c++) {
+      const t = now + c * (0.55 + Math.random() * 0.15);
+      const f0 = 1650 + Math.random() * 250;
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(f0 * 0.92, t);
+      o.frequency.linearRampToValueAtTime(f0 * 1.05, t + 0.07);
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.62, t + 0.5);
+      // a rasp in the throat
+      const vib = ctx.createOscillator();
+      vib.frequency.value = 38 + Math.random() * 8;
+      const vg = ctx.createGain();
+      vg.gain.value = f0 * 0.025;
+      vib.connect(vg).connect(o.frequency);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f0 * 1.1;
+      bp.Q.value = 3;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(level, t + 0.05);
+      g.gain.setTargetAtTime(level * 0.5, t + 0.12, 0.1);
+      g.gain.setTargetAtTime(0.0001, t + 0.38, 0.06);
+      o.connect(bp).connect(g).connect(p);
+      o.start(t);
+      vib.start(t);
+      o.stop(t + 0.75);
+      vib.stop(t + 0.75);
+    }
+  }
+
   /** The highlands come into view: a wide, open chord, slowly swelling. */
   vista() {
     const ctx = this.ctx;

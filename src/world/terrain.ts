@@ -1,4 +1,5 @@
 import {
+  Float32BufferAttribute,
   GLSL3,
   Mesh,
   type Object3D,
@@ -101,8 +102,14 @@ precision highp int;
 ${NOISE_GLSL}
 ${TERRAIN_GLSL}
 uniform vec2 uGridOffset;
+in float aWorn;
 out vec3 vWorldPos;
+out vec3 vLandN;
+out float vWorn;
 void main() {
+  // the lie of the land the highland mesh brings (straight up for the grid), and its worn path
+  vLandN = normal;
+  vWorn = aWorn;
   // the grid is flat; the highland mesh brings the height the highlands add
   vec2 p = position.xz + uGridOffset;
   vec3 wp = vec3(p.x, position.y + baseHeight(p), p.y);
@@ -179,6 +186,8 @@ layout(location = 1) out vec4 outInfo;
 ${LIGHTING_GLSL}
 ${SAND_GLSL}
 in vec3 vWorldPos;
+in vec3 vLandN;
+in float vWorn;
 uniform float uCut;
 
 void main() {
@@ -187,19 +196,10 @@ void main() {
   if (length(p - uHigh.xy) < uCut) discard;
   float d = worldDither();
   vec3 n = sandNormal(p);
-  // The highlands are shaded by the mesh's own flat facets, as the boulders are:
-  // broad smooth faces meeting at sharp edges.
-  vec3 fn = normalize(cross(dFdx(vWorldPos), dFdy(vWorldPos)));
-  if (fn.y < 0.0) fn = -fn;
+  // tilt the sand's own detail by the lie of the highlands under it
+  vec3 ln = normalize(vLandN);
+  n = normalize(n / n.y + ln / ln.y - vec3(0.0, 1.0, 0.0));
   float hm = highlandMask(p);
-  float rock = 0.0;
-  if (hm > 0.0) {
-    n = normalize(mix(n, fn, smoothstep(0.0, 0.3, hm)));
-    // bare rock on every face more than gently steep: whole faces, edged sharp
-    // (sand lies only on the near-level faces)
-    float steep = 1.0 - fn.y;
-    rock = step(0.5, hm) * step(0.045, steep) * step(highlandRoad(p), 0.5);
-  }
   int band = sandBandIndex(vWorldPos, n, d, 0.0);
 
   // Pixel-sized pebbles and grit, locked to a world grid of screen-pixel size.
@@ -244,30 +244,16 @@ void main() {
   vec3 col = sandBand(band);
 
   vec4 info = vec4(0.5, 1.0, 0.0, 0.0);
-  if (hm > 0.0) {
-    // the trail: worn in patches where feet and wheels kept to it, with faint ruts and gravel
-    float across;
-    float tr = highlandTrail(p, across);
-    if (tr > 0.3) {
-      float worn = tr * smoothstep(-0.35, 0.1, gnoise(p * 0.3 + 2.0));
-      bool rut = abs(abs(across) - 0.45) < 0.08 && gnoise(p * 0.8) > -0.1;
-      if (worn > 0.45 + (d - 0.5) * 0.3 || (rut && tr > 0.6)) {
-        band = clamp(band + 1, 2, 4);
-        if (hash01(floor(cell) + vec2(3.0, 61.0)) < 0.06) band = min(band + 1, 4);
-        col = sandBand(band);
-      }
-    }
-    // bare rock, lit exactly as the boulders are, with their outlines and crease highlights
-    if (rock > 0.5) {
-      float ndl = dot(fn, uSunDir);
-      float sh = shadowAt(vWorldPos, fn);
-      float cl = cloudShadowAt(p, d);
-      float l = ndl * sh * (1.0 - 0.5 * cl);
-      col = l > 0.62 ? ${glslRgb(PALETTE.rockLight)} : (l > 0.05 ? ${glslRgb(PALETTE.rockMid)} : ${glslRgb(PALETTE.rockDark)});
-      vec3 vn = normalize(mat3(viewMatrix) * fn);
-      info = vec4(vn.xy * 0.5 + 0.5, 0.55, 1.0);
-    }
+  // the footpath: the sand scuffed and kicked about where feet kept to it,
+  // thick with little dents and scattered grit, thinning out at its edges
+  if (vWorn > 0.05) {
+    float scuff = hash01(floor(cell) + vec2(3.0, 61.0));
+    float along = 0.75 + 0.25 * gnoise(p * 0.6 + 2.0);
+    if (scuff < 0.16 * vWorn * along) col = sandBand(clamp(band + 1, 2, 4));
+    else if (scuff > 1.0 - 0.03 * vWorn) col = sandBand(min(band + 2, 4));
   }
+  // the highlands are stonier: more grit and chips of rock in the sand
+  if (hm > 0.3 && !speck && hash01(floor(cell) + vec2(-41.0, 19.0)) < 0.012 * hm) col = sandBand(min(band + 2, 4));
 
   // Burnt sand and fused glass where the pod came down.
   float sc = smoothstep(0.3, 0.55, scorchAt(p));
@@ -303,6 +289,8 @@ export class Terrain {
   constructor(size = 128, segments = 224) {
     const geo = new PlaneGeometry(size, size, segments, segments);
     geo.rotateX(-Math.PI / 2);
+    // the grid is never worn by the path (that is on the highland mesh)
+    geo.setAttribute('aWorn', new Float32BufferAttribute(new Float32Array(geo.getAttribute('position').count), 1));
     this.cell = size / segments;
     this.mat = new ShaderMaterial({
       glslVersion: GLSL3,
@@ -316,8 +304,8 @@ export class Terrain {
   }
 
   /**
-   * The highlands, drawn with a mesh cut along the faces of the rock (the same
-   * shading, so the same shader program); the grid stands aside for it.
+   * The highlands' ground, drawn with a mesh of its own (the same shading, so
+   * the same shader program); the grid stands aside for it.
    */
   addHighlands(scene: Object3D) {
     if (!HIGH.on) return;

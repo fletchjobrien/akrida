@@ -65,7 +65,7 @@ wakes. Walk right:
 | The second pod | 64 |
 | The dying stranger | 86 |
 | The ship (centre, a little up the screen) | 118 |
-| The station on the highlands' summit (far up the screen) | about 210 (and 104 up) |
+| The station high in the highlands (far up the screen) | about 210 (and 104 up) |
 
 A few steps from where the creature wakes lies the first hint: a small curved
 scrap of the pod's white shell with a strip of its orange band, tipped up and
@@ -304,7 +304,7 @@ doorway, and it pulses softly.
    in both hands and look down at it. The camera leans in, and the world goes a
    little quieter. While you hold it out, your creature turns on the spot to
    face the cursor, so you can sweep the device round to find the way.
-3. **Hot or cold.** The device leads to the research station on the summit of
+3. **Hot or cold.** The device leads to the research station high in
    the highlands, 130 units north-east of the ship (up and to the right on
    screen; see below):
    - **Wrong way:** the light, its halo and its glow on the ground throb red,
@@ -316,7 +316,7 @@ doorway, and it pulses softly.
      chime, and a quiet chord hums under everything.
    - In the hand, it uses the way the arm points it (toward the cursor). Held
      out in both hands, it uses the way your creature faces. On the ground, it
-     uses the way its antenna points. On the summit (within 12 units of its
+     uses the way its antenna points. At the station (within 12 units of its
      middle), it stays solid.
    - Sounds are louder while you hold it out. On the ground, they come from
      where it lies.
@@ -326,7 +326,7 @@ doorway, and it pulses softly.
    it casts a faint pool of its colour on the ground. Click it again to walk over and
    pick it up.
 
-On the summit it burns solid green.
+At the station it burns solid green.
 
 **Code:**
 - The ship, its effects, the keypad and the door are in `src/world/ship.ts`.
@@ -347,38 +347,53 @@ On the summit it burns solid green.
 ## The highlands
 
 Far to the north-east of the ship, 130 units on (about a minute's walk), a
-rugged mountain rises out of the desert, with rocky hills around it. At its
-summit is a research station. It is the place the tracker leads to.
+mountain of rock rises out of the desert. The research station sits high on
+it, in a saddle of its ridge. It is the place the tracker leads to.
 
-- **Shape:** the dunes die away as the ground rises. The mountain climbs in
-  ridges, spurs and crags, steep near the top and spreading at its foot, higher
-  toward the north so it never hides the creature. Its summit, about 22 units
-  up, was levelled for the station.
-- **The trail:** a sandy trail runs out into the desert and winds up a broad
-  ridge to the summit. It is not graded flat: it keeps some of the lie of the
-  ground, its width changes, and it is worn darker in patches, with faint ruts
-  and grit where feet and wheels kept to it. It is the way up.
-- **The summit:** levelled for the station inside a ragged rim of rock. The
-  rock rises past the rim, and the level ground undulates a little.
-- **Rock and sand:** the rock is cut like the desert's boulders: broad, flat
-  faces that meet at sharp edges, lit in the boulders' three tones of grey,
-  with their dark outlines and light crease highlights. Sand lies only on the
-  near-level faces and in the hollows, and it is the desert's own sand, so the
-  mountain grows out of the land around it. Boulders of the same stone lie at
-  the feet of the steeper faces; the trail and the summit are clear.
-- **Walking:** the creature cannot climb anything steeper than about 49
-  degrees. It walks up the road (or any gentle slope) and can explore the
-  ledges and the foot of every face.
+- **Rock:** the mountain is made of the desert's own boulders, made the same
+  way and lit the same way, but huge and piled up. Their creases catch the
+  light more softly than on the small rocks.
+  - Spires of stacked boulders run along a ridge behind the station. Each
+    spire is a great boulder sunk in the ground, with smaller, taller ones
+    stacked on it and others leaning against its foot.
+  - The spires are highest on either side of the station and lower just
+    behind it, so the station sits in a notch of the ridge. A second, broken
+    line of spires stands further back.
+  - Outcrops cover the flanks: bigger and closer together high up and
+    behind, smaller and further apart toward the foot.
+  - Scree lies round the foot of every rock and of the mountain.
+- **Ground:** under the rock is a long rise of the desert's sand, gentle
+  toward the ship and steeper behind. The dunes die away on it. The ridge
+  stands to the north and east of the station, so the camera (which looks
+  north) always sees the station and the path.
+- **The path:** a footpath, worn by feet and not built. It winds up from the
+  desert and swings round the outcrops. Its width changes as it goes. It is
+  only a scuffed, gritty line in the sand, thinning out at its edges, with
+  loose stones on either side. The rocks next to it are kept low, so they
+  never hide the creature.
+- **The station's saddle:** gently level ground with a wandering edge. Rock
+  wraps round the station: a low wall behind it that rises into the spires,
+  tall crags to the north-west, and lower ones to the south-east.
+- **Walking:** the rocks stop the creature, as in the desert. It cannot climb
+  anything steeper than about 49 degrees. It walks up the path or picks its
+  way between the outcrops.
+- **Life and effects:**
+  - Three carrion birds circle slowly over the station. They glide on stiff,
+    slightly raised wings, bank into the turn, and now and then beat their
+    wings a few times. Their shadows sweep over the ground. Now and then one
+    cries: a thin, rough call that falls away and echoes.
+  - Sand streams off the tops of the spires in the wind, thickest in the
+    gusts.
+  - Now and then pebbles skitter down a rock near you, in a thin veil of
+    dust.
 - **Sound:** all of it echoes off the rock.
   - Wind moans through the rock: three narrow resonances that drift and gust,
     louder in strong wind, with a thin whistle off a sharp edge.
-  - Now and then pebbles skitter down a rock face near you. You see them bounce
-    down the face in a thin veil of dust.
   - Rarely, far off, a slab lets go with a long low rumble and a clatter.
-  - Near the summit, a low hum rises: two low notes slowly beating, with a
+  - Near the station, a low hum rises: two low notes slowly beating, with a
     faint high glint over them.
 - **First sight:** when the mountain comes into view, a wide, open chord swells
-  slowly, and your creature turns to look up at the summit.
+  slowly, and your creature turns to look up at the tallest spire.
 
 ### The research station
 
@@ -412,19 +427,20 @@ modules banded in orange, dark metal and glass.
     the middle one slid down.
   - The first time you come near, a low, sad chord swells and your creature
     turns to look at them.
-- The tracker burns solid green once you are on the summit.
+- The tracker burns solid green once you are at the station.
 
 **Code:**
-- The mountain's shape is in `src/world/highlands.ts`. Its height is worked
-  out once, on the CPU, at every point of a triangular lattice (faces 2.6
-  units across, each cut in four). The ground the creature walks on and the
-  mesh that draws the highlands both read that one table, so they always
-  agree. The trail and summit masks are also on the GPU (uniforms `uHigh` and
-  `uHighOn`). The rock and trail shading is in `src/world/terrain.ts`; the
-  rock takes its normal from the mesh's own faces.
-- The boulders, falling pebbles, sound levels and first sight are in
-  `src/world/highlandLife.ts`. The boulders are placed a few milliseconds at
-  a time after start-up, so loading never stalls.
+- The ground and the path are in `src/world/highlands.ts`. The ground's
+  height is worked out once, on the CPU, at every point of a triangular
+  lattice 1.3 units apart. The ground the creature walks on and the mesh that
+  draws it both read that one table, so they always agree. The mesh also
+  carries smooth normals and how worn the path is at each point. Only the
+  highland mask is on the GPU (uniforms `uHigh` and `uHighOn`).
+- The rock (instanced meshes of the desert's rock shapes, with a collider
+  for each big one), the sand streamers, the falling pebbles, the sound
+  levels and the first sight are in `src/world/highlandLife.ts`. The rock is
+  raised a few milliseconds at a time once the creature is on its way, so
+  nothing stalls. The birds are in `src/world/birds.ts`.
 - The station is in `src/world/station.ts`; the three dead in
   `src/story/Fallen.ts` (scripted poses on the creature's own rig).
 
@@ -517,7 +533,7 @@ the biggest cost at start-up. These steps keep the game smooth:
   can click stay separate. The boulders and pebbles are instanced meshes.
 - **Low render resolution.** The scene renders at about 300 rows (see
   "How the rendering works"), at a pixel ratio of 1.
-- **Less work per pixel.** The ground's shader works out only the desert's
+- **Less work per vertex.** The ground's shader works out only the desert's
   base height. The highland height is in the mesh, not in the shader.
 
 In a headless test with a software renderer, these changes cut the time to
