@@ -11,7 +11,7 @@ low resolution so that it looks like hand-made 2D pixel art.
 | Shift (hold) | Sprint (uses stamina, see below) |
 | Ctrl or C (tap) | Crouch on or off. Sprinting also stands the creature up. |
 | Mouse | Look. When the creature stands still, it looks at the cursor. When it runs, it tilts its head toward the cursor. |
-| Left click (hold), with the tracker in hand | Hold the tracker out in both hands and look at it. You can walk slowly while you do. |
+| Left click (hold), with the tracker in hand | Hold the tracker out in both hands and look at it. Your creature turns on the spot to face the cursor, so you can sweep it round. You can also walk slowly. |
 | Left click on the tracker | In hand: drop it. On the ground: walk to it and pick it up. |
 | Mouse wheel | Zoom in (wheel up) or out (wheel down). The game remembers your zoom. |
 | Double-click | Fullscreen |
@@ -259,24 +259,32 @@ A small device lies on the airlock floor, just inside the door. It looks like a
 walkie-talkie in the pods' colours: an off-white shell, an orange band, a dark
 rubber grip, a ribbed grille, a dial, and an antenna with a glowing tip. A
 small light sits in a dark window on its face. Before the door opens, nothing
-shows. After the door opens, its green light throbs faintly in the dark
+shows. After the door opens, its red light throbs faintly in the dark
 doorway, and it pulses softly.
 
 1. Click it (the cursor glows over it). Your creature walks up beside the
-   doorway, sinks onto one knee and takes it in its right hand. The first time,
-   it rises, turns, and holds it up in both hands. The device wakes with a
-   sweep of sound out of static, and the creature looks at it.
+   doorway, bends, and sinks onto one knee. Its hoof comes down over the
+   device and touches it (it shifts a little with a soft tick), then closes on
+   it. It lifts it slowly, straight up, and sand trickles off it. The device
+   stays where the hoof took it and turns into the grip as it comes up. It
+   does not jump into the hand.
+   The first time, the creature rises and turns, and its free hand brushes
+   the sand off the device's face in two strokes. Then it holds the device up
+   in both hands. The device wakes with a sweep of sound out of static, and
+   the creature looks at it.
 2. It carries the device in its right hand. Hold the left button to hold it out
    in both hands and look down at it. The camera leans in, and the world goes a
-   little quieter.
+   little quieter. While you hold it out, your creature turns on the spot to
+   face the cursor, so you can sweep the device round to find the way.
 3. **Hot or cold.** The device knows where something lies, 50 units north-east
    of the ship (up and to the right on screen):
-   - **Wrong way:** the light throbs very slowly (one throb in about 2.3 to 3.4
-     seconds, a little quicker the nearer you point). Each throb comes with a
-     deep, soft pulse of sound and faint radio static.
+   - **Wrong way:** the light, its halo and its glow on the ground throb red,
+     very slowly (one throb in about 2.3 to 3.4 seconds, a little quicker the
+     nearer you point). Each throb comes with a deep, soft pulse of sound and
+     faint radio static.
    - **Right way** (within about 26 degrees of it, until you turn 34 degrees
-     off): the light and the antenna burn a solid green. Two bell notes chime,
-     a soft chord hums, and motes of green light drift up off the antenna.
+     off): the light and the antenna burn a solid green. Two soft bell notes
+     chime, and a quiet chord hums under everything.
    - It uses the way your creature faces. On the ground, it uses the way its
      antenna points. Within 3 units of the place, it stays solid.
    - Sounds are louder while you hold it out. On the ground, they come from
@@ -284,7 +292,7 @@ doorway, and it pulses softly.
 4. Click it in your creature's hand to drop it. It falls with your motion,
    knocks on the sand with a clatter and a puff of sand, hops, and settles on
    its back. It glances off the hull and the rocks. Its light keeps going, and
-   it casts a faint green pool on the ground. Click it again to walk over and
+   it casts a faint pool of its colour on the ground. Click it again to walk over and
    pick it up.
 
 Nothing lies at the place yet.

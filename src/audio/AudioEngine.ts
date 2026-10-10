@@ -1307,15 +1307,14 @@ export class AudioEngine {
     hot.gain.value = 0;
     const warm = ctx.createBiquadFilter();
     warm.type = 'lowpass';
-    warm.frequency.value = 1500;
+    warm.frequency.value = 900;
     warm.connect(hot).connect(bus);
     for (const [f, g] of [
       [196.0, 0.32],
       [196.45, 0.26],
       [293.66, 0.22],
       [294.2, 0.18],
-      [392.0, 0.14],
-      [783.99, 0.035],
+      [392.0, 0.1],
     ]) {
       const o = ctx.createOscillator();
       o.frequency.value = f;
@@ -1328,7 +1327,7 @@ export class AudioEngine {
     const lfo = ctx.createOscillator();
     lfo.frequency.value = 0.23;
     const lg = ctx.createGain();
-    lg.gain.value = 260;
+    lg.gain.value = 180;
     lfo.connect(lg).connect(warm.frequency);
     lfo.start();
     this.tracker = { bus, pan, low, hot, fizz: this.white ? this.trackerFizz(ctx, this.white, bus) : null };
@@ -1359,7 +1358,7 @@ export class AudioEngine {
     t.bus.gain.setTargetAtTime(level, now, 0.12);
     t.pan.pan.setTargetAtTime(pan, now, 0.12);
     t.low.frequency.setTargetAtTime(700 * Math.pow(12, clarity), now, 0.12);
-    t.hot.gain.setTargetAtTime(hot * 0.075, now, 0.25);
+    t.hot.gain.setTargetAtTime(hot * 0.026, now, 0.5);
     t.fizz?.gain.setTargetAtTime(fizz * 0.012, now, 0.2);
   }
 
@@ -1409,8 +1408,8 @@ export class AudioEngine {
     const now = ctx.currentTime;
     [783.99, 1174.66].forEach((f, k) => {
       const t = now + k * 0.085;
-      this.trackerVoice(f, f, t, 0.006, 0.02, 1.1, level);
-      this.trackerVoice(f * 2.76, f * 2.76, t, 0.004, 0.0, 0.35, level * 0.18);
+      this.trackerVoice(f, f, t, 0.03, 0.02, 0.9, level);
+      this.trackerVoice(f * 2.76, f * 2.76, t, 0.02, 0.0, 0.25, level * 0.08);
     });
   }
 

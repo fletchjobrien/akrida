@@ -170,6 +170,8 @@ export class Creature {
 
   /** 0..1 target: hold something out in both hands in front of the chest and look down at it. */
   holdOut = 0;
+  /** When set and not walking, turn on the spot to face this way (radians). */
+  faceYaw: number | null = null;
   /** Carrying something in the right hand: that arm swings less and its elbow bends. */
   carrying = false;
   /** How far the hold-out has come (eased toward holdOut). */
@@ -327,6 +329,7 @@ export class Creature {
         this.yawTarget = lookYaw - Math.sign(rel) * 0.55;
       }
     }
+    if (this.faceYaw !== null && moveLen === 0) this.yawTarget = this.faceYaw;
     const turnF = lerp(1.9, 2.6, this.run) * (1 - this.crouch * 0.25);
     this.yawDyn.setParams(turnF, 0.85, 0);
     const prevYaw = this.yaw;

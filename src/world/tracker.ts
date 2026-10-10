@@ -48,11 +48,15 @@ const REST_LIFT = (D / 2) * SCALE + 0.004;
 const TIP = new Vector3(-0.032, H / 2 + 0.165, 0);
 const LED = new Vector3(0, -0.028, D / 2 + 0.008);
 
-/** The light's colour in five steps, dark to white-hot: quantised, so it reads as pixel art. */
+/**
+ * The light's colour in five steps, dark to white-hot, quantised so it reads
+ * as pixel art: red while it searches, green when it points true.
+ */
 const GREEN = [0x0c1a10, 0x1b4a26, 0x2f8f45, 0x6fe07a, 0xd8ffcc].map(rgb);
+const RED = [0x1c0c0c, 0x4a1714, 0x9a2a22, 0xec5a48, 0xffd2c6].map(rgb);
 const GLOW_GREEN = rgb(0x3fdc5a);
-const SPARK_HOT = rgb(0xd8ffcc).toArray();
-const SPARK_COOL = rgb(0x2f8f45).toArray();
+const GLOW_RED = rgb(0xff4632);
+const SAND = [rgb(0xe4c987).toArray(), rgb(0xbca872).toArray()];
 
 function faceted(g: BufferGeometry) {
   const f = g.index ? g.toNonIndexed() : g;
@@ -79,6 +83,10 @@ const _v = new Vector3();
 const _dq = new Quaternion();
 const _ax = new Vector3();
 const _n = new Vector2();
+const _c = new Vector3();
+const _gripP = new Vector3();
+const _gripQ = new Quaternion();
+GRIP.decompose(_gripP, _gripQ, _s);
 
 export type TrackerState = 'placed' | 'carried' | 'falling' | 'ground';
 
@@ -86,8 +94,8 @@ export type TrackerState = 'placed' | 'carried' | 'falling' | 'ground';
  * A hand-held tracker from the ship, about the size of a walkie-talkie: an
  * off-white shell banded like the pods, a grille, a small light on its face
  * and a glowing antenna tip. It knows where something lies. Pointed the wrong
- * way, its light throbs slowly; pointed the right way, it burns a solid green
- * and hums.
+ * way, its light throbs slowly red; pointed the right way, it burns a solid
+ * green and hums softly.
  */
 export class Tracker {
   readonly group = new Group();
@@ -121,7 +129,13 @@ export class Tracker {
   private readonly pool = new Glow(GLOW_GREEN, 0.75, { flat: true, core: 0 });
   private phase = 0.15;
   private flash = 0;
-  private sparkTimer = 0;
+  /** In the hand: where the hoof closed on it, easing into the grip as it is lifted. */
+  private readonly takeP = new Vector3();
+  private readonly takeQ = new Quaternion();
+  private takeT = 1;
+  /** Seconds of sand still trickling off it after it was taken up. */
+  private shed = 0;
+  private shedTimer = 0;
   private readonly vel = new Vector3();
   private readonly spin = new Vector3();
   private bounces = 0;
@@ -231,7 +245,7 @@ export class Tracker {
 
   /** Where a hand closes on it, in world space. */
   grabPoint(out: Vector3) {
-    return out.copy(this.rest).setY(this.rest.y + 0.02);
+    return out.copy(this.rest).setY(this.rest.y + 0.07);
   }
 
   /** It lies in the ship's doorway (so whoever takes it faces into the ship). */
@@ -239,12 +253,54 @@ export class Tracker {
     return this.state === 'placed';
   }
 
-  /** Into the hand. */
-  take() {
+  /** A light touch before the hoof closes on it: it shifts a little where it lies. */
+  nudge(dx: number, dz: number) {
+    if (this.state !== 'placed' && this.state !== 'ground') return;
+    this.group.position.x += dx;
+    this.group.position.z += dz;
+    this.rest.x += dx;
+    this.rest.z += dz;
+    _dq.setFromAxisAngle(_ax.set(0, 1, 0), (Math.random() - 0.5) * 0.12);
+    this.group.quaternion.premultiply(_dq);
+    this.restQ.copy(this.group.quaternion);
+    this.audio.trackerGrab(0.1);
+    this.sandPuff(2);
+  }
+
+  /**
+   * Into the hand: it stays where the hoof closed on it, and settles into the
+   * grip over the lift instead of jumping there.
+   */
+  take(creature: Creature) {
     this.state = 'carried';
     this.inShip = false;
     this.settle = -1;
+    const hand = creature.rig.arms[1].hand;
+    creature.rig.root.updateMatrixWorld(true);
+    this.group.updateMatrixWorld(true);
+    _m.copy(hand.matrixWorld).invert().multiply(this.group.matrixWorld).decompose(this.takeP, this.takeQ, _s);
+    this.takeT = 0;
+    this.shed = 1.1;
     this.audio.trackerGrab(0.3);
+  }
+
+  /** A few grains of sand shaken off it. */
+  sandPuff(count: number) {
+    const p = this.group.position;
+    for (let i = 0; i < count; i++) {
+      this.dust.spawn(
+        p.x + (Math.random() - 0.5) * 0.12,
+        p.y - 0.02,
+        p.z + (Math.random() - 0.5) * 0.12,
+        (Math.random() - 0.5) * 0.35,
+        Math.random() * 0.4,
+        (Math.random() - 0.5) * 0.35,
+        0.6 + Math.random() * 0.5,
+        SAND[i & 1],
+        1,
+        { g: 6, drag: 1.2, windK: 0.25 },
+      );
+    }
   }
 
   /** Wake it, the first time it is held. */
@@ -281,7 +337,15 @@ export class Tracker {
     if (this.state === 'carried') {
       const rig = creature.rig;
       rig.root.updateMatrixWorld(true);
-      _m.multiplyMatrices(rig.arms[1].hand.matrixWorld, GRIP).decompose(_p, _q, _s);
+      if (this.takeT < 1) {
+        // from where the hoof closed on it into the grip, as it comes up
+        this.takeT = Math.min(1, this.takeT + dt / 0.9);
+        const e = smoothstep(0, 1, this.takeT);
+        _p.lerpVectors(this.takeP, _gripP, e);
+        _q.slerpQuaternions(this.takeQ, _gripQ, e);
+        _m.compose(_p, _q, _c.set(1, 1, 1));
+        _m.premultiply(rig.arms[1].hand.matrixWorld).decompose(_p, _q, _s);
+      } else _m.multiplyMatrices(rig.arms[1].hand.matrixWorld, GRIP).decompose(_p, _q, _s);
       const w = smoothstep(0, 1, saturate(Math.max(creature.holdDyn.y, this.inspect)));
       if (w > 0.001) {
         _m.multiplyMatrices(rig.chest.matrixWorld, INSPECT).decompose(_p2, _q2, _s);
@@ -312,8 +376,8 @@ export class Tracker {
     if (this.hot !== wasHot && held) {
       if (this.hot) {
         this.flash = 1;
-        this.audio.trackerLock(0.16 + 0.12 * holdW);
-      } else this.audio.trackerLose(0.07 + 0.06 * holdW);
+        this.audio.trackerLock(0.05 + 0.04 * holdW);
+      } else this.audio.trackerLose(0.05 + 0.04 * holdW);
     }
     this.heat = this.hot ? Math.min(1, this.heat + dt * 7) : Math.max(0, this.heat - dt * 2.5);
     this.flash = Math.max(0, this.flash - dt * 2.2);
@@ -334,9 +398,11 @@ export class Tracker {
     const sleepy = this.awake ? 1 : 0.6;
     const searching = (0.06 + 0.94 * throb) * sleepy;
     this.light = searching + (1 - searching) * this.heat;
-    const step = (v: number) => GREEN[Math.max(0, Math.min(4, Math.round(v * 3.6 + this.flash * 1.4)))];
+    const palette = this.heat > 0.5 ? GREEN : RED;
+    const step = (v: number) => palette[Math.max(0, Math.min(4, Math.round(v * 3.6 + this.flash * 1.4)))];
     (this.ledMat.uniforms.uLight.value as Vector3).copy(step(this.light));
     (this.tipMat.uniforms.uLight.value as Vector3).copy(step(Math.min(1, this.light * 1.05)));
+    for (const g of [this.tipGlow, this.ledGlow, this.pool]) g.color.lerpVectors(GLOW_RED, GLOW_GREEN, this.heat);
 
     // ---- glows: halos on the light and the tip, and a pool of green on whatever is under it
     G.updateMatrixWorld(true);
@@ -350,26 +416,13 @@ export class Tracker {
     this.pool.position.set(G.position.x, ground + 0.012, G.position.z);
     this.pool.strength = lit * 0.32 * saturate(1.4 - above * 0.9);
 
-    // ---- pointing true: motes of light drift up off the antenna
-    if (this.heat > 0.5 && this.shown) {
-      this.sparkTimer -= dt * (0.6 + 1.2 * holdW + this.flash * 3);
-      while (this.sparkTimer <= 0) {
-        this.sparkTimer += 0.16;
-        const p = this.tipGlow.position;
-        const a = Math.random() * Math.PI * 2;
-        const r = 0.02 + Math.random() * 0.03;
-        this.dust.spawn(
-          p.x + Math.cos(a) * r,
-          p.y + 0.01,
-          p.z + Math.sin(a) * r,
-          Math.cos(a) * 0.08,
-          0.18 + Math.random() * 0.12,
-          Math.sin(a) * 0.08,
-          0.9 + Math.random() * 0.6,
-          SPARK_HOT,
-          0.6,
-          { g: -0.15, drag: 1.4, windK: 0.08, c2: SPARK_COOL, soft: true },
-        );
+    // ---- sand trickles off it for a moment after it is taken up
+    if (this.shed > 0 && held) {
+      this.shed -= dt;
+      this.shedTimer -= dt;
+      if (this.shedTimer <= 0) {
+        this.shedTimer = 0.05 + Math.random() * 0.08;
+        this.sandPuff(1);
       }
     }
 

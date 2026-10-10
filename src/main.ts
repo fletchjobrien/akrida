@@ -88,6 +88,8 @@ const approachTo = new Vector3();
 /** The left button while the tracker is in hand: a click on it drops it, holding raises it to look at. */
 const press = { down: false, t: 0, onDevice: false, out: false };
 let deviceHover = false;
+/** Holding the tracker out: the way the cursor turns the creature. */
+let spinYaw: number | null = null;
 /** How near the cursor (CSS pixels) must be to the tracker to use it, and how far the creature walks to it. */
 const DEVICE_PX = 30;
 const DEVICE_WALK = 7;
@@ -518,11 +520,16 @@ function update(dt: number, now: number) {
     } else if (approachTime > 6) approach = false;
     else control.move.set((dx / d) * Math.min(0.75, d * 2.2), (-dz / d) * Math.min(0.75, d * 2.2));
   }
+  creature.faceYaw = null;
   if (creature.holdOut > 0) {
-    // looking down at it: an unhurried walk
+    // looking down at it: an unhurried walk, or standing and turning on the spot toward the cursor
     control.move.multiplyScalar(0.55);
     control.sprint = false;
-  }
+    const dx = mouseGround.x - creature.pos.x;
+    const dz = mouseGround.z - creature.pos.z;
+    if (input.hasMouse && Math.hypot(dx, dz) > 0.35) spinYaw = Math.atan2(dx, dz);
+    creature.faceYaw = spinYaw ?? creature.yaw;
+  } else spinYaw = null;
   strangerHover = !!stranger && input.hasMouse && !holding && stranger.canInteract(creature.pos, mouseGround);
   deviceHover =
     !!tracker && input.hasMouse && (tracker.carried ? tracker.screenDistance(input.mouse, pr.camera) < DEVICE_PX : canTakeTracker(input.mouse));

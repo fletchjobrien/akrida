@@ -28,11 +28,11 @@ const BEND = mk(CALM, {
 
 /** Down on one knee, the free hand on the other, the right hand on the device. */
 const GRAB = mk(BEND, {
-  pelvisY: 0.4,
-  pelvisZ: -0.18,
-  pelvisPitch: 0.52,
-  spinePitch: 0.24,
-  chestPitch: 0.16,
+  pelvisY: 0.33,
+  pelvisZ: -0.06,
+  pelvisPitch: 0.78,
+  spinePitch: 0.3,
+  chestPitch: 0.22,
   neckPitch: 0.12,
   headPitch: 0.45,
   handL: hand(0.16, 0.4, 0.16, 0.85),
@@ -54,6 +54,18 @@ const RISE = mk(CALM, {
   handR: hand(-0.1, 0.62, 0.3, 1),
   footL: foot(0.12, 0.14, 0, 0.25, 0, 0),
   footR: foot(-0.12, -0.24, 0, 0.3, 0.1, 0),
+});
+
+/** Up again, the device in the right hand in front of its chest, the left coming over to brush it off. */
+const LIFTED = mk(CALM, {
+  pelvisPitch: 0.16,
+  neckPitch: 0.3,
+  headPitch: 0.42,
+  headRoll: -0.06,
+  handL: hand(0.06, 0.86, 0.34, 1),
+  handR: hand(-0.08, 0.84, 0.3, 1),
+  footL: foot(0.1, 0.06, 0, 0.2, 0, 0),
+  footR: foot(-0.1, -0.06, 0, 0.2, 0, 0),
 });
 
 /** Upright, holding it up in both hands to look at it as it wakes (as when it is held out later). */
@@ -82,34 +94,68 @@ type Key = { t: number; pose: ScriptPose; ease: Ease };
 const FIRST: Key[] = [
   { t: 0, pose: CALM, ease: 'linear' },
   { t: 0.5, pose: BEND, ease: 'inOut' },
-  { t: 1.0, pose: GRAB, ease: 'inOut' },
-  { t: 1.25, pose: GRAB, ease: 'linear' },
-  { t: 1.85, pose: RISE, ease: 'inOut' },
-  { t: 2.4, pose: STUDY, ease: 'out' },
-  { t: 3.3, pose: STUDY2, ease: 'inOut' },
-  { t: 3.9, pose: STUDY2, ease: 'linear' },
-  { t: 4.6, pose: CARRY, ease: 'inOut' },
+  { t: 1.05, pose: GRAB, ease: 'inOut' },
+  { t: 1.55, pose: GRAB, ease: 'linear' },
+  { t: 2.3, pose: RISE, ease: 'inOut' },
+  { t: 2.6, pose: LIFTED, ease: 'out' },
+  { t: 3.35, pose: LIFTED, ease: 'linear' },
+  { t: 3.75, pose: STUDY, ease: 'inOut' },
+  { t: 4.6, pose: STUDY2, ease: 'inOut' },
+  { t: 5.2, pose: STUDY2, ease: 'linear' },
+  { t: 6.0, pose: CARRY, ease: 'inOut' },
 ];
 /** After that: just scooped up. */
 const AGAIN: Key[] = [
   { t: 0, pose: CALM, ease: 'linear' },
   { t: 0.4, pose: BEND, ease: 'inOut' },
-  { t: 0.8, pose: GRAB, ease: 'inOut' },
-  { t: 0.95, pose: GRAB, ease: 'linear' },
-  { t: 1.45, pose: RISE, ease: 'inOut' },
-  { t: 2.0, pose: CARRY, ease: 'inOut' },
+  { t: 0.85, pose: GRAB, ease: 'inOut' },
+  { t: 1.2, pose: GRAB, ease: 'linear' },
+  { t: 1.8, pose: RISE, ease: 'inOut' },
+  { t: 2.45, pose: CARRY, ease: 'inOut' },
 ];
-/** When the hand closes on it. */
-const GRAB_AT = { first: 1.08, again: 0.86 };
+
+/** The beats of each version: when the hoof touches it, closes on it, and the rest. */
+interface Beats {
+  touch: number;
+  grab: number;
+  /** Stepping back clear of the hull as it rises. */
+  back: [number, number];
+  /** Turning to the camera (first time). */
+  turn: [number, number];
+  /** The left hand brushing the sand off (first time). */
+  brush: [number, number];
+  /** Held up in both hands (first time): in from, in to, out from, out to. */
+  inspect: [number, number, number, number];
+  wake: number;
+}
+const FIRST_BEATS: Beats = {
+  touch: 1.12,
+  grab: 1.32,
+  back: [1.6, 2.45],
+  turn: [1.95, 2.85],
+  brush: [2.55, 3.35],
+  inspect: [3.3, 3.75, 5.2, 5.75],
+  wake: 3.7,
+};
+const AGAIN_BEATS: Beats = {
+  touch: 0.84,
+  grab: 0.98,
+  back: [1.1, 1.85],
+  turn: [-1, -1],
+  brush: [-1, -1],
+  inspect: [-1, -1, -1, -1],
+  wake: -1,
+};
 /** How far in front of it to kneel (the knee lands a little short of it). */
-export const PICK_REACH = 0.42;
+export const PICK_REACH = 0.34;
 
 const _v = new Vector3();
 
 /**
  * Picking the tracker up: the creature steps up to it, bends, sinks onto one
  * knee and takes it in its right hand, and rises. The first time, it lifts it
- * to its face and turns it over as the device wakes up in its hand.
+ * to its chest, brushes the sand off it, and holds it up in both hands as it
+ * wakes.
  */
 export class PickupScene {
   active = false;
@@ -117,10 +163,12 @@ export class PickupScene {
   /** 0..1 how far the scene has drawn the camera in. */
   weight = 0;
   private keys: Key[] = FIRST;
-  private grabAt = GRAB_AT.first;
-  private end = 4.6;
+  private beats: Beats = FIRST_BEATS;
+  private end = 6;
   private first = true;
   private grabbed = false;
+  private touched = false;
+  private stroke = 0;
   private readonly pose = clonePose(CALM);
   private readonly start = new Vector3();
   private readonly stand = new Vector3();
@@ -176,9 +224,11 @@ export class PickupScene {
     this.active = true;
     this.t = 0;
     this.grabbed = false;
+    this.touched = false;
+    this.stroke = 0;
     this.first = !this.tracker.awake;
     this.keys = this.first ? FIRST : AGAIN;
-    this.grabAt = this.first ? GRAB_AT.first : GRAB_AT.again;
+    this.beats = this.first ? FIRST_BEATS : AGAIN_BEATS;
     this.end = this.keys[this.keys.length - 1].t;
     this.yaw = this.standPoint(c.pos, this.stand);
     this.startYaw = c.yaw;
@@ -192,7 +242,7 @@ export class PickupScene {
   focus(out: Vector3) {
     const c = this.creature;
     const p = this.tracker.position;
-    const k = this.first ? smoothstep(1.6, 2.4, this.t) * (1 - smoothstep(3.9, 4.6, this.t)) : 0;
+    const k = this.first ? smoothstep(2.0, 2.8, this.t) * (1 - smoothstep(5.2, 6.0, this.t)) : 0;
     return out.set(lerp(c.pos.x, p.x, 0.4), c.pos.y + lerp(0.45, 0.8, k), lerp(c.pos.z, p.z, 0.4));
   }
 
@@ -214,7 +264,8 @@ export class PickupScene {
     let dy = this.yaw - this.startYaw;
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     // and the step back out clear of the hull as it rises
-    const out = smoothstep(this.first ? 1.45 : 0.95, this.first ? 2.35 : 1.7, t);
+    const B = this.beats;
+    const out = smoothstep(B.back[0], B.back[1], t);
     c.pos.x += this.back.x * out;
     c.pos.z += this.back.z * out;
     let yaw = this.startYaw + dy * k;
@@ -222,8 +273,9 @@ export class PickupScene {
       // rising, it turns round to look at what it has found
       let ds = this.studyYaw - this.yaw;
       ds = Math.atan2(Math.sin(ds), Math.cos(ds));
-      yaw += ds * ease('inOut', smoothstep(1.45, 2.35, t));
-      this.tracker.inspect = smoothstep(1.85, 2.3, t) * (1 - smoothstep(3.85, 4.35, t));
+      yaw += ds * ease('inOut', smoothstep(B.turn[0], B.turn[1], t));
+      const [i0, i1, o0, o1] = B.inspect;
+      this.tracker.inspect = smoothstep(i0, i1, t) * (1 - smoothstep(o0, o1, t));
     }
     c.setYaw(yaw);
 
@@ -239,36 +291,76 @@ export class PickupScene {
       blendPose(P, a.pose, b.pose, ease(b.ease, clamp((t - a.t) / (b.t - a.t), 0, 1)));
     }
 
-    // the right hand goes to the device, and once it has it, eases into the keyed pose
+    // The right hand: it reaches out over the device, comes down and touches it
+    // (it shifts a little), closes on it, and lifts it slowly as if weighing it,
+    // straight up off the ground, before easing into the keyed pose.
     const h = P.handR;
-    const ga = this.grabAt;
+    const touch = B.touch;
+    const ga = B.grab;
     if (!this.grabbed) {
-      const cy = Math.cos(c.yaw);
-      const sy = Math.sin(c.yaw);
-      const g = this.grab;
-      const dx = g.x - c.pos.x;
-      const dz = g.z - c.pos.z;
+      this.tracker.grabPoint(this.grab);
+      this.toBody(this.grab, this.hold);
       // over it first, then down onto it
-      const over = 0.12 * (1 - smoothstep(ga - 0.35, ga - 0.05, t));
-      this.hold.set(dx * cy - dz * sy, g.y - this.world.height(g.x, g.z) + over, dx * sy + dz * cy);
+      this.hold.y += 0.11 * (1 - smoothstep(touch - 0.3, touch, t));
     }
-    const reach = smoothstep(0.15, ga - 0.1, t) * (1 - smoothstep(ga + 0.05, ga + 0.55, t));
+    const lift = 0.17 * ease('inOut', smoothstep(ga + 0.05, ga + 0.7, t));
+    const reach = smoothstep(0.15, touch - 0.1, t) * (1 - smoothstep(ga + 0.45, ga + 1.0, t));
     if (reach > 0) {
       h.x = lerp(h.x, this.hold.x, reach);
-      h.y = lerp(h.y, this.hold.y, reach);
+      h.y = lerp(h.y, this.hold.y + lift, reach);
       h.z = lerp(h.z, this.hold.z, reach);
       h.ik = lerp(h.ik, 1, reach);
     }
-    if (!this.grabbed && t >= this.grabAt) {
+    if (!this.touched && t >= touch) {
+      this.touched = true;
+      this.tracker.nudge(Math.sin(c.yaw) * 0.012, Math.cos(c.yaw) * 0.012);
+    }
+    if (!this.grabbed && t >= ga) {
       this.grabbed = true;
-      this.tracker.take();
+      // pose the hand where it is now, so the device is taken from exactly there
+      c.updateScripted(0, P, this.world);
+      this.tracker.take(c);
       c.carrying = true;
       this.audio.effort(0.08);
     }
-    if (this.first && t >= 2.25 && t - dt < 2.25) this.tracker.wake();
+
+    // the first time, the left hand brushes the sand off its face: two strokes across it
+    if (B.brush[0] >= 0) {
+      const [b0, b1] = B.brush;
+      const w = smoothstep(b0 - 0.1, b0 + 0.1, t) * (1 - smoothstep(b1 - 0.1, b1 + 0.1, t));
+      if (w > 0) {
+        const u = clamp((t - b0) / (b1 - b0), 0, 1);
+        this.toBody(this.tracker.position, this.dev);
+        const sweep = Math.sin(u * Math.PI * 4);
+        const L = P.handL;
+        L.x = lerp(L.x, this.dev.x + 0.045 + 0.075 * sweep, w);
+        L.y = lerp(L.y, this.dev.y + 0.03 + 0.02 * Math.abs(sweep), w);
+        L.z = lerp(L.z, this.dev.z + 0.05, w);
+        L.ik = lerp(L.ik, 1, w);
+        const n = Math.floor(u * 4);
+        if (n > this.stroke && n <= 4) {
+          this.stroke = n;
+          this.tracker.sandPuff(4);
+          this.audio.scuff(0.035);
+        }
+      }
+    }
+    if (B.wake >= 0 && t >= B.wake && t - dt < B.wake) this.tracker.wake();
 
     c.updateScripted(dt, P, this.world);
     if (t >= end) this.finish();
+  }
+
+  private readonly dev = new Vector3();
+
+  /** A world point to body space (x its left, y above the ground under it, z ahead). */
+  private toBody(w: Vector3, out: Vector3) {
+    const c = this.creature;
+    const cy = Math.cos(c.yaw);
+    const sy = Math.sin(c.yaw);
+    const dx = w.x - c.pos.x;
+    const dz = w.z - c.pos.z;
+    return out.set(dx * cy - dz * sy, w.y - this.world.height(w.x, w.z), dx * sy + dz * cy);
   }
 
   /** Hand control back: its ground position moves to where its body ended up. */
