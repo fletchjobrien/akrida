@@ -272,7 +272,11 @@ doorway, and it pulses softly.
    the sand off the device's face in two strokes. Then it holds the device up
    in both hands. The device wakes with a sweep of sound out of static, and
    the creature looks at it.
-2. It carries the device in its right hand. Hold the left button to hold it out
+2. It carries the device in its right hand, held out a little in front of it.
+   The arm and the device point toward your cursor and follow it the same way
+   the head does (further out to its right than across its body). The antenna
+   points that way, and the face turns up so you can see the light. Hold the
+   left button to hold it out
    in both hands and look down at it. The camera leans in, and the world goes a
    little quieter. While you hold it out, your creature turns on the spot to
    face the cursor, so you can sweep the device round to find the way.
@@ -285,8 +289,9 @@ doorway, and it pulses softly.
    - **Right way** (within about 26 degrees of it, until you turn 34 degrees
      off): the light and the antenna burn a solid green. Two soft bell notes
      chime, and a quiet chord hums under everything.
-   - It uses the way your creature faces. On the ground, it uses the way its
-     antenna points. Within 3 units of the place, it stays solid.
+   - In the hand, it uses the way the arm points it (toward the cursor). Held
+     out in both hands, it uses the way your creature faces. On the ground, it
+     uses the way its antenna points. Within 3 units of the place, it stays solid.
    - Sounds are louder while you hold it out. On the ground, they come from
      where it lies.
 4. Click it in your creature's hand to drop it. It falls with your motion,

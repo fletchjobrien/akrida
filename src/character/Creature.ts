@@ -176,6 +176,10 @@ export class Creature {
   carrying = false;
   /** How far the hold-out has come (eased toward holdOut). */
   readonly holdDyn = new Dyn(1.6, 0.95, 0);
+  /** How far the carrying arm is held out, aimed where the head looks (eased). */
+  readonly aimDyn = new Dyn(1.1, 0.9, 0);
+  /** The way the carried thing points, on the ground (radians, like `yaw`). */
+  pointYaw = 0;
 
   /** Set to drive the breathing from a script: the -1..1 breath and its size. */
   scriptBreath: { value: number; amp: number } | null = null;
@@ -679,6 +683,11 @@ export class Creature {
     lookYaw = lerp(lookYaw, 0, hold);
     lookRoll = lerp(lookRoll, 0, hold);
     const ly = this.lookYawDyn.update(dt, lookYaw);
+    // carrying: the right arm held out a little, pointing where the head turns
+    // (it can swing out to its right further than across its body)
+    const aim = saturate(this.aimDyn.update(dt, this.carrying ? 1 - 0.6 * run : 0)) * (1 - hold);
+    const aimRel = clamp(ly * 0.85, -1.35, 0.55);
+    this.pointYaw = this.yaw + aimRel * aim;
     const lp = this.lookPitchDyn.update(dt, lookPitch);
     const lr = this.lookRollDyn.update(dt, clamp(lookRoll, -0.4, 0.4));
 
@@ -727,16 +736,32 @@ export class Creature {
         dt,
         0.08 + run * 0.12 + crouch * 0.1 + Math.abs(bank) * 0.5 + strain * 0.14 + tiredIdle * 0.12,
       );
-      arm.shoulder.rotation.set(a, 0, side * out + side * breath * 0.01, 'YXZ');
+      let ra = a;
+      let ry = 0;
+      let rb = side * out + side * breath * 0.01;
+      let re = el;
+      if (holding && aim > 0.001) {
+        // out ahead and a little down, toward where it looks, elbow a touch bent
+        const down = 0.6;
+        _v.set(Math.sin(aimRel) * Math.cos(down), -Math.sin(down), Math.cos(aimRel) * Math.cos(down))
+          .multiplyScalar(0.39)
+          .add(arm.shoulder.position);
+        solveArm(arm.shoulder.position, _v, side, _arm);
+        ra = lerp(ra, _arm.a, aim);
+        ry = _arm.y * aim;
+        rb = lerp(rb, _arm.b, aim);
+        re = lerp(re, _arm.e, aim);
+      }
+      arm.shoulder.rotation.set(ra, ry, rb, 'YXZ');
       // shoulders slump when tired and rise with each panting breath
       arm.shoulder.position.y = 0.235 + breath * 0.006 * breathAmp - tired * 0.015 + tiredIdle * breath * 0.01;
-      arm.elbow.rotation.set(el, 0, -side * 0.05, 'YXZ');
+      arm.elbow.rotation.set(re, 0, -side * 0.05, 'YXZ');
       if (hold > 0.001) {
         // both hands brought together in front of the chest, cradling what they hold
         _v.set(side * 0.11, 0.13, 0.3);
         solveArm(arm.shoulder.position, _v, side, _arm);
-        arm.shoulder.rotation.set(lerp(a, _arm.a, hold), _arm.y * hold, lerp(side * out, _arm.b, hold), 'YXZ');
-        arm.elbow.rotation.set(lerp(el, _arm.e, hold), 0, -side * 0.05 * (1 - hold), 'YXZ');
+        arm.shoulder.rotation.set(lerp(ra, _arm.a, hold), lerp(ry, _arm.y, hold), lerp(rb, _arm.b, hold), 'YXZ');
+        arm.elbow.rotation.set(lerp(re, _arm.e, hold), 0, -side * 0.05 * (1 - hold), 'YXZ');
       }
     }
 
@@ -808,6 +833,8 @@ export class Creature {
   /** Pose the whole body from a script instead of the controls (cutscenes). */
   updateScripted(dt: number, P: ScriptPose, world: World) {
     this.time += dt;
+    this.pointYaw = this.yaw;
+    this.aimDyn.reset(0);
     this.events.length = 0;
     this.cues.length = 0;
     this.vel.set(0, 0, 0);

@@ -87,6 +87,11 @@ const _c = new Vector3();
 const _gripP = new Vector3();
 const _gripQ = new Quaternion();
 GRIP.decompose(_gripP, _gripQ, _s);
+const _gp = new Vector3();
+const _gq = new Quaternion();
+const _ay = new Vector3();
+const _az = new Vector3();
+const _hand = new Vector3();
 
 export type TrackerState = 'placed' | 'carried' | 'falling' | 'ground';
 
@@ -337,15 +342,30 @@ export class Tracker {
     if (this.state === 'carried') {
       const rig = creature.rig;
       rig.root.updateMatrixWorld(true);
+      _gp.copy(_gripP);
+      _gq.copy(_gripQ);
       if (this.takeT < 1) {
         // from where the hoof closed on it into the grip, as it comes up
         this.takeT = Math.min(1, this.takeT + dt / 0.9);
         const e = smoothstep(0, 1, this.takeT);
-        _p.lerpVectors(this.takeP, _gripP, e);
-        _q.slerpQuaternions(this.takeQ, _gripQ, e);
-        _m.compose(_p, _q, _c.set(1, 1, 1));
-        _m.premultiply(rig.arms[1].hand.matrixWorld).decompose(_p, _q, _s);
-      } else _m.multiplyMatrices(rig.arms[1].hand.matrixWorld, GRIP).decompose(_p, _q, _s);
+        _gp.lerpVectors(this.takeP, _gp, e);
+        _gq.slerpQuaternions(this.takeQ, _gq, e);
+      }
+      _m.compose(_gp, _gq, _c.set(1, 1, 1));
+      _m.premultiply(rig.arms[1].hand.matrixWorld).decompose(_p, _q, _s);
+      // held out a little to point: the antenna goes exactly the way the arm aims,
+      // tipped just above level, with its face up so the light shows
+      const aim = smoothstep(0, 1, saturate(creature.aimDyn.y));
+      if (aim > 0.001) {
+        _ay.set(Math.sin(creature.pointYaw), 0.2, Math.cos(creature.pointYaw)).normalize();
+        _az.set(0, 1, 0).addScaledVector(_ay, -_ay.y).normalize();
+        _m.makeBasis(_ax.crossVectors(_ay, _az), _ay, _az);
+        _q2.setFromRotationMatrix(_m);
+        rig.arms[1].hand.getWorldPosition(_hand);
+        _p2.copy(_hand).addScaledVector(_ay, 0.07).addScaledVector(_az, 0.01);
+        _p.lerp(_p2, aim);
+        _q.slerp(_q2, aim);
+      }
       const w = smoothstep(0, 1, saturate(Math.max(creature.holdDyn.y, this.inspect)));
       if (w > 0.001) {
         _m.multiplyMatrices(rig.chest.matrixWorld, INSPECT).decompose(_p2, _q2, _s);
@@ -359,7 +379,7 @@ export class Tracker {
     }
 
     // ---- which way it points, and whether that is the way
-    if (this.state === 'carried') _v.set(Math.sin(creature.yaw), 0, Math.cos(creature.yaw));
+    if (this.state === 'carried') _v.set(Math.sin(creature.pointYaw), 0, Math.cos(creature.pointYaw));
     else _v.set(0, 1, 0).applyQuaternion(G.quaternion).setY(0);
     const tx = this.target.x - G.position.x;
     const tz = this.target.z - G.position.z;
