@@ -1,4 +1,5 @@
 import { clamp, lerp, rng } from '../core/math';
+import { TONES } from '../story/tune';
 
 /**
  * A voice for the dying stranger, synthesised sample by sample: a glottal
@@ -88,9 +89,10 @@ function render(sr: number, seconds: number, seed: number, frame: (t: number) =>
   let holdN = 0;
   let holdK = 6;
   let peakSeen = 1e-9;
+  let fr = frame(0);
   for (let i = 0; i < n; i++) {
-    const t = i / sr;
-    const fr = frame(t);
+    // the voice's controls change slowly: sample them every 16 samples (3 kHz)
+    if ((i & 15) === 0) fr = frame(i / sr);
 
     // new glottal period: draw its jittered pitch and shimmered loudness
     if (ph >= 1 || periodF0 === 0) {
@@ -128,10 +130,13 @@ function render(sr: number, seconds: number, seed: number, frame: (t: number) =>
     bub += (bubTarget - bub) * 0.004;
     const am = 1 - fr.gurgle * 0.85 * Math.pow(bub, 1.5);
 
-    F1.set(fr.f1 + fr.gurgle * 180 * (bub - 0.5), 90 + fr.gurgle * 120, sr);
-    F2.set(fr.f2, 120, sr);
-    F3.set(fr.f3, 180, sr);
-    nasal.set(260, 120, sr);
+    // the resonances drift slowly: retune them every 16 samples, not every sample
+    if ((i & 15) === 0) {
+      F1.set(fr.f1 + fr.gurgle * 180 * (bub - 0.5), 90 + fr.gurgle * 120, sr);
+      F2.set(fr.f2, 120, sr);
+      F3.set(fr.f3, 180, sr);
+      if (i === 0) nasal.set(260, 120, sr);
+    }
     let y = F3.tick(F2.tick(F1.tick(src)));
     y = y * 0.85 + nasal.tick(src) * 0.15;
     y *= am;
@@ -323,4 +328,48 @@ export function breathSamples(sr: number, seed: number, inhale: boolean) {
     },
     inhale ? 0.5 : 0.35,
   );
+}
+
+/** Every voice buffer the game uses (mono samples at `sr`). */
+export interface Voices {
+  gargles: Float32Array[];
+  inhales: Float32Array[];
+  exhales: Float32Array[];
+  /** Two takes of each tone the stranger sings, by TONES index. */
+  notes: Float32Array[][];
+  /** The keypad's tone for each TONES index. */
+  pads: Float32Array[];
+}
+
+/** Build them all (half a second or more: run it in a worker, see voiceWorker.ts). */
+export function buildVoices(sr: number): Voices {
+  return {
+    gargles: [0, 1, 2].map((i) => gargleSamples(sr, 300 + i)),
+    inhales: [0, 1, 2, 3].map((i) => breathSamples(sr, 400 + i, true)),
+    exhales: [0, 1, 2, 3, 4].map((i) => breathSamples(sr, 500 + i, false)),
+    notes: TONES.map((f, k) => [0, 1].map((v) => noteSamples(sr, f, 600 + k * 10 + v))),
+    pads: TONES.map((f) => padSamples(sr, f)),
+  };
+}
+
+/**
+ * The same, a piece at a time between frames, for when a worker cannot be
+ * started. Calls `done` when finished.
+ */
+export function buildVoicesSliced(sr: number, done: (v: Voices) => void) {
+  const v: Voices = { gargles: [], inhales: [], exhales: [], notes: TONES.map(() => []), pads: [] };
+  const jobs: (() => void)[] = [
+    ...[0, 1, 2].map((i) => () => v.gargles.push(gargleSamples(sr, 300 + i))),
+    ...[0, 1, 2, 3].map((i) => () => v.inhales.push(breathSamples(sr, 400 + i, true))),
+    ...[0, 1, 2, 3, 4].map((i) => () => v.exhales.push(breathSamples(sr, 500 + i, false))),
+    ...TONES.flatMap((f, k) => [0, 1].map((n) => () => v.notes[k].push(noteSamples(sr, f, 600 + k * 10 + n)))),
+    ...TONES.map((f) => () => v.pads.push(padSamples(sr, f))),
+  ];
+  const step = () => {
+    const job = jobs.shift();
+    if (!job) return done(v);
+    job();
+    setTimeout(step, 0);
+  };
+  setTimeout(step, 0);
 }

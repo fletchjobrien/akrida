@@ -342,6 +342,10 @@ There are no audio files. The Web Audio API makes all sound at start-up:
   formant that opens up, with a thin whistling resonance. While tired, the
   panting has a faint wheeze on each inhale.
 
+- **No stalls:** making all of this takes about a second of work. When the
+  sound starts, only the heartbeat is made at once. The other sounds are built
+  a few milliseconds at a time over the next frames, and the voices below are
+  built in a Web Worker (`src/audio/voiceWorker.ts`), off the main thread.
 - **The stranger's voice** is made sample by sample (`src/audio/voice.ts`).
   A glottal pulse (Rosenberg's shape) with jitter, shimmer and period
   doubling goes through a cascade of formant resonators (Klatt's design).

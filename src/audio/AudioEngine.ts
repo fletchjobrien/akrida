@@ -1,7 +1,7 @@
 import { clamp, lerp, noise1, rng } from '../core/math';
 import type { StaminaCue, StepEvent } from '../character/Creature';
 import type { Wind } from '../world/wind';
-import { breathSamples, gargleSamples, noteSamples, padSamples } from './voice';
+import { buildVoicesSliced, type Voices } from './voice';
 import { TONES } from '../story/tune';
 
 /**
@@ -411,6 +411,11 @@ export class AudioEngine {
   private muffle!: BiquadFilterNode;
   private deepGasps: Buf[] = [];
   private time = 0;
+  /** Sound still to be built after start, a little each frame. */
+  private jobs: (() => void)[] = [];
+  private windReady = false;
+  private sitesReady = false;
+  private silence!: Buf;
   // the dying stranger
   private strangerBus: GainNode | null = null;
   private strangerPan!: StereoPannerNode;
@@ -475,29 +480,50 @@ export class AudioEngine {
     this.master.connect(this.muffle);
 
     const reverb = ctx.createConvolver();
-    reverb.buffer = impulseResponse(ctx, 2.4);
     this.reverbSend = ctx.createGain();
     this.reverbSend.gain.value = 0.18;
     this.reverbSend.connect(reverb);
     reverb.connect(this.master);
 
-    this.buildWind(ctx);
-    this.buildBreath(ctx);
-
-    for (let i = 0; i < 10; i++) this.steps.push(stepBuffer(ctx, i, 0));
-    for (let i = 0; i < 8; i++) this.heavySteps.push(stepBuffer(ctx, 100 + i, 1));
-    for (let i = 0; i < 6; i++) this.sprays.push(sprayBuffer(ctx, i));
-    for (let i = 0; i < 4; i++) this.gasps.push(gaspBuffer(ctx, i, 0));
-    for (let i = 0; i < 3; i++) this.deepGasps.push(gaspBuffer(ctx, 50 + i, 1));
-    for (let i = 0; i < 3; i++) this.pours.push(pourBuffer(ctx, i));
+    // Only what the first moments need is made now. Everything else is built a little
+    // at a time over the next frames (see pump), so starting the sound never stalls
+    // the game; the voices are built in a worker (see buildStranger).
+    this.silence = ctx.createBuffer(1, 1, ctx.sampleRate);
     this.heart = heartBuffer(ctx);
-    for (let i = 0; i < 6; i++) this.ticks.push(tickBuffer(ctx, i));
-    for (let i = 0; i < 3; i++) this.crackles.push(crackleBuffer(ctx, i));
-    for (let i = 0; i < 3; i++) this.creaks.push(creakBuffer(ctx, i));
-    for (let i = 0; i < 2; i++) this.clanks.push(clankBuffer(ctx, i));
-    this.white = noiseBuffer(ctx, 2.3, 'white', 9);
-    this.sites = this.siteKinds.map((k) => this.buildSite(ctx, k));
     this.buildStranger(ctx);
+    const noise: Buf[] = [];
+    this.jobs.push(
+      () => noise.push(noiseBuffer(ctx, 7.3, 'white', 1)),
+      () => noise.push(noiseBuffer(ctx, 9.1, 'pink', 2)),
+      () => noise.push(noiseBuffer(ctx, 11.7, 'brown', 3)),
+      () => this.buildWind(ctx, noise[0], noise[1], noise[2]),
+      () => {
+        this.buildBreath(ctx);
+        this.windReady = true;
+      },
+      () => (reverb.buffer = impulseResponse(ctx, 2.4)),
+      ...[0, 1, 2, 3].map((i) => () => this.gasps.push(gaspBuffer(ctx, i, 0))),
+      ...[0, 1, 2].map((i) => () => this.deepGasps.push(gaspBuffer(ctx, 50 + i, 1))),
+      ...Array.from({ length: 10 }, (_, i) => () => this.steps.push(stepBuffer(ctx, i, 0))),
+      ...[0, 1, 2].map((i) => () => this.pours.push(pourBuffer(ctx, i))),
+      ...Array.from({ length: 8 }, (_, i) => () => this.heavySteps.push(stepBuffer(ctx, 100 + i, 1))),
+      ...Array.from({ length: 6 }, (_, i) => () => this.sprays.push(sprayBuffer(ctx, i))),
+      ...Array.from({ length: 6 }, (_, i) => () => this.ticks.push(tickBuffer(ctx, i))),
+      ...[0, 1, 2].map((i) => () => this.crackles.push(crackleBuffer(ctx, i))),
+      ...[0, 1, 2].map((i) => () => this.creaks.push(creakBuffer(ctx, i))),
+      ...[0, 1].map((i) => () => this.clanks.push(clankBuffer(ctx, i))),
+      () => (this.white = noiseBuffer(ctx, 2.3, 'white', 9)),
+      () => {
+        this.sites = this.siteKinds.map((k) => this.buildSite(ctx, k));
+        this.sitesReady = true;
+      },
+    );
+    // keep building between frames too, so it finishes quickly whatever the frame rate
+    const tick = () => {
+      this.pump();
+      if (this.jobs.length) setTimeout(tick, 0);
+    };
+    setTimeout(tick, 0);
 
     document.addEventListener('visibilitychange', () => {
       if (!this.ctx) return;
@@ -516,11 +542,7 @@ export class AudioEngine {
     return src;
   }
 
-  private buildWind(ctx: AudioContext) {
-    const white = noiseBuffer(ctx, 7.3, 'white', 1);
-    const pink = noiseBuffer(ctx, 9.1, 'pink', 2);
-    const brown = noiseBuffer(ctx, 11.7, 'brown', 3);
-
+  private buildWind(ctx: AudioContext, white: Buf, pink: Buf, brown: Buf) {
     this.windGain = ctx.createGain();
     this.windGain.gain.value = 1;
     this.windGain.connect(this.master);
@@ -644,7 +666,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     if (!ctx) return;
     const src = ctx.createBufferSource();
-    src.buffer = this.pours[Math.floor(Math.random() * this.pours.length)];
+    src.buffer = this.any(this.pours);
     src.playbackRate.value = rate * (0.9 + Math.random() * 0.2);
     const g = ctx.createGain();
     g.gain.value = level;
@@ -660,7 +682,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     if (!ctx) return;
     const src = ctx.createBufferSource();
-    src.buffer = this.steps[Math.floor(Math.random() * this.steps.length)];
+    src.buffer = this.any(this.steps);
     src.playbackRate.value = 0.7 + Math.random() * 0.15;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
@@ -676,7 +698,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     if (!ctx) return;
     const src = ctx.createBufferSource();
-    src.buffer = this.deepGasps[Math.floor(Math.random() * this.deepGasps.length)];
+    src.buffer = this.any(this.deepGasps);
     src.playbackRate.value = 0.62 + Math.random() * 0.08;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
@@ -692,7 +714,7 @@ export class AudioEngine {
   /** Register a wreck; returns its id for the site* calls. */
   addSite(hum: SiteHum): number {
     this.siteKinds.push(hum);
-    if (this.ctx) this.sites.push(this.buildSite(this.ctx, hum));
+    if (this.ctx && this.sitesReady) this.sites.push(this.buildSite(this.ctx, hum));
     return this.siteKinds.length - 1;
   }
 
@@ -833,19 +855,19 @@ export class AudioEngine {
   }
 
   siteTick(i: number, level: number) {
-    this.playSite(i, this.ticks[Math.floor(Math.random() * this.ticks.length)], level, 0.85 + Math.random() * 0.3);
+    this.playSite(i, this.any(this.ticks), level, 0.85 + Math.random() * 0.3);
   }
 
   siteSpark(i: number, level: number) {
-    this.playSite(i, this.crackles[Math.floor(Math.random() * this.crackles.length)], level, 0.9 + Math.random() * 0.25);
+    this.playSite(i, this.any(this.crackles), level, 0.9 + Math.random() * 0.25);
   }
 
   siteCreak(i: number, level: number, rate: number) {
-    this.playSite(i, this.creaks[Math.floor(Math.random() * this.creaks.length)], level, rate);
+    this.playSite(i, this.any(this.creaks), level, rate);
   }
 
   siteClank(i: number, level: number) {
-    this.playSite(i, this.clanks[Math.floor(Math.random() * this.clanks.length)], level, 0.92 + Math.random() * 0.16);
+    this.playSite(i, this.any(this.clanks), level, 0.92 + Math.random() * 0.16);
   }
 
   /** A dying beacon half buried in the sand: a soft warble that sags in pitch. */
@@ -914,7 +936,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     const n = this.sites[i];
     if (!ctx || !n) return;
-    this.playSite(i, this.crackles[Math.floor(Math.random() * this.crackles.length)], level, 1.5 + Math.random() * 0.4);
+    this.playSite(i, this.any(this.crackles), level, 1.5 + Math.random() * 0.4);
     const now = ctx.currentTime;
     const g = ctx.createGain();
     g.gain.setValueAtTime(level * 0.35, now);
@@ -1083,7 +1105,7 @@ export class AudioEngine {
     const ctx = this.ctx;
     if (!ctx || !this.ticks.length) return;
     const src = ctx.createBufferSource();
-    src.buffer = this.ticks[Math.floor(Math.random() * this.ticks.length)];
+    src.buffer = this.any(this.ticks);
     src.playbackRate.value = rate;
     const g = ctx.createGain();
     g.gain.value = level;
@@ -1160,7 +1182,7 @@ export class AudioEngine {
     o.stop(now + 1.3);
     for (const t of [1.0, 1.12, 1.3]) {
       const src = ctx.createBufferSource();
-      src.buffer = this.clanks[Math.floor(Math.random() * this.clanks.length)];
+      src.buffer = this.any(this.clanks);
       src.playbackRate.value = 0.7 + Math.random() * 0.15;
       const cg = ctx.createGain();
       cg.gain.value = level * 0.6;
@@ -1230,7 +1252,7 @@ export class AudioEngine {
       [0.42, 0.5, 0.8],
     ]) {
       const src = ctx.createBufferSource();
-      src.buffer = this.clanks[Math.floor(Math.random() * this.clanks.length)];
+      src.buffer = this.any(this.clanks);
       src.playbackRate.value = r;
       const g = ctx.createGain();
       g.gain.value = level * l;
@@ -1295,11 +1317,29 @@ export class AudioEngine {
       b.getChannelData(0).set(d);
       return b;
     };
-    for (let i = 0; i < 3; i++) this.gargles.push(mono(gargleSamples(sr, 300 + i)));
-    for (let i = 0; i < 4; i++) this.inhales.push(mono(breathSamples(sr, 400 + i, true)));
-    for (let i = 0; i < 5; i++) this.exhales.push(mono(breathSamples(sr, 500 + i, false)));
-    this.notes = TONES.map((f, k) => [0, 1].map((v) => mono(noteSamples(sr, f, 600 + k * 10 + v))));
-    this.padVoices = TONES.map((f) => mono(padSamples(sr, f)));
+    // the voices take a while to synthesise: build them in a worker so the game never
+    // stalls (they are not needed until the stranger is reached)
+    const take = (v: Voices) => {
+      this.gargles = v.gargles.map(mono);
+      this.inhales = v.inhales.map(mono);
+      this.exhales = v.exhales.map(mono);
+      this.notes = v.notes.map((takes) => takes.map(mono));
+      this.padVoices = v.pads.map(mono);
+    };
+    try {
+      const worker = new Worker(new URL('./voiceWorker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (e: MessageEvent<Voices>) => {
+        take(e.data);
+        worker.terminate();
+      };
+      worker.onerror = () => {
+        worker.terminate();
+        buildVoicesSliced(sr, take);
+      };
+      worker.postMessage({ sr });
+    } catch {
+      buildVoicesSliced(sr, take);
+    }
 
     this.strangerBus = ctx.createGain();
     this.strangerBus.gain.value = 0;
@@ -1351,7 +1391,7 @@ export class AudioEngine {
 
   /** A gargled, static-laced cry of pain. */
   strangerGargle(level: number) {
-    this.playStranger(this.gargles[Math.floor(Math.random() * this.gargles.length)], level);
+    this.playStranger(this.any(this.gargles), level);
   }
 
   /** One raspy note: `tone` indexes TONES (see story/tune.ts). */
@@ -1429,9 +1469,22 @@ export class AudioEngine {
     src.start(ctx.currentTime + delay);
   }
 
+  /** Build some of the sound still waiting, a few milliseconds' worth per frame. */
+  private pump() {
+    const t0 = performance.now();
+    while (this.jobs.length && performance.now() - t0 < 4) this.jobs.shift()!();
+  }
+
+  /** A random buffer from a bank, or silence if the bank is not built yet. */
+  private any(bank: Buf[]): Buf {
+    return bank.length ? bank[Math.floor(Math.random() * bank.length)] : this.silence;
+  }
+
   update(dt: number, wind: Wind, breath: { value: number; exertion: number; wheeze: number }) {
     const ctx = this.ctx;
     if (!ctx) return;
+    this.pump();
+    if (!this.windReady) return;
     this.time += dt;
     const now = ctx.currentTime;
     const t = this.time;
@@ -1477,7 +1530,7 @@ export class AudioEngine {
     if (!ctx) return;
     const now = ctx.currentTime;
     const src = ctx.createBufferSource();
-    src.buffer = this.sprays[Math.floor(Math.random() * this.sprays.length)];
+    src.buffer = this.any(this.sprays);
     src.playbackRate.value = 0.55 + Math.random() * 0.15;
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
@@ -1517,7 +1570,7 @@ export class AudioEngine {
 
     if (ev.run > 0.2 || ev.scuff) {
       const sp = ctx.createBufferSource();
-      sp.buffer = this.sprays[Math.floor(Math.random() * this.sprays.length)];
+      sp.buffer = this.any(this.sprays);
       sp.playbackRate.value = 0.85 + Math.random() * 0.4;
       const g = ctx.createGain();
       g.gain.value = ev.scuff ? 0.05 : ev.run * 0.07 * (0.7 + Math.random() * 0.6);
