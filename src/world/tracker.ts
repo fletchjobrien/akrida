@@ -30,8 +30,8 @@ import type { Creature } from '../character/Creature';
 /** Within this angle of the way to go it holds a solid light; it lets go a little wider (hysteresis). */
 const HOT_IN = (26 * Math.PI) / 180;
 const HOT_OUT = (34 * Math.PI) / 180;
-/** This close to the place, it shows solid whichever way it points. */
-const ARRIVE = 3;
+/** This close to the place (on the station's summit), it shows solid whichever way it points. */
+const ARRIVE = 12;
 
 // the device, in its own space: x across its face, y up toward the antenna, z out of its face
 const W = 0.13;

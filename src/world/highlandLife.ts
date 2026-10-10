@@ -3,7 +3,8 @@ import { rgb } from '../render/palette';
 import { toonMaterial } from '../render/shared';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
 import { rng } from '../core/math';
-import { HIGH, HIGH_REACH, highlandMask } from './highlands';
+import { HIGH, HIGH_REACH, highlandMask, highlandRoad } from './highlands';
+import { PALETTE } from '../render/palette';
 import { terrainHeight } from './terrain';
 import { convexHull, makeRockGeometry, type Rocks } from './rocks';
 import { hash01 } from './noise';
@@ -17,13 +18,13 @@ const smooth = (e0: number, e1: number, x: number) => {
 };
 
 const BOULDER_CAP = 420;
-const PEBBLE = [rgb(0x6e3f30).toArray(), rgb(0x9a5a40).toArray(), rgb(0x4e3028).toArray()];
-const RED_DUST = rgb(0xc58a62).toArray();
-const RED_DUST_FADE = rgb(0xe0b48a).toArray();
+const PEBBLE = [rgb(PALETTE.rockDark).toArray(), rgb(PALETTE.rockMid).toArray(), rgb(0x463e3b).toArray()];
+const DUST = rgb(PALETTE.sandShade).toArray();
+const DUST_FADE = rgb(PALETTE.sandMid).toArray();
 
 /**
  * What goes on in the highlands: the first sight of them, their sound (wind
- * moaning through the rock, louder in gusts, and a low hum at their heart),
+ * moaning through the rock, louder in gusts, and a low hum near the summit),
  * pebbles that now and then skitter down a cliff near the creature, and,
  * rarely, a far-off rockfall.
  */
@@ -42,7 +43,16 @@ export class Highlands {
     private readonly audio: AudioEngine,
     rocks: Rocks,
   ) {
-    const mat = toonMaterial({ dark: 0x6e3a2c, mid: 0xa45a3e, light: 0xd08a5c, litAt: 0.6, midAt: 0.05, outline: 0.55, highlight: 1 });
+    // the same stone as the rocks out in the desert
+    const mat = toonMaterial({
+      dark: PALETTE.rockDark,
+      mid: PALETTE.rockMid,
+      light: PALETTE.rockLight,
+      litAt: 0.62,
+      midAt: 0.05,
+      outline: 0.55,
+      highlight: 1,
+    });
     for (const g of this.geos) {
       const mesh = new InstancedMesh(g, mat, BOULDER_CAP);
       mesh.count = 0;
@@ -91,10 +101,8 @@ export class Highlands {
         const x = HIGH.x + gx + (hash01(ix * 3 + 1, iz) - 0.5) * STEP;
         const z = HIGH.z + gz + (hash01(ix, iz * 3 + 7) - 0.5) * STEP;
         if (highlandMask(x, z) < 0.25) continue;
-        // the heart of the basin, and the way up the valley into it, are left clear
-        const la = (x - HIGH.x) * HIGH.ox + (z - HIGH.z) * HIGH.oz;
-        const lb = -(x - HIGH.x) * HIGH.oz + (z - HIGH.z) * HIGH.ox;
-        if (Math.hypot(la, lb) < 6 || (la > 0 && la < 48 && Math.abs(lb) < 2.5)) continue;
+        // the road and the summit were cleared
+        if (highlandRoad(x, z) > 0.05) continue;
         if (slope(x, z) > 0.45) continue;
         // how close under a cliff: steep ground a little way off
         let near = 0;
@@ -168,8 +176,8 @@ export class Highlands {
     if (!this.discovered && (dc < 82 || highlandMask(listener.x, listener.z) > 0.05)) {
       this.discovered = true;
       this.justDiscovered = true;
-      this.lookPoint.set(HIGH.x - HIGH.ox * 14, 0, HIGH.z - HIGH.oz * 14);
-      this.lookPoint.y = terrainHeight(this.lookPoint.x, this.lookPoint.z) + 4;
+      this.lookPoint.set(HIGH.x, 0, HIGH.z);
+      this.lookPoint.y = terrainHeight(HIGH.x, HIGH.z) + 3;
     }
     const near = smooth(HIGH_REACH + 15, 52, dc);
     const heart = smooth(26, 5, dc);
@@ -226,7 +234,7 @@ export class Highlands {
           { g: 9, drag: 0.25, windK: 0.02 },
         );
       }
-      // a thin veil of red dust shaken loose with them
+      // a thin veil of dust shaken loose with them
       for (let i = 0; i < 5; i++) {
         this.dust.spawn(
           x + (Math.random() - 0.5) * 0.6,
@@ -236,9 +244,9 @@ export class Highlands {
           -0.15 - Math.random() * 0.2,
           dz * 0.3 + (Math.random() - 0.5) * 0.2,
           1.6 + Math.random(),
-          RED_DUST,
+          DUST,
           2,
-          { g: 0.3, drag: 1.5, windK: 0.5, c2: RED_DUST_FADE, soft: true },
+          { g: 0.3, drag: 1.5, windK: 0.5, c2: DUST_FADE, soft: true },
         );
       }
       const dist = Math.hypot(x - listener.x, z - listener.z);

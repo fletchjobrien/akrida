@@ -148,7 +148,8 @@ float rippleHeight(vec2 p) {
 // Fractured, pitted rock in the highlands (shading only), as much as gRock says.
 float gRock = 0.0;
 float rockDetail(vec2 p) {
-  return gnoise(p * 1.9) * 0.09 + gnoise(p * 5.3 + 3.1) * 0.03;
+  float r1 = 1.0 - abs(gnoise(p * 1.4 + 7.0)) * 2.0;
+  return r1 * r1 * 0.16 + gnoise(p * 3.1) * 0.07 + gnoise(p * 7.3 + 3.1) * 0.025;
 }
 
 float detailHeight(vec2 p) {
@@ -188,40 +189,35 @@ ${SAND_GLSL}
 in vec3 vWorldPos;
 in float vSteep;
 
-// The beds of the highland rock, from the bottom up, repeating: orange, rust,
-// cream, red-brown, salmon sandstone.
-vec3 stratum(int k) {
-  if (k == 0) return ${glslRgb(0xd9905c)};
-  if (k == 1) return ${glslRgb(0xc06a44)};
-  if (k == 2) return ${glslRgb(0xe8bf8a)};
-  if (k == 3) return ${glslRgb(0xa4553c)};
-  return ${glslRgb(0xcf8a66)};
+// The highland rock: the desert's own grey-brown stone, in five light steps.
+vec3 rockBand(int i) {
+  if (i <= 0) return ${glslRgb(0xd3c7bb)};
+  if (i == 1) return ${glslRgb(PALETTE.rockLight)};
+  if (i == 2) return ${glslRgb(0x9a8d84)};
+  if (i == 3) return ${glslRgb(PALETTE.rockMid)};
+  return ${glslRgb(PALETTE.rockDark)};
 }
 
 vec3 rockColor(vec3 wp, vec3 n, float d, float steep) {
   vec2 p = wp.xz;
-  // the beds run nearly level, gently warped, so every cliff shows the same bands
-  float sy = wp.y * 0.72 + gnoise(p * 0.05) * 1.2 + gnoise(p * 0.4) * 0.12;
-  int k = int(mod(floor(sy), 5.0));
-  vec3 base = stratum(k);
   // soft wrapped light, so faces turned from the sun still read as rock
   float ndl = dot(n, uSunDir);
   float sh = shadowAt(wp, n);
   float l = (ndl * 0.55 + 0.45) * mix(0.55, 1.0, sh) + (d - 0.5) * 0.08;
-  int band = l > 0.86 ? 0 : (l > 0.66 ? 1 : (l > 0.46 ? 2 : (l > 0.28 ? 3 : 4)));
-  // thin dark partings between the beds
-  if (fract(sy) < 0.07 + (d - 0.5) * 0.03) band = min(band + 1, 4);
-  // desert varnish: dark streaks run down the steepest faces
+  int band = l > 0.88 ? 0 : (l > 0.68 ? 1 : (l > 0.48 ? 2 : (l > 0.3 ? 3 : 4)));
+  // faint bedding, here and there
+  float bed = fract(wp.y * 0.45 + gnoise(p * 0.06) * 0.8);
+  if (bed < 0.05 && gnoise(p * 0.2 + 9.0) > 0.0) band = min(band + 1, 4);
+  // weathering stains run down the steepest faces
   float streak = gnoise(vec2(dot(p, vec2(0.71, -0.71)) * 2.4, wp.y * 0.22 + 5.0));
-  bool varnish = steep > 0.45 && streak > 0.2 + (d - 0.5) * 0.1;
-  if (varnish) band = min(band + 1, 4);
-  // grit and pebbles caught on the ledges
+  if (steep > 0.5 && streak > 0.28 + (d - 0.5) * 0.1) band = min(band + 1, 4);
+  // grit caught in the cracks
   float g = hash01(floor(p / uPixelWorld) + vec2(77.0, -19.0));
   if (g < 0.02) band = min(band + 1, 4);
-  float mult = band == 0 ? 1.1 : (band == 1 ? 1.0 : (band == 2 ? 0.84 : (band == 3 ? 0.67 : 0.5)));
-  vec3 c = base * mult;
-  if (varnish) c = mix(c, c * vec3(0.78, 0.66, 0.72), 0.6);
-  return min(c, vec3(1.0));
+  vec3 c = rockBand(band);
+  // patches of warmer and cooler stone
+  float tint = gnoise(p * 0.05 + 1.3);
+  return c * mix(vec3(1.0), tint > 0.0 ? vec3(1.04, 1.0, 0.95) : vec3(0.97, 0.99, 1.03), abs(tint) * 1.6);
 }
 
 void main() {
@@ -229,7 +225,7 @@ void main() {
   float d = worldDither();
   float hm = highlandMask(p);
   // bare rock where the ground is steep at large: cliffs, crags, the flanks of buttes
-  gRock = hm * smoothstep(0.2, 0.42, vSteep);
+  gRock = hm * smoothstep(0.06, 0.2, vSteep) * (1.0 - highlandRoad(p));
   vec3 n = sandNormal(p);
   int band = sandBandIndex(vWorldPos, n, d, 0.0);
 
@@ -274,10 +270,16 @@ void main() {
 
   vec3 col = sandBand(band);
 
-  // The highlands: red sand, and bare layered rock on the cliffs and crags.
+  // The highlands: bare rock on the steep ground, and the station's graded road.
   if (hm > 0.0) {
-    // sand blown in from the desert, reddened by the rock it has worn from
-    col = mix(col, col * vec3(1.0, 0.85, 0.7), hm * 0.6);
+    float rd = highlandRoad(p);
+    if (rd > 0.5 + (d - 0.5) * 0.3) {
+      // packed down by wheels: a shade darker, with two faint ruts and gravel
+      float ru = hash01(floor(cell) + vec2(3.0, 61.0));
+      band = clamp(band + 1, 2, 4);
+      if (ru < 0.05) band = min(band + 1, 4);
+      col = sandBand(band);
+    }
     // the edge of the bare rock wanders, as scree and drifted sand would leave it
     float edgeN = gnoise(p * 1.3 + 5.5) * 0.3 + gnoise(p * 4.1) * 0.12;
     if (gRock > 0.5 + (d - 0.5) * 0.4 + edgeN) col = rockColor(vWorldPos, n, d, max(vSteep, 1.0 - n.y));

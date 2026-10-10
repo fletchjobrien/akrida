@@ -35,6 +35,8 @@ import { PeekScene } from './story/PeekScene';
 import { strayDebris } from './world/strayDebris';
 import { HIGH, highlandMask } from './world/highlands';
 import { Highlands } from './world/highlandLife';
+import { Station } from './world/station';
+import { Fallen } from './story/Fallen';
 import { Tracker } from './world/tracker';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
@@ -79,6 +81,10 @@ let padWeight = 0;
 let stranger: Stranger | null = null;
 // the highlands the tracker leads to
 let highlands: Highlands | null = null;
+// the research station on its summit, and the three shot outside it
+let station: Station | null = null;
+let fallen: Fallen | null = null;
+let fallenSeen = false;
 // the tracker left in the ship's doorway, and taking it up
 let tracker: Tracker | null = null;
 let pickup: PickupScene | null = null;
@@ -255,6 +261,10 @@ function layoutWorld() {
       shared.uHighOn.value = 1;
       highlands = new Highlands(dust, audio, rocks);
       highlands.addTo(scene);
+      station = new Station(rocks, dust, audio);
+      station.addTo(scene);
+      fallen = new Fallen(world, station.wallRow, station.rowDir, station.rowOut, rocks, (p, o) => pr.snapDelta(p, o));
+      fallen.addTo(scene);
     }
   }
   rocks.refresh();
@@ -754,6 +764,14 @@ function finishFrame(dt: number, target: Vector3) {
       noticeWhat = ship;
     }
   }
+  if (station) station.update(dt, elapsed, creature.pos);
+  if (fallen && !fallenSeen && !wake.active && Math.hypot(creature.pos.x - fallen.lookPoint.x, creature.pos.z - fallen.lookPoint.z) < 10) {
+    // the three of them, lined up against the wall
+    fallenSeen = true;
+    audio.sorrow();
+    noticeTime = 4;
+    noticeWhat = fallen;
+  }
   if (highlands) {
     highlands.update(dt, creature.pos, wind);
     if (highlands.justDiscovered && !wake.active) {
@@ -858,6 +876,12 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     get highlands() {
       return highlands;
+    },
+    get station() {
+      return station;
+    },
+    get fallen() {
+      return fallen;
     },
     HIGH,
     get peek() {
