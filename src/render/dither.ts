@@ -26,7 +26,7 @@ in vec3 vWorldPos;
 in vec3 vWorldNormal;
 void main() {
   // see-through the pixel-art way: only some of the pixels are drawn
-  if (worldDither() >= uDensity || outsideRoom(vWorldPos)) discard;
+  if (worldDither() >= uDensity) discard;
   vec3 n = normalize(vWorldNormal);
   if (!gl_FrontFacing) n = -n;
   float l = max(max(dot(n, uSunDir), 0.0) * shadowAt(vWorldPos, n), roomLight(vWorldPos, n));

@@ -12,7 +12,8 @@ low resolution so that it looks like hand-made 2D pixel art.
 | Ctrl or C (tap) | Crouch on or off. Sprinting also stands the creature up. |
 | Mouse | Look. When the creature stands still, it looks at the cursor. When it runs, it tilts its head toward the cursor. |
 | Left click (hold), with the tracker in hand | Hold the tracker out in both hands and look at it. Your creature turns on the spot to face the cursor, so you can sweep it round. You can also walk slowly. |
-| Left click on the tracker | In hand: drop it. On the ground: walk to it and pick it up. |
+| Left click on the tracker | In hand: drop it (a click on your creature's body works too). On the ground: walk to it and pick it up. |
+| Left click on a data card | In hand: drop it (or click your creature's body). Lying about: walk to it and pick it up. |
 | Mouse wheel | Zoom in (wheel up) or out (wheel down). The game remembers your zoom. |
 | Double-click | Fullscreen |
 
@@ -320,7 +321,9 @@ doorway, and it pulses softly.
      middle), it stays solid.
    - Sounds are louder while you hold it out. On the ground, they come from
      where it lies.
-4. Click it in your creature's hand to drop it. It falls with your motion,
+4. Click it in your creature's hand (or click your creature) to drop it. When the
+   cursor is right by your creature, its arm holds still so the device is easy to
+   click. It falls with your motion,
    knocks on the sand with a clatter and a puff of sand, hops, and settles on
    its back. It glances off the hull and the rocks. Its light keeps going, and
    it casts a faint pool of its colour on the ground. Click it again to walk over and
@@ -428,11 +431,14 @@ modules banded in orange, dark metal and glass.
   smoky veined wings folded along their backs, long feelers, and the great
   kinked hind legs of their kind.
   - They crawl over the bodies and the blood. Heads jerk down to tear, jaws
-    work, abdomens pulse, and now and then one hops to a better place on a
-    buzz of wings. You hear a dry, busy clicking of jaws, now and then wet.
+    work, abdomens pulse. Now and then one climbs down and scuttles across
+    the sand to another body in jerky bursts, stopping dead, feelers
+    twitching, then on, leaving fine tracks. You hear a dry, busy clicking
+    of jaws, now and then wet, and little chirring chitters through the
+    swarm.
   - When your creature comes near (or comes running from further off), they
     freeze, turn to face it, feelers up and wings half lifted, and a dry
-    rattle runs through the swarm.
+    rattle and a frightened squealing run through the swarm.
   - Then they break, scattering to either side: a fast six-legged scuttle,
     zigzagging, with buzzing hops. They veer along walls and rocks. Their
     feet patter on the sand, leaving fine double lines of tracks and little
@@ -490,26 +496,29 @@ doorway (or click it) to leave.
 
 ### The data cards and the thing in the tank
 
-- **The reader:** on the work bay's desk, under the three screens, is a card
-  reader with three slots, ringed red, green and blue. A thick black cord
-  runs from under the desk, sprawled across the deck, back through the tube
-  to the specimen tank.
+- **The reader:** on the work bay's desk, under the three screens, is a big
+  grey card reader with three slots in its top, each ringed red, green or
+  blue, a light under each and a little status screen. A thick black cord
+  comes out of its side, runs down the desk and sprawls across the deck,
+  back through the tube to the specimen tank.
 - **The cards:** twelve little floppy-sized data cards of coloured plastic,
   each with a sliding metal shutter and a label, were spilled when the
   station was raided. They catch the light now and then.
   - Seven are inside: on the top bunk, on the table by the cups, under the
     suit rack, among the papers, by the smashed tank, on the lab bench and by
     the lockers.
-  - Five are out on the sand, most half buried: by the dead, past the crates,
-    under the solar panels, by a lamp post, and the green one off among the
-    rocks, out of the way.
+  - Five are outside: four in a little heap spilled from the tipped crate,
+    and the green one off on its own among the rocks, out of the way.
   - Only one is red, one green and one blue.
-- **Taking them:** click a card. Your creature walks to it, stoops and takes
-  it, and it goes into a fan of cards at its hip.
-- **The reader:** click the reader to feed in the cards you carry, one after
-  another. Red, green and blue each click into their own slot, the ring
-  lights and its screen glows the card's colour. Any other card is refused
-  with a buzz, the screen flashes red, and it is pushed back out.
+- **Taking them:** click a card. Your creature walks to it, stoops, and
+  takes it up into its right hand, holding it out as it does the tracker.
+  It holds one thing at a time: taking a card sets down what it held. Click
+  the card (or your creature) to let it fall.
+- **The reader:** click the reader with a card in hand. Your creature leans
+  in and slides it home. Red, green and blue each go into their own slot,
+  standing on edge, with a heavy ka-chunk; the ring lights and its screen
+  glows the card's colour. Any other card is refused with a buzz, the screen
+  flashes red, and it pops back up into your creature's hand.
 - **The release:** when all three are in, the reader chimes and a relay
   clunks.
   - Pumps start and the tank drains in gulps and glugs, the fluid swirling
@@ -534,8 +543,7 @@ something comes for it.
 
 - **What it is:** a loitering munition. It is a small, matte, angular
   quadcopter with a warhead slung under its belly and a stencilled yellow
-  band round the warhead. On its back is the mark of those who sent it: a
-  hollow red triangle, its point forward, with red bands on its four arms. It has one red sensor eye in a turret under its
+  band round the warhead. It is all black. It has one red sensor eye in a turret under its
   nose, a whip antenna and a tail strobe.
 - **How it comes:** you hear the whine of its props before you see it. A low,
   dissonant chord swells. It comes in high over the ridge behind the station
@@ -565,11 +573,19 @@ something comes for it.
 - **Running from it:** your creature glances back over its shoulder at it
   now and then while it runs. It still hunts while your creature does
   something else (picks something up, looks into a pod), but it never strikes
-  then. If your creature gets back inside, the drone waits outside the
-  airlock.
-- **Checkpoint:** the first time your creature goes into the station is a
-  checkpoint. After the strike it wakes there, whole, as if none of it had
-  happened. Leave again, and the drone comes again.
+  then. It flies over the station, never through it, and dives from its open
+  side.
+- **Panic:** when the drone finds your creature, it panics: it breathes hard
+  and fast, its heart races, its eyes and head dart and a shiver runs
+  through it. A moment later it drops whatever it holds (the tracker or a
+  data card), and it cannot pick anything up while the drone hunts it.
+- **Getting away:** if your creature gets back inside the station, the drone
+  gives up: it climbs away over the ridge and never hunts your creature
+  again. While your creature is inside, the camera and its eyes leave the
+  drone alone.
+- **Checkpoint:** reaching the mountain's peak (near the station) is a
+  checkpoint. After the strike your creature wakes there, whole, as if none
+  of it had happened. Leave the station again, and the drone comes again.
 
 **Code:**
 - The ground and the path are in `src/world/highlands.ts`. The ground's

@@ -54,6 +54,8 @@ interface Bug {
   chew: number;
   hopTimer: number;
   hop: { t: number; dur: number; h: number; from: number; to: number; vx: number; vz: number } | null;
+  /** Scuttling over to another place on the dead: where to, how high it sits there, the way it set out from. */
+  walk: { x: number; z: number; y: number; from: number; total: number; pause: number; burst: number } | null;
   heading: number;
   /** Which way it breaks when it runs. */
   side: number;
@@ -113,6 +115,7 @@ export class Locusts {
   private noticed = false;
   private awayTime = 0;
   private chewTimer = 0;
+  private chitterTimer = 0;
   private readonly m = new Matrix4();
   private readonly q = new Quaternion();
   private readonly s = new Vector3();
@@ -287,6 +290,7 @@ export class Locusts {
       chew: 0,
       hopTimer: 3 + Math.random() * 8,
       hop: null,
+      walk: null,
       heading: 0,
       side: 1,
       speed: 0,
@@ -319,6 +323,7 @@ export class Locusts {
       b.state = 'feed';
       b.t = 0;
       b.hop = null;
+      b.walk = null;
       b.speed = 0;
       b.root.visible = true;
       b.root.position.set(b.pos.x, p.y, b.pos.z);
@@ -345,6 +350,10 @@ export class Locusts {
         b.delay = Math.random() * 0.35;
       }
       this.audio.locustAlarm(this.level(listener, this.center) * 1.2, this.pan(listener, this.center));
+      // and a frightened squealing breaks out through them
+      for (let k = 0; k < 5; k++) {
+        setTimeout(() => this.audio.locustSqueal(this.level(listener, this.center) * 0.9, (Math.random() - 0.5) * 1.2), k * 90 + Math.random() * 120);
+      }
     }
     const time = performance.now() / 1000;
     let running = 0;
@@ -363,6 +372,11 @@ export class Locusts {
       this.place(b);
     }
     // the sound of them: jaws working while they eat, a patter of feet as they run
+    this.chitterTimer -= dt;
+    if (chewing > 0 && this.chitterTimer <= 0) {
+      this.chitterTimer = 0.12 + Math.random() * 0.45;
+      this.audio.locustChitter(this.level(listener, this.center) * Math.min(1, 0.4 + chewing / 10), this.pan(listener, this.center) + (Math.random() - 0.5) * 0.4);
+    }
     this.chewTimer -= dt;
     if (chewing > 0 && this.chewTimer <= 0) {
       this.chewTimer = 0.05 + Math.random() * 0.12;
@@ -402,18 +416,84 @@ export class Locusts {
     for (const w of b.wings) w.rotation.z = 0;
     this.legsStill(b, time, 0.04);
     b.body.rotation.set(0.12, 0, 0);
-    // now and then, hop to another place on the dead
-    if (b.hop) this.hopOn(b, dt);
+    // now and then, scuttle over to another place on the dead
+    if (b.walk) this.walkOn(b, dt, time, listener);
+    else if (b.hop) this.hopOn(b, dt);
     else {
       b.hopTimer -= dt;
       if (b.hopTimer <= 0 && this.feed.length > 1) {
-        b.hopTimer = 5 + Math.random() * 9;
+        b.hopTimer = 3 + Math.random() * 7;
         const p = this.feed[Math.floor(Math.random() * this.feed.length)];
-        const tx = p.x + (Math.random() - 0.5) * 0.12;
-        const tz = p.z + (Math.random() - 0.5) * 0.12;
-        b.yaw = Math.atan2(tx - b.pos.x, tz - b.pos.z);
-        this.startHop(b, tx, tz, p.y, 0.25, 0.4, listener);
+        const tx = p.x + (Math.random() - 0.5) * 0.14;
+        const tz = p.z + (Math.random() - 0.5) * 0.14;
+        const total = Math.hypot(tx - b.pos.x, tz - b.pos.z);
+        if (total > 0.15) {
+          b.walk = { x: tx, z: tz, y: p.y, from: b.perch, total, pause: 0, burst: 0.3 + Math.random() * 0.5 };
+        } else {
+          // just a shuffle round on the spot
+          b.yaw += (Math.random() - 0.5) * 1.5;
+        }
       }
+    }
+  }
+
+  /**
+   * Scuttling between the bodies: down off one, across the sand in jerky
+   * bursts, stopping dead, feelers twitching, then on, and up onto the next.
+   */
+  private walkOn(b: Bug, dt: number, time: number, listener: Vector3) {
+    const w = b.walk!;
+    const dx = w.x - b.pos.x;
+    const dz = w.z - b.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (w.pause > 0) {
+      w.pause -= dt;
+      this.legsStill(b, time, 0.1);
+      for (const [k, a] of b.ant.entries()) a.rotation.x = -0.6 + noise1(time * 9, b.seed + k) * 0.5;
+      b.head.rotation.x = 0.1;
+      return;
+    }
+    w.burst -= dt;
+    if (w.burst <= 0) {
+      w.burst = 0.25 + Math.random() * 0.6;
+      if (Math.random() < 0.55) w.pause = 0.1 + Math.random() * 0.45;
+    }
+    // a little wander in its line, and turning sharply toward where it is going
+    const want = Math.atan2(dx, dz) + noise1(time * 4, b.seed) * 0.5;
+    let dy = want - b.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    b.yaw += dy * Math.min(1, dt * 12);
+    const speed = 1.1 + Math.sin(time * 13 + b.seed) * 0.25;
+    const step = Math.min(d, speed * dt);
+    const ox = b.pos.x;
+    const oz = b.pos.z;
+    b.pos.x += Math.sin(b.yaw) * step;
+    b.pos.z += Math.cos(b.yaw) * step;
+    // down off the body at the start, up onto the next at the end
+    const gone = w.total - d;
+    const g = terrainHeight(b.pos.x, b.pos.z);
+    const down = w.from * Math.max(0, 1 - gone / 0.3);
+    const up = Math.max(0, w.y - g) * Math.max(0, 1 - d / 0.3);
+    b.perch = Math.max(down, up);
+    b.body.rotation.set(up > down ? -0.5 : down > 0.01 ? 0.45 : 0.02, 0, Math.sin(time * 40) * 0.04);
+    b.gait += dt * speed * 10;
+    this.legsRun(b);
+    b.head.rotation.x = 0.05;
+    for (const a of b.ant) a.rotation.x = -0.3 + Math.sin(time * 20 + b.seed) * 0.15;
+    b.abdomen.scale.y = 1;
+    // its feet leave fine prints across the sand
+    if (b.perch < 0.02) {
+      b.track += Math.hypot(b.pos.x - ox, b.pos.z - oz);
+      while (b.track > 0.055) {
+        b.track -= 0.055;
+        b.trackSide = -b.trackSide;
+        this.print(b.pos.x + Math.cos(b.yaw) * 0.03 * b.trackSide, b.pos.z - Math.sin(b.yaw) * 0.03 * b.trackSide, b.yaw);
+      }
+    }
+    if (Math.random() < dt * 8) this.audio.locustPatter(this.level(listener, b.pos) * 0.35, this.pan(listener, b.pos));
+    if (d < 0.02) {
+      b.walk = null;
+      b.perch = Math.max(0, w.y - g);
     }
   }
 

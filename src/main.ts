@@ -93,6 +93,13 @@ const grabAt = new Vector3();
 /** Glancing back over its shoulder at the drone while it runs: seconds left of this glance, and until the next. */
 let glanceT = 0;
 let glanceWait = 2;
+/** Reaching into the reader with a card: seconds left. */
+let insertT = 0;
+/** The drone gave up on the creature (it went back inside): it never hunts it again. */
+let droneSpares = false;
+/** How long the drone has been hunting the creature (it panics, then drops what it holds). */
+let huntT = 0;
+let heartT = 0;
 /** Where the creature comes back to when it dies: the last checkpoint it passed. */
 interface Checkpoint {
   name: string;
@@ -185,9 +192,16 @@ function setInside(on: boolean) {
     creature.setYaw(Math.atan2(-d.x, -d.z));
   }
   camDyn.reset(new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
-  // the first time in is a checkpoint; coming back out, something is waiting
-  if (on && !checkpoint) saveCheckpoint('station');
-  if (!on && wasInside && !drone.active && !strike.active && !droneDone) droneWait = 4;
+  // back inside, out of its reach: the drone gives up on the creature for good
+  if (on) {
+    droneWait = -1;
+    if (drone.active && !drone.prey) {
+      drone.leave();
+      droneSpares = true;
+    }
+  }
+  // coming back out, something is waiting
+  if (!on && wasInside && !drone.active && !strike.active && !droneDone && !droneSpares) droneWait = 4;
 }
 
 function saveCheckpoint(name: string) {
@@ -203,6 +217,8 @@ function respawn() {
   going = null;
   hatchMove = null;
   creature.releaseScript();
+  creature.panic = 0;
+  huntT = 0;
   const cp = checkpoint;
   if (cp?.inside && station) {
     inside = false;
@@ -461,6 +477,9 @@ function* buildShip(): Generator<unknown, void, unknown> {
   ship = s;
   doorScene = new DoorScene(creature, world, s, audio, dust);
   tracker = t;
+  // it lies on the station's deck if it is dropped inside
+  const at = new Vector3();
+  t.groundAt = (x, z) => (station?.interior.floorY && station.interior.contains(at.set(x, 0, z)) ? station.interior.floorY : terrainHeight(x, z));
   pickup = new PickupScene(creature, world, t, audio);
 }
 
@@ -504,12 +523,17 @@ window.addEventListener('pointerdown', (e) => {
   wake.begin();
   if (e.button !== 0 || wake.active || doorScene?.active || pickup?.active || peek?.active || hatchMove || strike.active) return;
   clickAt.set(e.clientX, e.clientY);
+  // a card in hand: a click on it (or on the creature) lets it fall
+  if (cards?.held && (cards.heldDistance(clickAt, pr.camera) < DEVICE_PX || bodyDistance(clickAt) < BODY_PX)) {
+    cards.drop();
+    return;
+  }
   // the tracker in hand: what the press means is settled on release (or by holding on)
   if (tracker?.carried) {
     press.down = true;
     press.t = 0;
     press.out = false;
-    press.onDevice = tracker.screenDistance(clickAt, pr.camera) < DEVICE_PX;
+    press.onDevice = tracker.screenDistance(clickAt, pr.camera) < DEVICE_PX || bodyDistance(clickAt) < BODY_PX;
     if (press.onDevice) return;
   }
   // the keypad: press the button under the click; a click off the pad steps back from it
@@ -539,7 +563,7 @@ function endPress() {
 window.addEventListener('pointerup', (e) => {
   if (e.button !== 0 || !press.down) return;
   // a quick click on it lets it go
-  if (!press.out && press.onDevice && press.t < 0.3 && tracker?.carried && !inside) {
+  if (!press.out && press.onDevice && press.t < 0.3 && tracker?.carried) {
     tracker.drop(creature);
     creature.carrying = false;
   }
@@ -549,9 +573,17 @@ window.addEventListener('blur', endPress);
 
 const near = (x: number, z: number, r: number) => Math.hypot(x - creature.pos.x, z - creature.pos.z) < r;
 
+/** How near (CSS pixels) a click must be to the creature's body to count as a click on what it holds. */
+const BODY_PX = 34;
+const bodyAt = new Vector3();
+function bodyDistance(mouse: Vector2) {
+  creature.rig.chest.getWorldPosition(bodyAt).project(pr.camera);
+  return Math.hypot(((bodyAt.x + 1) / 2) * window.innerWidth - mouse.x, ((1 - bodyAt.y) / 2) * window.innerHeight - mouse.y);
+}
+
 /** What usable thing is under the mouse, up to WALK_RANGE away, or null. */
 function usableAt(mouse: Vector2, ground: Vector3): Usable | null {
-  if (tracker && pickup && tracker.takeable && !tracker.carried && near(tracker.position.x, tracker.position.z, WALK_RANGE)) {
+  if (tracker && pickup && tracker.takeable && !tracker.carried && huntT <= 0 && near(tracker.position.x, tracker.position.z, WALK_RANGE)) {
     if (tracker.screenDistance(mouse, pr.camera) < DEVICE_PX) return { kind: 'tracker' };
   }
   if (ship && near(ship.doorCenter.x, ship.doorCenter.z, WALK_RANGE)) {
@@ -571,7 +603,7 @@ function usableAt(mouse: Vector2, ground: Vector3): Usable | null {
     const c = cards.cardAt(mouse, pr.camera, inside);
     if (c && near(c.mesh.position.x, c.mesh.position.z, WALK_RANGE)) return { kind: 'card', card: c };
   }
-  if (cards && station && inside && cards.carried.length && !cards.busy && !cards.complete && readerAt(mouse)) return { kind: 'reader' };
+  if (cards && station && inside && cards.held?.state === 'held' && !cards.complete && readerAt(mouse)) return { kind: 'reader' };
   if (station && station.interior.floorY && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
     return { kind: 'hatch' };
   }
@@ -602,7 +634,7 @@ function stillUsable(u: Usable) {
     case 'card':
       return u.card.state === 'lying';
     case 'reader':
-      return !!cards && cards.carried.length > 0 && !cards.complete;
+      return !!cards?.held && !cards.complete;
     default:
       return true;
   }
@@ -683,6 +715,7 @@ function use(u: Usable) {
   going = null;
   switch (u.kind) {
     case 'tracker':
+      cards?.drop();
       pickup!.begin();
       break;
     case 'pad':
@@ -701,13 +734,19 @@ function use(u: Usable) {
       beginHatch(inside);
       break;
     case 'card':
-      // stoop and take it
-      grabT = 0.55;
+      // stoop and take it up (setting down the tracker if it has it)
+      if (tracker?.carried) {
+        tracker.drop(creature);
+        creature.carrying = false;
+      }
+      grabT = 0.6;
       grabAt.copy(u.card.mesh.position);
       cards!.grab(u.card);
       break;
     case 'reader':
-      cards!.insertAll();
+      // lean in and slide it home
+      insertT = 0.75;
+      cards!.insert();
   }
 }
 
@@ -864,7 +903,7 @@ function update(dt: number, now: number) {
   if (padMode && (input.move.lengthSq() > 0 || !ship || ship.state === 'cracked' || !nearPad())) padMode = false;
   const holding = (stranger?.busy ?? false) || padMode;
   creature.glance = 0;
-  const droneNear = drone.active && !drone.prey && !inside && drone.position.distanceTo(creature.pos) < 26;
+  const droneNear = drone.active && !drone.prey && !inside && drone.phase !== 'leave' && drone.position.distanceTo(creature.pos) < 26;
   let droneBehind = false;
   if (droneNear) {
     const rel = Math.atan2(drone.position.x - creature.pos.x, drone.position.z - creature.pos.z) - creature.yaw;
@@ -883,6 +922,8 @@ function update(dt: number, now: number) {
   }
   if (grabT > 0) {
     look = lookPoint.copy(grabAt);
+  } else if (insertT > 0 && station) {
+    look = lookPoint.copy(station.interior.reader.look);
   } else if (droneNear && (!droneBehind || glanceT > 0)) {
     // it cannot look away from it
     look = lookPoint.copy(drone.position);
@@ -950,6 +991,16 @@ function update(dt: number, now: number) {
     control.sprint = false;
     control.crouch = true;
   }
+  if (insertT > 0) {
+    // both hands out over the reader, eyes on the slot
+    insertT -= dt;
+    control.move.set(0, 0);
+    control.sprint = false;
+    creature.holdOut = insertT > 0.1 ? 1 : 0;
+  }
+  // the cursor right by the body: the arm holding something stays still, so it can be clicked
+  const holdingSomething = !!tracker?.carried || !!cards?.held;
+  creature.aimHold = holdingSomething && input.hasMouse && Math.hypot(mouseGround.x - creature.pos.x, mouseGround.z - creature.pos.z) < 1.3;
   if (going) {
     const g = going;
     g.time += dt;
@@ -978,7 +1029,10 @@ function update(dt: number, now: number) {
   } else spinYaw = null;
   // what the cursor is over: something to walk to and use, the tracker in hand, a keypad button
   hoverUse = input.hasMouse && !holding ? usableAt(input.mouse, mouseGround) : null;
-  deviceHover = !!tracker?.carried && input.hasMouse && tracker.screenDistance(input.mouse, pr.camera) < DEVICE_PX;
+  deviceHover =
+    input.hasMouse &&
+    ((!!tracker?.carried && (tracker.screenDistance(input.mouse, pr.camera) < DEVICE_PX || bodyDistance(input.mouse) < BODY_PX)) ||
+      (!!cards?.held && (cards.heldDistance(input.mouse, pr.camera) < DEVICE_PX || bodyDistance(input.mouse) < BODY_PX)));
   if (ship) ship.hover = padMode && input.hasMouse ? ship.buttonAt(input.mouse, pr.camera) : -1;
   creature.update(dt, control, world);
 
@@ -1028,7 +1082,7 @@ function update(dt: number, now: number) {
     // held out to look at: lean the view in toward it
     focusTarget.lerp(encounterFocus.copy(tracker.position), 0.35 * eH);
   }
-  if (drone.active && drone.position.distanceTo(creature.pos) < 14) {
+  if (drone.active && !inside && !drone.prey && drone.phase !== 'leave' && drone.position.distanceTo(creature.pos) < 14) {
     // keep it in view
     focusTarget.lerp(drone.position, 0.3);
   }
@@ -1132,7 +1186,8 @@ function finishFrame(dt: number, target: Vector3) {
   if (fallen) fallen.update(dt, creature.pos);
   if (locusts) locusts.update(dt, creature.pos, creature.speed, !inside);
   if (cards) {
-    cards.update(dt, elapsed, rocks.nearby);
+    cards.update(dt, rocks.nearby);
+    cards.locked = huntT > 0;
     if (cards.justCompleted && specimen) {
       specimen.begin();
       noticeTime = 2;
@@ -1141,6 +1196,28 @@ function finishFrame(dt: number, target: Vector3) {
   }
   if (specimen) specimen.update(dt, elapsed, creature.pos);
   updateDrone(dt);
+  // the drone has found it: panic, and whatever it holds falls from its hands
+  const hunted = drone.active && !drone.prey && !inside && drone.phase !== 'approach' && drone.phase !== 'leave' && !strike.active;
+  if (hunted) {
+    if (huntT === 0) audio.wakeGasp(0.09, false);
+    huntT += dt;
+    if (huntT > 1.4 && huntT - dt <= 1.4) {
+      if (tracker?.carried) {
+        tracker.drop(creature);
+        creature.carrying = false;
+      }
+      cards?.drop();
+    }
+    // its heart racing
+    heartT -= dt;
+    if (heartT <= 0) {
+      heartT = 0.42;
+      audio.heartbeat(0.12 * creature.panic);
+    }
+  } else if (!drone.active || inside) huntT = 0;
+  creature.panic = Math.max(0, Math.min(1, creature.panic + (hunted ? dt * 1.6 : -dt * 0.5)));
+  // reaching the mountain's peak is a checkpoint
+  if (!checkpoint && station && !inside && !wake.active && Math.hypot(creature.pos.x - HIGH.x, creature.pos.z - HIGH.z) < 16) saveCheckpoint('peak');
   npcStrike.update(dt);
   if (npcStrike.active && specimen) specimen.follow();
   if (fallen && !fallenSeen && !wake.active && Math.hypot(creature.pos.x - fallen.lookPoint.x, creature.pos.z - fallen.lookPoint.z) < 10) {

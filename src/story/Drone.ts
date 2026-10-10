@@ -7,7 +7,7 @@ import { Glow } from '../render/glow';
 import { terrainHeight } from '../world/terrain';
 import type { AudioEngine } from '../audio/AudioEngine';
 
-export type DronePhase = 'idle' | 'approach' | 'stalk' | 'lock' | 'dive';
+export type DronePhase = 'idle' | 'approach' | 'stalk' | 'lock' | 'dive' | 'leave';
 
 const EYE_DIM = rgb(0x5a0a08);
 const EYE_HOT = rgb(0xff2a18);
@@ -17,8 +17,6 @@ const STROBE_OFF = rgb(0x1a1c20);
 /** How long it stalks the creature before it locks on, and how long it holds the lock. */
 const STALK_TIME = 15;
 const LOCK_TIME = 2.4;
-/** The mark of those who sent it: a hollow red triangle, its point forward, and red bands on its arms. */
-const MARK_RED = { dark: 0x5e0a0a, mid: 0x9c1212, light: 0xd01c1c };
 
 function faceted(g: BufferGeometry) {
   const f = g.index ? g.toNonIndexed() : g;
@@ -100,12 +98,6 @@ export class Drone {
     body.scale.set(1, 0.55, 1);
     add(F, new BoxGeometry(0.16, 0.05, 0.2), metal, 0, 0.045, -0.02);
     add(F, new BoxGeometry(0.1, 0.04, 0.12), hull, 0, -0.02, 0.17).rotation.x = 0.35;
-    // their mark on its back: a hollow red triangle pointing the way it flies
-    const red = toonMaterial({ ...MARK_RED, litAt: 0.5, midAt: -0.2, outline: 0.5, highlight: 0.3 });
-    const tri = add(F, new CylinderGeometry(0.1, 0.1, 0.012, 3), red, 0, 0.074, -0.01, false);
-    tri.rotation.y = Math.PI;
-    const hollow = add(F, new CylinderGeometry(0.045, 0.045, 0.014, 3), metal, 0, 0.076, -0.01, false);
-    hollow.rotation.y = Math.PI;
     // a whip antenna and the strobe that blinks on its tail
     add(F, new CylinderGeometry(0.006, 0.006, 0.22, 3), metal, -0.04, 0.14, -0.14, false).rotation.x = -0.35;
     add(F, new BoxGeometry(0.03, 0.02, 0.03), this.strobeMat, 0.04, 0.06, -0.16, false);
@@ -118,8 +110,6 @@ export class Drone {
     ]) {
       const arm = add(F, new BoxGeometry(0.035, 0.025, 0.3), hull, sx * 0.13, 0.01, sz * 0.13);
       arm.rotation.y = Math.atan2(sx, sz);
-      const bandMesh = add(F, new BoxGeometry(0.04, 0.03, 0.05), red, sx * 0.17, 0.012, sz * 0.17, false);
-      bandMesh.rotation.y = Math.atan2(sx, sz);
       const mx = sx * 0.24;
       const mz = sz * 0.24;
       add(F, new CylinderGeometry(0.035, 0.04, 0.07, 6), metal, mx, 0.03, mz);
@@ -181,6 +171,16 @@ export class Drone {
     return this.phase !== 'idle';
   }
 
+  /** Give up on its prey: climb away over the ridge and go. */
+  leave() {
+    if (this.phase === 'idle' || this.phase === 'leave') return;
+    this.phase = 'leave';
+    this.t = 0;
+    this.laser.visible = false;
+    const P = this.root.position;
+    this.lockFrom.set(P.x - (this.lockFrom.x - P.x) * 0, P.y + 20, P.z);
+  }
+
   /** Where it is (for the creature to look at). */
   get position() {
     return this.root.position;
@@ -195,7 +195,7 @@ export class Drone {
     // something else to kill: it goes straight for it
     if (prey !== this.prey) {
       this.prey = prey;
-      if (prey && (this.phase === 'stalk' || this.phase === 'dive')) this.toLock(chest);
+      if (prey && (this.phase === 'stalk' || this.phase === 'dive' || this.phase === 'leave')) this.toLock(chest, avoid);
     }
     // not now: it backs off and goes on circling
     if (!allowStrike && (this.phase === 'lock' || this.phase === 'dive')) {
@@ -221,7 +221,15 @@ export class Drone {
       if (flat < 11) {
         this.phase = 'stalk';
         this.t = 0;
-        if (this.prey) this.toLock(chest);
+        if (this.prey) this.toLock(chest, avoid);
+      }
+    } else if (this.phase === 'leave') {
+      // climbing away, back the way it came
+      this.want.copy(this.lockFrom);
+      maxSpeed = 12;
+      if (this.t > 6 || P.distanceTo(listener) > 48) {
+        this.reset();
+        return;
       }
     } else if (this.phase === 'stalk') {
       // circling it, hunting this way and that, now and then darting to a new side
@@ -261,9 +269,7 @@ export class Drone {
         this.phase = 'lock';
         this.t = 0;
         this.inspecting = 0;
-        // back and up, away from it
-        this.lockFrom.set(chest.x - (dx / flat) * 9, chest.y + 5.5, chest.z - (dz / flat) * 9);
-        this.audio.droneLock(this.level(listener));
+        this.toLock(chest, avoid);
       }
     } else if (this.phase === 'lock') {
       // hanging dead still, staring; the tone climbs
@@ -334,16 +340,22 @@ export class Drone {
   }
 
   /** Back and up from its target, and lock on. */
-  private toLock(chest: Vector3) {
+  private toLock(chest: Vector3, avoid: Vector3 | null) {
     const P = this.root.position;
-    const dx = chest.x - P.x;
-    const dz = chest.z - P.z;
-    const flat = Math.hypot(dx, dz) || 1;
-    const back = Math.min(9, Math.max(5, flat));
+    // back and up from it: from where it is, or, near the station, from its open side,
+    // so the dive never goes through the building
+    let ox = P.x - chest.x;
+    let oz = P.z - chest.z;
+    if (avoid && Math.hypot(chest.x - avoid.x, chest.z - avoid.z) < 18) {
+      ox = chest.x - avoid.x;
+      oz = chest.z - avoid.z;
+    }
+    const ol = Math.hypot(ox, oz) || 1;
+    const back = this.prey ? 6 : 9;
     this.phase = 'lock';
     this.t = 0;
     this.inspecting = 0;
-    this.lockFrom.set(chest.x - (dx / flat) * back, chest.y + 5, chest.z - (dz / flat) * back);
+    this.lockFrom.set(chest.x + (ox / ol) * back, chest.y + 5, chest.z + (oz / ol) * back);
     this.audio.droneLock(0.6);
   }
 
@@ -353,7 +365,8 @@ export class Drone {
     // never below head height over the ground, and clear over the station
     {
       this.want.y = Math.max(this.want.y, terrainHeight(this.want.x, this.want.z) + 1.3);
-      if (avoid && Math.hypot(this.want.x - avoid.x, this.want.z - avoid.z) < 9) this.want.y = Math.max(this.want.y, avoid.y + 4.4);
+      // over the station, never through it: the habitat, the dome and the mast
+      if (avoid && (Math.hypot(this.want.x - avoid.x, this.want.z - avoid.z) < 13 || Math.hypot(P.x - avoid.x, P.z - avoid.z) < 13)) this.want.y = Math.max(this.want.y, avoid.y + 5.4);
     }
     // a twitchy, hunting hover: never quite still
     const jit = this.phase === 'lock' ? 0.03 : 0.18;

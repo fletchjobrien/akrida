@@ -61,7 +61,6 @@ void main() {
   int band = sandBandIndex(vWorldPos, n, d, fresh > d ? 2.0 : 1.0);
   outColor = vec4(sandBand(max(band, 2)), 1.0);
   outInfo = vec4(0.5, 1.0, 0.0, 0.0);
-  if (uRoomOn > 0.5) outColor = vec4(ROOM_BLACK, 1.0);
 }
 `;
 

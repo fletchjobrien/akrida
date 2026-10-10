@@ -53,16 +53,15 @@ export const shared = {
 };
 
 /**
- * While the creature is inside the research station (`uRoomOn`), nothing
- * outside its rooms can be seen: `outsideRoom` tells the shaders what to
- * black out. The rooms are the habitat, the tube and the lab, in the
+ * While the creature is inside the research station (`uRoomOn`), its lamps
+ * light only what is inside its rooms: `outsideRoom` tells which side of the
+ * walls a point is on. The rooms are the habitat, the tube and the lab, in the
  * habitat's frame (`uRoomInv` maps the world into it); see
  * world/stationInterior.ts.
  */
 export const ROOM_GLSL = /* glsl */ `
 uniform mat4 uRoomInv;
 uniform float uRoomOn;
-const vec3 ROOM_BLACK = vec3(0.028, 0.024, 0.03);
 bool outsideRoom(vec3 wp) {
   if (uRoomOn < 0.5) return false;
   vec3 l = (uRoomInv * vec4(wp, 1.0)).xyz;
@@ -196,8 +195,6 @@ void main() {
   outColor = vec4(col, 1.0);
   vec3 vn = normalize(vViewNormal);
   outInfo = vec4(vn.xy * 0.5 + 0.5, uOutline, uHighlight);
-  // indoors, the world outside the walls is not seen
-  if (outsideRoom(vWorldPos)) discard;
 }
 `;
 

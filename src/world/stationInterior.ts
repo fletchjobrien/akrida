@@ -556,35 +556,45 @@ export class StationInterior {
       [3.8, 1.82, -0.4],
     ]) this.box(x - 0.14, y - 0.006, -1.43, x + 0.14, y + 0.006, -1.42, M.dead, R, false).rotation.z = r;
     // a keyboard, a mug, papers
-    this.box(3.45, 1.55, -1.3, 3.95, 1.57, -1.12, m.metal);
     this.add(R, new CylinderGeometry(0.05, 0.05, 0.1, 6), m.accent, 2.6, 1.6, -1.35);
-    for (let k = 0; k < 4; k++) this.box(4.0 + k * 0.12, 1.55, -1.35 + (k % 2) * 0.1, 4.25 + k * 0.12, 1.556 + k * 0.002, -1.1 + (k % 2) * 0.1, M.paper, R, false).rotation.y = k * 0.3;
-    // the card reader at the desk's edge: three slots, ringed red, green and blue
+    for (let k = 0; k < 4; k++) this.box(4.3 + k * 0.1, 1.55, -1.35 + (k % 2) * 0.1, 4.52 + k * 0.1, 1.556 + k * 0.002, -1.1 + (k % 2) * 0.1, M.paper, R, false).rotation.y = k * 0.3;
+    // the card reader on the desk under the screens: a heavy grey unit, three slots
+    // in its top, each ringed in its colour, a light under each, a little status screen
     {
-      const rx = 3.1;
-      const rz = -1.12;
-      this.box(rx - 0.32, 1.55, rz - 0.1, rx + 0.32, 1.66, rz + 0.1, m.metal);
-      this.box(rx - 0.3, 1.66, rz - 0.08, rx + 0.3, 1.67, rz + 0.08, M.trim, R, false);
+      const rx = 3.72;
+      const rz = -1.16;
+      const top = 1.8;
+      this.box(rx - 0.48, 1.55, rz - 0.16, rx + 0.48, top, rz + 0.16, m.metal);
+      this.box(rx - 0.46, top, rz - 0.14, rx + 0.46, top + 0.015, rz + 0.14, M.trim, R, false);
+      this.box(rx - 0.48, 1.6, rz + 0.16, rx + 0.48, 1.63, rz + 0.17, m.accent, R, false);
+      const status = toonMaterial({ dark: 0x7ae070, mid: 0x7ae070, light: 0x7ae070, unlit: true, outline: 0 });
+      this.box(rx + 0.3, 1.66, rz + 0.161, rx + 0.44, 1.76, rz + 0.17, status, R, false);
       for (const [k, c] of [0xd02828, 0x30b040, 0x2860d8].entries()) {
-        const x = rx - 0.18 + k * 0.18;
-        this.box(x - 0.07, 1.665, rz - 0.012, x + 0.07, 1.675, rz + 0.012, M.dead, R, false);
+        const x = rx - 0.3 + k * 0.26;
+        const ring = toonMaterial({ dark: c, mid: c, light: c, litAt: 0.5, outline: 0.3, highlight: 0.3 });
+        this.box(x - 0.13, top + 0.012, rz - 0.04, x + 0.13, top + 0.024, rz + 0.04, ring, R, false);
+        this.box(x - 0.115, top + 0.016, rz - 0.012, x + 0.115, top + 0.028, rz + 0.012, M.dead, R, false);
         const led = toonMaterial({ dark: c, mid: c, light: c, unlit: true, outline: 0 });
-        (led.uniforms.uLight.value as Vector3).multiplyScalar(0.3);
-        this.box(x - 0.05, 1.62, rz + 0.1, x + 0.05, 1.64, rz + 0.105, led, R, false);
+        this.box(x - 0.07, 1.68, rz + 0.161, x + 0.07, 1.72, rz + 0.172, led, R, false);
         this.reader.leds.push(led);
-        this.reader.slots.push(this.root.localToWorld(new Vector3(x, 1.67, rz)));
+        this.setLed(k, 'dim');
+        this.reader.slots.push(this.root.localToWorld(new Vector3(x, top + 0.02, rz)));
       }
-      this.reader.proxy.position.set(rx, 1.6, rz + 0.05);
+      this.reader.proxy.position.set(rx, 1.7, rz + 0.05);
+      this.reader.proxy.scale.set(1.4, 1.2, 1.2);
       this.reader.proxy.visible = false;
       R.add(this.reader.proxy);
-      this.root.localToWorld(this.reader.stand.set(rx, DECK, -0.5));
-      this.root.localToWorld(this.reader.look.set(rx, 1.6, rz));
-      // the cord from under the desk, sprawled across the deck, through the tube to the tank
+      this.root.localToWorld(this.reader.stand.set(rx, DECK, -0.42));
+      this.root.localToWorld(this.reader.look.set(rx, 1.75, rz));
+      // the cord: out of the reader's side, down the desk's edge, sprawled across the deck,
+      // through the tube to the tank
+      const cordMat = toonMaterial({ dark: 0x0e0e10, mid: 0x1c1c20, light: 0x34343a, litAt: 0.55, outline: 0.5, highlight: 0.6 });
+      this.box(rx + 0.48, 1.62, rz + 0.02, rx + 0.56, 1.67, rz + 0.07, cordMat, R, false);
+      this.box(rx + 0.52, DECK + 0.02, rz + 0.02, rx + 0.57, 1.66, rz + 0.07, cordMat, R, false);
       this.cord([
-        [rx + 0.15, -1.0],
-        [rx + 0.5, -0.72],
-        [rx + 1.2, -0.85],
-        [4.6, -0.45],
+        [rx + 0.55, rz + 0.05],
+        [rx + 0.62, -0.85],
+        [rx + 0.95, -0.62],
         [4.95, -0.62],
         [5.15, -0.05],
         [5.55, 0.32],

@@ -27,8 +27,8 @@ const STEP = mk(CALM, {
 /** Braced on the rim, leaning right over, head down in the hatchway. */
 const LEAN = mk(STEP, {
   pelvisY: 0.6,
-  pelvisZ: 0.04,
-  pelvisPitch: 0.55,
+  pelvisZ: -0.04,
+  pelvisPitch: 0.5,
   spinePitch: 0.25,
   chestPitch: 0.18,
   neckPitch: 0.3,
@@ -41,7 +41,7 @@ const LEAN = mk(STEP, {
 /** Looking round inside: one way, the other, then down into the bottom of it. */
 const LOOK_A = mk(LEAN, { headYaw: 0.6, headRoll: -0.12, neckPitch: 0.26, chestRoll: 0.04 });
 const LOOK_B = mk(LEAN, { headYaw: -0.62, headRoll: 0.12, neckPitch: 0.26, chestRoll: -0.04 });
-const LOOK_C = mk(LEAN, { headYaw: 0.08, headPitch: 0.62, neckPitch: 0.38, pelvisPitch: 0.6 });
+const LOOK_C = mk(LEAN, { headYaw: 0.08, headPitch: 0.62, neckPitch: 0.38, pelvisPitch: 0.54 });
 
 /** Pulled back out, upright, hands down. */
 const BACK = mk(CALM, {
@@ -72,7 +72,7 @@ const KEYS: Key[] = [
 ];
 const END = 6.7;
 /** How far from the hatchway's middle (on the ground) it stands to lean in, and the step back out. */
-const PEEK_REACH = 0.62;
+const PEEK_REACH = 0.86;
 const STEP_OUT = 0.45;
 
 const _v = new Vector3();

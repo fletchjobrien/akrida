@@ -190,6 +190,10 @@ export class Creature {
   scriptBreath: { value: number; amp: number } | null = null;
   /** 0..1: a glance back over its shoulder at what it is looking at, even while running. */
   glance = 0;
+  /** 0..1: panic. Breathing hard and fast, eyes and head darting, a shiver through the body. */
+  panic = 0;
+  /** True to hold the carrying arm still (the cursor is right by the body, to click what it holds). */
+  aimHold = false;
   private readonly glanceDyn = new Dyn(3.2, 0.8, 0);
 
   constructor(world: World, x = 0, z = 0, skin?: Skin) {
@@ -590,7 +594,7 @@ export class Creature {
     const tired = this.tired;
     const strain = this.strain;
     const recovery = this.exhausted ? this.stamina : 1;
-    this.exertion = Math.max(this.exertion, strain * 0.9, tired * lerp(1, 0.45, recovery));
+    this.exertion = Math.max(this.exertion, strain * 0.9, tired * lerp(1, 0.45, recovery), this.panic * 0.85);
     this.breathRate = lerp(0.27, 1.25, this.exertion) + run * 0.3;
     this.breathPhase = (this.breathPhase + dt * this.breathRate) % 1;
     const breath = Math.sin(this.breathPhase * TAU);
@@ -706,6 +710,9 @@ export class Creature {
       }
     }
     lookYaw += noise1(t * 0.31, 7) * 0.05 * (1 - moving);
+    // panic: the head darts this way and that, never settling
+    lookYaw += (noise1(t * 2.3, 31) * 0.35 + noise1(t * 7.1, 37) * 0.12) * this.panic;
+    lookPitch += noise1(t * 3.1, 41) * 0.12 * this.panic;
     lookPitch += noise1(t * 0.27, 11) * 0.03 * (1 - moving);
     lookYaw *= 1 - tired * 0.35;
     lookPitch += strain * 0.15 + tiredWalk * 0.32 + tiredIdle * 0.35 - sigh * 0.45;
@@ -717,14 +724,16 @@ export class Creature {
     const ly = this.lookYawDyn.update(dt, lookYaw);
     // carrying: the right arm held out a little, pointing where the head turns
     // (it can swing out to its right further than across its body)
-    const aim = saturate(this.aimDyn.update(dt, this.carrying ? 1 - 0.6 * run : 0)) * (1 - hold);
+    const aim = saturate(this.aimDyn.update(dt, this.carrying && !this.aimHold ? 1 - 0.6 * run : 0)) * (1 - hold);
     const aimRel = clamp(ly * 0.85, -1.35, 0.55);
     this.pointYaw = this.yaw + aimRel * aim;
     const lp = this.lookPitchDyn.update(dt, lookPitch);
     const lr = this.lookRollDyn.update(dt, clamp(lookRoll, -0.4, 0.4));
 
     const chestLean = lean * 0.2 - crouch * 0.05;
-    rig.chest.rotation.set(chestLean - breath * 0.015 * breathAmp, -twist * 0.9 + ly * (0.2 + 0.25 * this.glance), -roll * 0.4 - bank * 0.3, 'YXZ');
+    // a shiver of fear runs through it
+    const shiver = this.panic * (noise1(t * 23, 51) * 0.03 + noise1(t * 41, 53) * 0.015);
+    rig.chest.rotation.set(chestLean - breath * 0.015 * breathAmp + shiver, -twist * 0.9 + ly * (0.2 + 0.25 * this.glance), -roll * 0.4 - bank * 0.3 + shiver, 'YXZ');
     const bs = breath * 0.022 * breathAmp;
     rig.chestMesh.scale.set(1 + bs * 0.6, 1 + bs * 0.4, 1 + bs);
     rig.neck.rotation.set(-lean * 0.35 + lp * 0.25, ly * 0.3 + twist * 0.3, lr * 0.3, 'YXZ');

@@ -2359,6 +2359,66 @@ export class AudioEngine {
     for (let k = 0; k < n; k++) this.jawClick(now + Math.random() * 0.1, level * (0.06 + Math.random() * 0.06), p, Math.random() < 0.18);
   }
 
+  /** A little chirring chitter: a quick run of tiny pulses, high and dry, from somewhere in the swarm. */
+  locustChitter(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = this.locustOut(Math.max(-1, Math.min(1, pan)));
+    const n = 3 + Math.floor(Math.random() * 6);
+    const f = 4200 + Math.random() * 2600;
+    const gap = 0.018 + Math.random() * 0.016;
+    for (let k = 0; k < n; k++) {
+      const at = now + k * gap;
+      const src = ctx.createBufferSource();
+      src.buffer = this.white;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f * (1 + (Math.random() - 0.5) * 0.08);
+      bp.Q.value = 7;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(level * 0.09 * (1 - (k / n) * 0.5), at + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.011);
+      src.connect(bp).connect(g).connect(p);
+      src.start(at, Math.random() * 2, 0.02);
+    }
+  }
+
+  /** One of them squealing in fright: a thin, harsh, rising squeak. */
+  locustSqueal(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = this.locustOut(Math.max(-1, Math.min(1, pan)));
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    const f = 2400 + Math.random() * 1400;
+    o.frequency.setValueAtTime(f * 0.8, now);
+    o.frequency.exponentialRampToValueAtTime(f * 1.35, now + 0.12);
+    o.frequency.exponentialRampToValueAtTime(f, now + 0.2);
+    const am = ctx.createOscillator();
+    am.frequency.value = 90 + Math.random() * 60;
+    const amg = ctx.createGain();
+    amg.gain.value = 0.5;
+    const g2 = ctx.createGain();
+    g2.gain.value = 0.5;
+    am.connect(amg).connect(g2.gain);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = f;
+    bp.Q.value = 3;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level * 0.06, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    o.connect(bp).connect(g2).connect(g).connect(p);
+    o.start(now);
+    am.start(now);
+    o.stop(now + 0.3);
+    am.stop(now + 0.3);
+  }
+
   /** Startled: a dry rattle runs through the swarm, wings and legs scraping, rising. */
   locustAlarm(level: number, pan: number) {
     const ctx = this.ctx;
@@ -2525,8 +2585,20 @@ export class AudioEngine {
     if (r) out.connect(r.echo);
     this.burst(now, 0.12, 1800, 3200, 2, level * 0.25, out);
     if (ok) {
+      // ka-chunk: the latch catching, then the card driven home with a heavy clunk
       this.burst(now + 0.11, 0.008, 4200, 3400, 5, level * 0.7, out);
       this.burst(now + 0.13, 0.01, 2600, 2000, 5, level * 0.5, out);
+      this.tone(now + 0.2, 95, 0.12, level * 0.9, out);
+      this.burst(now + 0.2, 0.05, 1100, 500, 2, level * 0.6, out);
+      if (this.clanks.length) {
+        const c = ctx.createBufferSource();
+        c.buffer = this.any(this.clanks);
+        c.playbackRate.value = 1.35;
+        const cg = ctx.createGain();
+        cg.gain.value = level * 0.55;
+        c.connect(cg).connect(out);
+        c.start(now + 0.2);
+      }
       this.tone(now + 0.18, 1320, 0.09, level * 0.12, out);
       this.tone(now + 0.27, 1760, 0.14, level * 0.12, out);
     } else {

@@ -144,6 +144,8 @@ export class Tracker {
   private readonly settleFrom = new Quaternion();
   private floor = 0;
   private inShip = true;
+  /** The ground under a point (a building's floor, where there is one). */
+  groundAt: (x: number, z: number) => number = terrainHeight;
   private readonly screen = new Vector3();
 
   constructor(
@@ -433,7 +435,7 @@ export class Tracker {
     const lit = this.shown ? this.light : 0;
     this.tipGlow.strength = lit * (0.75 + 0.35 * this.flash) * (0.85 + 0.25 * holdW);
     this.ledGlow.strength = lit * 0.6 * (0.8 + 0.3 * holdW);
-    const ground = this.inShip ? this.floor : terrainHeight(G.position.x, G.position.z);
+    const ground = this.inShip ? this.floor : this.groundAt(G.position.x, G.position.z);
     const above = G.position.y - ground;
     this.pool.position.set(G.position.x, ground + 0.012, G.position.z);
     this.pool.strength = lit * 0.32 * saturate(1.4 - above * 0.9);
@@ -499,7 +501,7 @@ export class Tracker {
         }
       }
     }
-    const ground = terrainHeight(G.position.x, G.position.z) + REST_LIFT;
+    const ground = this.groundAt(G.position.x, G.position.z) + REST_LIFT;
     if (G.position.y > ground || this.vel.y > 0) return;
     G.position.y = ground;
     if (this.bounces === 0) {
@@ -518,7 +520,7 @@ export class Tracker {
     if (Math.hypot(_v.x, _v.z) < 0.2) _v.set(Math.random() - 0.5, 0, Math.random() - 0.5);
     this.flatQ(_v, this.restQ);
     this.rest.set(G.position.x + this.vel.x * 0.06, 0, G.position.z + this.vel.z * 0.06);
-    this.rest.y = terrainHeight(this.rest.x, this.rest.z) + REST_LIFT;
+    this.rest.y = this.groundAt(this.rest.x, this.rest.z) + REST_LIFT;
     this.settleFrom.copy(G.quaternion);
     this.settle = 0;
     this.vel.set(0, 0, 0);

@@ -37,7 +37,7 @@ in vec3 vColor;
 in float vFade;
 in vec3 vWorld;
 void main() {
-  if (vFade <= worldDither() || outsideRoom(vWorld)) discard;
+  if (vFade <= worldDither()) discard;
   outColor = vec4(vColor, 1.0);
   outInfo = vec4(0.5, 1.0, 0.0, 0.0);
 }

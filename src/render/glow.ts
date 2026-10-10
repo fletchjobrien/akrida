@@ -45,7 +45,7 @@ float bayer4(vec2 p) {
 }
 void main() {
   float r = length(vUv);
-  if (r >= 1.0 || outsideRoom(vWorld)) discard;
+  if (r >= 1.0) discard;
   float fall = 1.0 - r;
   float v = uStrength * (fall * fall * 0.75 + uCore * smoothstep(0.32, 0.0, r));
   // a few hard steps, dithered between, so the light reads as pixel art

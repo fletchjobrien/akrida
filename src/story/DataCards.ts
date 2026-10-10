@@ -25,7 +25,7 @@ const COLORS: [string, number][] = [
   ['brown', 0x7a5232],
 ];
 
-type CardState = 'lying' | 'flying' | 'carried' | 'slotting' | 'slot' | 'rejecting';
+type CardState = 'lying' | 'rising' | 'held' | 'falling' | 'slotting' | 'slot' | 'rejecting' | 'returning';
 
 interface Card {
   mesh: Group;
@@ -36,6 +36,7 @@ interface Card {
   t: number;
   from: Vector3;
   to: Vector3;
+  vel: Vector3;
   slot: number;
 }
 
@@ -47,31 +48,36 @@ function faceted(g: BufferGeometry) {
   return f;
 }
 
+const ease = (k: number) => k * k * (3 - 2 * k);
+
 /**
  * Data cards: a dozen little floppy-sized cards of coloured plastic, each with
  * a sliding metal shutter and a label, spilled through the station and out
- * across the sand when it was raided, some half buried. Only one is red, one
- * green and one blue; the green one lies out of the way, off among the rocks.
+ * by the crates when it was raided. Only one is red, one green and one blue;
+ * the green one lies off on its own, out among the rocks.
  *
- * Click one to pick it up: the creature stoops, takes it, and slips it into a
- * fan of cards at its hip. Click the reader on the desk to feed them in: each
- * of red, green and blue clicks into its own slot and its ring lights; any
- * other card is refused with a buzz and pushed back out. When all three are
+ * One is carried at a time, in the right hand, held out like the tracker:
+ * click one and the creature stoops and takes it up. Click it (or the
+ * creature) again to let it fall. Take it to the reader on the desk and the
+ * creature leans in and slides it home: red, green and blue each go into
+ * their own slot with a heavy ka-chunk and their ring lights; any other card
+ * is refused with a buzz and pops back up into its hand. When all three are
  * in, `complete` turns true.
  */
 export class DataCards {
   readonly group = new Group();
   readonly cards: Card[] = [];
-  readonly carried: Card[] = [];
+  held: Card | null = null;
   complete = false;
   justCompleted = false;
+  /** While true (the drone is hunting), nothing can be picked up. */
+  locked = false;
   private readonly filled = [false, false, false];
-  private queue: Card[] = [];
-  private stepTimer = 0;
   private glintTimer = 2;
   private nudged = false;
   private readonly tmp = new Vector3();
   private readonly push = new Vector2();
+  private readonly screen = new Vector3();
 
   constructor(
     private readonly station: Station,
@@ -102,7 +108,7 @@ export class DataCards {
       box(0.1, 0.018, 0.008, ink, -0.01, 0, -0.04);
       box(0.06, 0.018, 0.008, ink, -0.03, 0, -0.065);
       this.group.add(g);
-      this.cards.push({ mesh: g, kind: k, inside: true, state: 'lying', t: 0, from: new Vector3(), to: new Vector3(), slot: -1 });
+      this.cards.push({ mesh: g, kind: k, inside: true, state: 'lying', t: 0, from: new Vector3(), to: new Vector3(), vel: new Vector3(), slot: -1 });
     }
     this.place();
   }
@@ -111,54 +117,52 @@ export class DataCards {
     scene.add(this.group);
   }
 
-  /** Where they lie: seven inside, five out on the sand. */
+  /** Where they lie: seven inside, four spilled by the crates, and the green one off on its own. */
   private place() {
     const I = this.station.interior.root;
     const G = this.station.group;
     const D = 0.85;
-    // inside, in the habitat's frame: [kind, x, y, z, yaw, tilt]
-    const inside: [number, number, number, number, number, number][] = [
-      [0, 7.9, D, 1.15, 0.7, 0], // red: by the smashed tank, among the glass
-      [3, -4.4, 2.17, -1.25, 0.3, 0], // yellow: on the top bunk
-      [4, -2.95, 1.565, -1.28, -0.4, 0], // orange: on the table, by the cups
-      [8, 0.25, D, -0.92, 1.2, 0], // white: under the suit rack
-      [5, 3.9, D, 0.62, 2.1, 0], // purple: among the papers
-      [7, 8.6, 1.535, -1.52, 0.2, 0], // cyan: on the lab bench
-      [9, -4.55, D, 0.22, -0.9, 0], // grey: by the lockers
+    // inside, in the habitat's frame: [kind, x, y, z, yaw]
+    const inside: [number, number, number, number, number][] = [
+      [0, 7.9, D, 1.15, 0.7], // red: by the smashed tank, among the glass
+      [3, -4.4, 2.17, -1.25, 0.3], // yellow: on the top bunk
+      [4, -2.95, 1.565, -1.28, -0.4], // orange: on the table, by the cups
+      [8, 0.25, D, -0.92, 1.2], // white: under the suit rack
+      [5, 2.6, D, 0.75, 2.1], // purple: among the papers
+      [7, 8.6, 1.535, -1.52, 0.2], // cyan: on the lab bench
+      [9, -4.55, D, 0.22, -0.9], // grey: by the lockers
     ];
-    for (const [k, x, y, z, yaw, tilt] of inside) {
+    for (const [k, x, y, z, yaw] of inside) {
       const c = this.cards[k];
       c.inside = true;
       I.localToWorld(c.mesh.position.set(x, y + 0.008, z));
-      c.mesh.rotation.set(tilt, yaw + this.station.yaw, 0);
+      c.mesh.rotation.set(0, yaw + this.station.yaw, 0);
     }
-    // outside, in the station's frame, most of them half sunk in the sand
-    const outside: [number, number, number, number, number][] = [
-      [2, -1.6, 2.9, 0.4, 0.9], // blue: by the dead, half buried
-      [10, 6.3, 4.7, 2.2, 0.7], // black: past the spilled crates
-      [6, 6.6, -5.0, -0.8, 0], // magenta: under the solar panels
-      [11, -3.4, 7.3, 1.1, 1.0], // brown: by a lamp post, nearly buried
-      [1, -12.5, 4.5, -2.3, 0.8], // green: out of the way, off among the rocks
+    // outside, in the station's frame: a little heap spilled from the tipped crate, and the green one alone
+    const outside: [number, number, number, number][] = [
+      [2, 2.45, 5.05, 0.4], // blue
+      [10, 2.75, 5.2, 2.0], // black
+      [6, 2.55, 5.35, -0.9], // magenta
+      [11, 2.25, 5.3, 1.3], // brown
+      [1, -12.5, 4.5, -2.3], // green: out of the way, among the rocks
     ];
-    for (const [k, x, z, yaw, sunk] of outside) {
+    for (const [i, [k, x, z, yaw]] of outside.entries()) {
       const c = this.cards[k];
       c.inside = false;
       G.localToWorld(c.mesh.position.set(x, 0, z));
-      c.mesh.position.y = terrainHeight(c.mesh.position.x, c.mesh.position.z) + 0.01 - sunk * 0.06;
-      c.mesh.rotation.set(sunk * 0.9, yaw + this.station.yaw, sunk * 0.3, 'YXZ');
+      c.mesh.position.y = terrainHeight(c.mesh.position.x, c.mesh.position.z) + 0.012 + i * 0.012;
+      c.mesh.rotation.set(0.08 * (i % 2 ? 1 : -1), yaw + this.station.yaw, 0.06, 'YXZ');
     }
   }
 
   /** The card under the mouse (lying where it can be seen), if any. */
   cardAt(mouse: Vector2, camera: Camera, inside: boolean): Card | null {
+    if (this.locked) return null;
     let best: Card | null = null;
-    let bd = 20;
+    let bd = 22;
     for (const c of this.cards) {
       if (c.state !== 'lying' || c.inside !== inside) continue;
-      this.tmp.copy(c.mesh.position).project(camera);
-      const sx = ((this.tmp.x + 1) / 2) * window.innerWidth;
-      const sy = ((1 - this.tmp.y) / 2) * window.innerHeight;
-      const d = Math.hypot(sx - mouse.x, sy - mouse.y);
+      const d = this.screenDist(c, mouse, camera);
       if (d < bd) {
         bd = d;
         best = c;
@@ -167,132 +171,167 @@ export class DataCards {
     return best;
   }
 
-  /** Pick it up: it flies to the creature's hand, then to the fan at its hip. */
-  grab(c: Card) {
-    if (c.state !== 'lying') return;
-    c.state = 'flying';
-    c.t = 0;
-    c.from.copy(c.mesh.position);
-    this.audio.cardPickup(0.35);
-    // sand shaken off a buried one
-    if (!c.inside) this.dust.kick(c.from.x, c.from.y, c.from.z, 0, 0, 3, 0.4);
+  /** Distance in CSS pixels from `mouse` to the held card on screen (Infinity when none). */
+  heldDistance(mouse: Vector2, camera: Camera) {
+    return this.held && this.held.state === 'held' ? this.screenDist(this.held, mouse, camera) : Infinity;
   }
 
-  /** Feed every carried card to the reader in turn. */
-  insertAll() {
-    if (this.queue.length || !this.carried.length) return;
-    this.queue = [...this.carried];
-    this.stepTimer = 0;
+  private screenDist(c: Card, mouse: Vector2, camera: Camera) {
+    c.mesh.getWorldPosition(this.screen).project(camera);
+    const sx = ((this.screen.x + 1) / 2) * window.innerWidth;
+    const sy = ((1 - this.screen.y) / 2) * window.innerHeight;
+    return Math.hypot(sx - mouse.x, sy - mouse.y);
+  }
+
+  /** Take it up: it rises from where it lies into the creature's hand. */
+  grab(c: Card) {
+    if (c.state !== 'lying') return;
+    if (this.held) this.drop();
+    c.state = 'rising';
+    c.t = 0;
+    c.from.copy(c.mesh.position);
+    this.held = c;
+    this.audio.cardPickup(0.35);
+    if (!c.inside) this.dust.kick(c.from.x, c.from.y, c.from.z, 0, 0, 2, 0.3);
+  }
+
+  /** Let the held card fall where the creature stands. */
+  drop() {
+    const c = this.held;
+    if (!c) return;
+    this.held = null;
+    this.creature.carrying = false;
+    this.toWorld(c);
+    c.state = 'falling';
+    c.vel.set(Math.sin(this.creature.yaw) * 0.6 + this.creature.vel.x * 0.5, 0.8, Math.cos(this.creature.yaw) * 0.6 + this.creature.vel.z * 0.5);
+    this.audio.cardPickup(0.15);
+  }
+
+  /** Slide the held card into the reader (the creature leaning in to do it). */
+  insert() {
+    const c = this.held;
+    if (!c || c.state !== 'held' || this.complete) return;
+    this.held = null;
+    this.creature.carrying = false;
+    this.toWorld(c);
+    c.from.copy(c.mesh.position);
+    c.t = 0;
+    const fits = c.kind < 3 && !this.filled[c.kind];
+    c.slot = fits ? c.kind : Math.max(0, this.filled.indexOf(false));
+    c.state = fits ? 'slotting' : 'rejecting';
+    c.to.copy(this.station.interior.reader.slots[c.slot]);
   }
 
   get busy() {
-    return this.queue.length > 0 || this.cards.some((c) => c.state === 'flying' || c.state === 'slotting' || c.state === 'rejecting');
+    return this.cards.some((c) => c.state === 'rising' || c.state === 'slotting' || c.state === 'rejecting' || c.state === 'returning');
   }
 
-  update(dt: number, time: number, rocks: RockInfo[]) {
+  update(dt: number, rocks: RockInfo[]) {
     this.justCompleted = false;
     const interior = this.station.interior;
-    // once: make sure the ones out on the sand are not lying inside a rock
+    const yaw = this.station.yaw;
+    // once: make sure the ones out on the sand are not lying inside a rock or a crate
     if (!this.nudged && rocks.length > 20) {
       this.nudged = true;
       for (const c of this.cards) {
         if (c.inside) continue;
         const p = c.mesh.position;
-        for (let pass = 0; pass < 4; pass++) for (const r of rocks) pushOutOfRock(r, p, 0.3, this.push);
-        p.y = terrainHeight(p.x, p.z) + 0.01 - (c.mesh.rotation.x / 0.9) * 0.06;
+        const y = p.y - terrainHeight(p.x, p.z);
+        for (let pass = 0; pass < 4; pass++) for (const r of rocks) pushOutOfRock(r, p, 0.16, this.push);
+        p.y = terrainHeight(p.x, p.z) + y;
       }
     }
-    // the reader takes them one at a time
-    if (this.queue.length) {
-      this.stepTimer -= dt;
-      if (this.stepTimer <= 0) {
-        const c = this.queue.shift()!;
-        this.stepTimer = 0.6;
-        const i = this.carried.indexOf(c);
-        if (i >= 0) this.carried.splice(i, 1);
-        this.toWorld(c);
-        c.from.copy(c.mesh.position);
-        c.t = 0;
-        const fits = c.kind < 3 && !this.filled[c.kind];
-        c.slot = fits ? c.kind : this.filled.indexOf(false);
-        if (c.slot < 0) c.slot = 1;
-        c.state = fits ? 'slotting' : 'rejecting';
-        c.to.copy(interior.reader.slots[c.slot]);
-      }
-    }
+    const hand = this.creature.rig.arms[1].hand;
     for (const c of this.cards) {
-      if (c.state === 'flying') {
+      if (c.state === 'rising') {
         c.t += dt;
-        const k = Math.min(1, c.t / 0.32);
-        this.creature.rig.arms[1].hand.getWorldPosition(this.tmp);
-        c.mesh.position.lerpVectors(c.from, this.tmp, k * k * (3 - 2 * k));
-        c.mesh.position.y += Math.sin(k * Math.PI) * 0.15;
-        c.mesh.rotation.x += dt * 6;
-        if (k >= 1) this.toBelt(c);
+        // it waits for the hand to come down to it, then rises with it
+        const k = Math.min(1, Math.max(0, (c.t - 0.18) / 0.3));
+        hand.getWorldPosition(this.tmp);
+        c.mesh.position.lerpVectors(c.from, this.tmp, ease(k));
+        if (k >= 1) this.toHand(c);
+      } else if (c.state === 'returning') {
+        c.t += dt;
+        const k = Math.min(1, c.t / 0.25);
+        hand.getWorldPosition(this.tmp);
+        c.mesh.position.lerpVectors(c.from, this.tmp, ease(k));
+        if (k >= 1) this.toHand(c);
+      } else if (c.state === 'falling') {
+        c.vel.y -= 9 * dt;
+        c.mesh.position.addScaledVector(c.vel, dt);
+        c.mesh.rotation.x += dt * 9;
+        c.mesh.rotation.z += dt * 5;
+        const inside = interior.contains(c.mesh.position);
+        const g = inside && interior.floorY ? interior.floorY : terrainHeight(c.mesh.position.x, c.mesh.position.z);
+        if (c.mesh.position.y <= g + 0.012) {
+          c.mesh.position.y = g + 0.012;
+          c.mesh.rotation.set(0, c.mesh.rotation.y, 0);
+          c.state = 'lying';
+          c.inside = inside;
+          this.audio.cardPickup(0.12);
+        }
       } else if (c.state === 'slotting' || c.state === 'rejecting') {
         c.t += dt;
-        const k = Math.min(1, c.t / 0.3);
-        // into the slot, standing on its edge, half in
+        // lined up over the slot, standing on its edge, then pushed home
+        const k = Math.min(1, c.t / 0.28);
+        const home = Math.min(1, Math.max(0, (c.t - 0.3) / 0.12));
         this.tmp.copy(c.to);
-        this.tmp.y += 0.06;
-        c.mesh.position.lerpVectors(c.from, this.tmp, k * k * (3 - 2 * k));
-        c.mesh.rotation.set((Math.PI / 2) * k, this.station.yaw, 0);
-        if (c.state === 'slotting' && k >= 1) {
+        this.tmp.y += 0.16 - (c.state === 'slotting' ? home * 0.13 : home * 0.06);
+        c.mesh.position.lerpVectors(c.from, this.tmp, ease(k));
+        c.mesh.rotation.set(Math.PI / 2, yaw, 0, 'YXZ');
+        if (c.state === 'slotting' && c.t > 0.42) {
           c.state = 'slot';
           this.filled[c.kind] = true;
           interior.setLed(c.kind, 'full');
           interior.showScreen(c.kind, [0xd02828, 0x30b040, 0x2860d8][c.kind], 1.6);
-          this.audio.cardInsert(0.4, true);
+          this.audio.cardInsert(0.5, true);
           if (this.filled.every(Boolean)) {
             this.complete = true;
             this.justCompleted = true;
-            this.queue = [];
           }
-        } else if (c.state === 'rejecting' && c.t > 0.3 && c.t < 0.3 + dt * 1.5) {
-          this.audio.cardInsert(0.3, false);
+        } else if (c.state === 'rejecting' && c.t > 0.42 && c.t - dt <= 0.42) {
+          this.audio.cardInsert(0.4, false);
           interior.showScreen(1, 0xe02020, 0.6);
-        } else if (c.state === 'rejecting' && c.t > 0.55) {
-          // pushed back out: back to the hip
-          this.toBelt(c);
+        } else if (c.state === 'rejecting' && c.t > 0.95) {
+          // pushed back out, and taken up again
+          c.state = 'returning';
+          c.t = 0;
+          c.from.copy(c.mesh.position);
+          this.held = c;
         }
       }
     }
     // the ones still lying about catch the light now and then
     this.glintTimer -= dt;
     if (this.glintTimer <= 0) {
-      this.glintTimer = 1.5 + Math.random() * 2.5;
+      this.glintTimer = 1 + Math.random() * 2;
       const lying = this.cards.filter((c) => c.state === 'lying');
       const c = lying[Math.floor(Math.random() * lying.length)];
       if (c) {
         const p = c.mesh.position;
-        this.dust.spawn(p.x, p.y + 0.03, p.z, 0, 0.02, 0, 0.15, GLINT, 2, { g: 0, drag: 0, windK: 0 });
+        this.dust.spawn(p.x, p.y + 0.03, p.z, 0, 0.02, 0, 0.18, GLINT, 2, { g: 0, drag: 0, windK: 0 });
       }
     }
-    void time;
   }
 
-  /** Into the fan of cards at its hip. */
-  private toBelt(c: Card) {
-    c.state = 'carried';
-    if (!this.carried.includes(c)) this.carried.push(c);
-    const pelvis = this.creature.rig.pelvis;
-    pelvis.add(c.mesh);
-    this.layoutBelt();
+  /** Into the right hand, held up and out like the tracker. */
+  private toHand(c: Card) {
+    c.state = 'held';
+    this.held = c;
+    const hand = this.creature.rig.arms[1].hand;
+    hand.add(c.mesh);
+    c.mesh.position.set(0, -0.07, 0.06);
+    c.mesh.rotation.set(Math.PI / 2, 0, 0);
+    c.mesh.scale.setScalar(1);
+    this.creature.carrying = true;
   }
 
-  private layoutBelt() {
-    for (const [i, c] of this.carried.entries()) {
-      c.mesh.position.set(0.17 + i * 0.004, -0.02 + (i % 2) * 0.01, -0.06 + i * 0.012);
-      c.mesh.rotation.set(0, 0, Math.PI / 2 - 0.25 + i * 0.05);
-      c.mesh.scale.setScalar(0.55);
-    }
-  }
-
-  /** Out of the hip pouch and back into the world, where it is now. */
+  /** Out of the hand and back into the world, where it is now. */
   private toWorld(c: Card) {
     c.mesh.getWorldPosition(this.tmp);
     this.group.add(c.mesh);
     c.mesh.position.copy(this.tmp);
     c.mesh.scale.setScalar(1);
+    c.mesh.rotation.set(0, this.creature.yaw, 0);
   }
 }
