@@ -429,6 +429,50 @@ modules banded in orange, dark metal and glass.
     turns to look at them.
 - The tracker burns solid green once you are at the station.
 
+### Inside the station
+
+Click the airlock's doorway to go in. Your creature walks to the steps, the
+view dims for a moment, and it steps through. Then the roof, the front wall,
+the near end, the tube and the lab's dome come away, so you look down into
+the rooms with the mountain still all round them. Walk back out through the
+doorway (or click it) to leave.
+
+- **Light:** the roof still casts its shadow, so the rooms are in shade. Lamps
+  light them in pools, and the lamp over the work bay stutters. The screens,
+  the rack's lights and the specimen tank glow. A red emergency strip pulses
+  along the foot of the back wall. Sunlight falls through the broken dome
+  into the lab, with dust drifting in it.
+- **The quarters**, at the far end: a bunk bed with its blanket dragged half
+  onto the deck, lockers (one hanging open, a jacket inside), a fold-down
+  table with cups still on it, a stool knocked flat, a rug, and a picture of
+  somewhere green.
+- **By the airlock:** a rack with one pressure suit left on it and one hook
+  empty, a bench with a helmet on it, laser burns on the wall, and grey-blue
+  smears on the deck where the three were dragged out.
+- **The work bay:** a desk under three screens (the middle one cracked and
+  flickering), a wall display showing a scan of one of the creature's own
+  kind, a chair spun away from the desk, papers across the deck, a rack of
+  blinking lights in the corner, and a torn cable that sparks.
+- **The lab**, through the short tube: a specimen tank glowing in the middle
+  with one of the creature's kind curled up in it and bubbles rising past it;
+  a second tank smashed open, its fluid spilled across the deck among the
+  glass; a bench with a microscope and racks of vials; a cold cabinet; a
+  console; and cables over the floor.
+- **Walking:** the walls and the furniture stop the creature. The deck takes
+  no footprints and throws up no sand. The tracker cannot be dropped inside.
+- **Sound:**
+  - The wind and the mountain's sounds fall to a dull murmur through the
+    walls.
+  - The room's own sound comes up: the lamps' buzz, an air handler's fan with
+    a slow beat in it, a low drone in the vents, and the rack's faint whine.
+  - The station's power hum, its broken alarm and its creaks are all round
+    you.
+  - Hooves knock on the metal deck, with a hollow ring under them and a short
+    slap off the walls.
+  - Bubbles blip in the tank, the torn cable snaps and fizzes, and the
+    cracked screen crackles when it stutters.
+  - The airlock door grinds on its broken track and clanks as you pass.
+
 **Code:**
 - The ground and the path are in `src/world/highlands.ts`. The ground's
   height is worked out once, on the CPU, at every point of a triangular
@@ -441,6 +485,12 @@ modules banded in orange, dark metal and glass.
   levels and the first sight are in `src/world/highlandLife.ts`. The rock is
   raised a few milliseconds at a time once the creature is on its way, so
   nothing stalls. The birds are in `src/world/birds.ts`.
+- The station's interior (rooms, lamps, walls to bump into, and what goes on
+  inside) is in `src/world/stationInterior.ts`. The parts that come away for
+  the cutaway are in the station's `shell` group: they are hidden from the
+  camera but still cast their shadow. The lamps are a term in the shared toon
+  lighting (`roomLight` in `src/render/shared.ts`) that lights only what is
+  inside the station's walls.
 - The station is in `src/world/station.ts`; the three dead in
   `src/story/Fallen.ts` (scripted poses on the creature's own rig).
 

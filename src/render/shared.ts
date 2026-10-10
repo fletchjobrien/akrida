@@ -42,6 +42,14 @@ export const shared = {
   /** Area the stain map covers: min x, min z, 1 / size, and 1 when it is in use. */
   uStainRect: { value: new Vector4(0, 0, 1, 0) },
   uPixelWorld: { value: new Vector2(1 / 18, 1 / 18) },
+  /**
+   * Lamps inside the research station (see world/stationInterior.ts): position
+   * x, y, z and strength. They light only what is inside its walls (the box
+   * `uRoomInv` maps into), and only while the creature is inside (`uRoomOn`).
+   */
+  uRoomLight: { value: [0, 1, 2, 3, 4].map(() => new Vector4(0, 0, 0, 0)) },
+  uRoomInv: { value: new Matrix4() },
+  uRoomOn: { value: 0 },
 };
 
 export const LIGHTING_GLSL = /* glsl */ `
@@ -56,8 +64,26 @@ uniform vec2 uWindDir;
 uniform float uWindStrength;
 uniform float uWindTravel;
 uniform vec2 uPixelWorld;
+uniform vec4 uRoomLight[5];
+uniform mat4 uRoomInv;
+uniform float uRoomOn;
 
 ${NOISE_GLSL}
+
+// The station's lamps, inside its walls only: a soft fall-off, wrapped a
+// little round the surfaces they light.
+float roomLight(vec3 wp, vec3 n) {
+  if (uRoomOn < 0.5) return 0.0;
+  vec3 lp = (uRoomInv * vec4(wp, 1.0)).xyz;
+  if (lp.x < -5.7 || lp.x > 11.2 || lp.z < -2.6 || lp.z > 3.1 || lp.y > 3.8 || lp.y < -0.5) return 0.0;
+  float l = 0.0;
+  for (int i = 0; i < 5; i++) {
+    vec3 d = uRoomLight[i].xyz - wp;
+    float r2 = dot(d, d) + 0.01;
+    l += uRoomLight[i].w / (1.0 + r2 * 0.55) * (0.3 + 0.7 * max(0.0, dot(n, d * inversesqrt(r2))));
+  }
+  return l * uRoomOn;
+}
 
 // 4x4 ordered dither, anchored to the world (camera texel offset) so the
 // pattern never crawls when the camera scrolls.
@@ -136,6 +162,7 @@ void main() {
   float d = worldDither();
   float cl = cloudShadowAt(vWorldPos.xz, d);
   float l = ndl * sh * (1.0 - 0.5 * cl);
+  l = max(l, roomLight(vWorldPos, n));
   vec3 col = l > uLitAt ? uLight : (l > uMidAt ? uMid : uDark);
   col = mix(col, uLight, uUnlit);
   // a coat of sand, thickest on surfaces that face up; it thins out as uDust falls

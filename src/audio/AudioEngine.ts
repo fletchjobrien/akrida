@@ -443,6 +443,12 @@ export class AudioEngine {
   } | null = null;
   /** 0..1 multiplier on the surroundings (wind, the wreck), lowered for close moments. */
   private envLevel = 1;
+  /** The world outside (wind, the highlands), muffled when the creature is indoors. */
+  private outside!: BiquadFilterNode;
+  private outsideGain!: GainNode;
+  /** How far indoors the creature is (0..1), and the room's own sound once built. */
+  private indoor = 0;
+  private room: { bus: GainNode; buzz: GainNode; echo: GainNode } | null = null;
 
   private windGain!: GainNode;
   private whoosh!: BiquadFilterNode;
@@ -494,6 +500,13 @@ export class AudioEngine {
     this.master.gain.value = 0;
     this.master.gain.setTargetAtTime(1.15, ctx.currentTime, 1.2);
     this.master.connect(this.muffle);
+
+    // the outside world, dulled through walls when the creature is indoors
+    this.outside = ctx.createBiquadFilter();
+    this.outside.type = 'lowpass';
+    this.outside.frequency.value = 20000;
+    this.outsideGain = ctx.createGain();
+    this.outside.connect(this.outsideGain).connect(this.master);
 
     const reverb = ctx.createConvolver();
     this.reverbSend = ctx.createGain();
@@ -561,7 +574,7 @@ export class AudioEngine {
   private buildWind(ctx: AudioContext, white: Buf, pink: Buf, brown: Buf) {
     this.windGain = ctx.createGain();
     this.windGain.gain.value = 1;
-    this.windGain.connect(this.master);
+    this.windGain.connect(this.outside);
     const windVerb = ctx.createGain();
     windVerb.gain.value = 0.35;
     this.windGain.connect(windVerb);
@@ -1504,7 +1517,7 @@ export class AudioEngine {
     if (this.high) return this.high;
     const bus = ctx.createGain();
     bus.gain.value = 0;
-    bus.connect(this.master);
+    bus.connect(this.outside);
     // everything out there echoes off the rock
     const send = ctx.createGain();
     send.gain.value = 1.1;
@@ -1701,6 +1714,253 @@ export class AudioEngine {
       vib.start(t);
       o.stop(t + 0.75);
       vib.stop(t + 0.75);
+    }
+  }
+
+  /**
+   * Indoors (0..1): the wind and the rock outside fall to a dull murmur
+   * through the walls, and the room's own sound comes up: a lamp ballast's
+   * buzz, an air handler's fan, a low vent drone, and the whine of the rack.
+   */
+  setIndoors(amount: number, flicker = 1) {
+    const ctx = this.ctx;
+    if (!ctx || !this.outside) return;
+    this.indoor = amount;
+    const now = ctx.currentTime;
+    this.outside.frequency.setTargetAtTime(20000 * Math.pow(500 / 20000, amount), now, 0.15);
+    this.outsideGain.gain.setTargetAtTime(1 - 0.6 * amount, now, 0.15);
+    if (amount <= 0 && !this.room) return;
+    const r = this.roomBus();
+    if (!r) return;
+    r.bus.gain.setTargetAtTime(amount * 0.9 * this.envLevel, now, 0.2);
+    r.buzz.gain.setTargetAtTime(0.02 * flicker * flicker, now, 0.01);
+  }
+
+  private roomBus() {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return null;
+    if (this.room) return this.room;
+    const bus = ctx.createGain();
+    bus.gain.value = 0;
+    bus.connect(this.master);
+    // the lamps' ballast: a thin mains buzz
+    const buzz = ctx.createGain();
+    buzz.gain.value = 0;
+    const bf = ctx.createBiquadFilter();
+    bf.type = 'bandpass';
+    bf.frequency.value = 1100;
+    bf.Q.value = 0.8;
+    bf.connect(buzz).connect(bus);
+    for (const [f, type, g] of [
+      [120, 'sawtooth', 0.5],
+      [240.4, 'square', 0.15],
+      [360.2, 'sawtooth', 0.1],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(bf);
+      o.start();
+    }
+    // the air handler: a soft rush of air with a slow beat in it
+    {
+      const src = this.loop(ctx, this.white);
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'bandpass';
+      lp.frequency.value = 320;
+      lp.Q.value = 0.6;
+      const g = ctx.createGain();
+      g.gain.value = 0.05;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.31;
+      const lg = ctx.createGain();
+      lg.gain.value = 0.012;
+      lfo.connect(lg).connect(g.gain);
+      lfo.start();
+      src.connect(lp).connect(g).connect(bus);
+    }
+    // a low drone in the vents, and the rack's faint high whine
+    for (const [f, g] of [
+      [55, 0.05],
+      [82.6, 0.025],
+      [3150, 0.0025],
+      [3162, 0.0018],
+    ]) {
+      const o = ctx.createOscillator();
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(bus);
+      o.start();
+    }
+    // a small hard room: a short, bright slap off the walls
+    const echo = ctx.createGain();
+    echo.gain.value = 1;
+    const d = ctx.createDelay(0.2);
+    d.delayTime.value = 0.045;
+    const fb = ctx.createGain();
+    fb.gain.value = 0.32;
+    const dl = ctx.createBiquadFilter();
+    dl.type = 'lowpass';
+    dl.frequency.value = 2600;
+    echo.connect(d).connect(dl).connect(fb).connect(d);
+    dl.connect(this.master);
+    this.room = { bus, buzz, echo };
+    return this.room;
+  }
+
+  /** A bubble rising through the specimen tank: a soft, wet blip. */
+  roomBubble(level: number) {
+    const ctx = this.ctx;
+    const r = this.roomBus();
+    if (!ctx || !r) return;
+    const now = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const f = 380 + Math.random() * 500;
+    o.frequency.setValueAtTime(f, now);
+    o.frequency.exponentialRampToValueAtTime(f * 2.2, now + 0.06);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level, now + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+    o.connect(g).connect(r.bus);
+    o.start(now);
+    o.stop(now + 0.1);
+  }
+
+  /** The torn cable arcing: a sharp electric snap and a fizz. */
+  roomZap(level: number) {
+    const ctx = this.ctx;
+    const r = this.roomBus();
+    if (!ctx || !r || !this.white) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2200;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(level, now);
+    g.gain.setTargetAtTime(level * 0.3, now + 0.02, 0.03);
+    g.gain.setTargetAtTime(0.0001, now + 0.2, 0.08);
+    const am = ctx.createOscillator();
+    am.type = 'square';
+    am.frequency.value = 60;
+    const amg = ctx.createGain();
+    amg.gain.value = level * 0.6;
+    am.connect(amg).connect(g.gain);
+    src.connect(hp).connect(g).connect(r.bus);
+    g.connect(r.echo);
+    src.start(now, Math.random(), 0.6);
+    am.start(now);
+    am.stop(now + 0.6);
+  }
+
+  /** The cracked screen stuttering: a dry crackle of static. */
+  roomCrackle(level: number) {
+    const ctx = this.ctx;
+    const r = this.roomBus();
+    if (!ctx || !r || !this.white) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 3800;
+    bp.Q.value = 1.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    for (let k = 0; k < 6; k++) {
+      const t = now + k * (0.02 + Math.random() * 0.05);
+      g.gain.setValueAtTime(level * (0.4 + Math.random() * 0.6), t);
+      g.gain.setValueAtTime(0.0001, t + 0.012);
+    }
+    src.connect(bp).connect(g).connect(r.bus);
+    src.start(now, Math.random(), 0.5);
+  }
+
+  /** The airlock door dragged on its broken track: a short grinding scrape and a clank. */
+  hatch(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(700, now);
+    bp.frequency.linearRampToValueAtTime(420, now + 0.45);
+    bp.Q.value = 3;
+    const am = ctx.createOscillator();
+    am.frequency.value = 23;
+    const amg = ctx.createGain();
+    amg.gain.value = level * 0.5;
+    am.connect(amg);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level, now + 0.05);
+    g.gain.setTargetAtTime(0.0001, now + 0.4, 0.06);
+    amg.connect(g.gain);
+    src.connect(bp).connect(g).connect(this.master);
+    g.connect(this.reverbSend);
+    src.start(now, Math.random(), 0.8);
+    am.start(now);
+    am.stop(now + 0.8);
+    // it catches and clanks at the end
+    if (this.clanks.length) {
+      const c = ctx.createBufferSource();
+      c.buffer = this.any(this.clanks);
+      c.playbackRate.value = 0.8;
+      const cg = ctx.createGain();
+      cg.gain.value = level * 0.8;
+      c.connect(cg).connect(this.master);
+      cg.connect(this.reverbSend);
+      c.start(now + 0.42);
+    }
+  }
+
+  /** A hoof on the metal deck: a dull knock, a hollow ring under it, and the room's slap. */
+  private metalStep(ev: StepEvent) {
+    const ctx = this.ctx!;
+    const now = ctx.currentTime;
+    const r = this.roomBus();
+    const pace = 0.2 + Math.min(ev.speed, 2.5) * 0.08;
+    const loud = (ev.scuff ? 0.08 : pace) * lerp(1, 0.4, ev.crouch) * (0.85 + Math.random() * 0.3);
+    const p = ctx.createStereoPanner();
+    p.pan.value = ev.side * 0.12;
+    p.connect(this.master);
+    if (r) p.connect(r.echo);
+    // the knock
+    if (this.white) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.white;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1300 + Math.random() * 500 + ev.run * 500;
+      bp.Q.value = 1.4;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(loud * 1.6, now);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+      src.connect(bp).connect(g).connect(p);
+      src.start(now, Math.random(), 0.08);
+    }
+    // the deck plate rings, hollow over the space beneath
+    for (const [f, d, a] of [
+      [140 + Math.random() * 20, 0.12, 0.9],
+      [610 + Math.random() * 60, 0.09, 0.25],
+      [1730 + Math.random() * 90, 0.05, 0.1],
+    ]) {
+      const o = ctx.createOscillator();
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(loud * a, now + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + d);
+      o.connect(g).connect(p);
+      o.start(now);
+      o.stop(now + d + 0.02);
     }
   }
 
@@ -2039,6 +2299,10 @@ export class AudioEngine {
   step(ev: StepEvent) {
     const ctx = this.ctx;
     if (!ctx) return;
+    if (this.indoor > 0.5) {
+      this.metalStep(ev);
+      return;
+    }
     const now = ctx.currentTime;
     const heavy = ev.run > 0.5;
     const bank = heavy ? this.heavySteps : this.steps;

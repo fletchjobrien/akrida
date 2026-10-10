@@ -4,6 +4,7 @@ import {
   BoxGeometry,
   BufferGeometry,
   CylinderGeometry,
+  Float32BufferAttribute,
   Group,
   Mesh,
   Object3D,
@@ -24,6 +25,7 @@ import { terrainHeight } from './terrain';
 import { footprintOf, type Rocks } from './rocks';
 import type { Dust } from './particles';
 import type { AudioEngine } from '../audio/AudioEngine';
+import { StationInterior } from './stationInterior';
 
 function faceted(g: BufferGeometry) {
   const f = g.index ? g.toNonIndexed() : g;
@@ -57,6 +59,19 @@ const LAMP_OFF = rgb(0x3a3630);
  */
 export class Station {
   readonly group = new Group();
+  /**
+   * What is taken away when the creature goes inside, so it can be seen: the
+   * roof and the front of the habitat, its near end, the tube, and the lab's
+   * dome and near wall. It still casts its shadow, so the rooms stay in shade
+   * and their own lamps light them.
+   */
+  readonly shell = new Group();
+  readonly interior: StationInterior;
+  /** An unseen box over the doorway, for the mouse. */
+  private readonly doorProxy = new Mesh(new BoxGeometry(1.3, 2.1, 0.5));
+  /** Where to stand outside the airlock to go in, and the way in (world space). */
+  readonly doorOutside = new Vector3();
+  readonly doorIn = new Vector3();
   readonly center = new Vector3();
   /** Where the three were shot: the middle of the row, at the foot of the wall, in world space. */
   readonly wallRow = new Vector3();
@@ -114,6 +129,34 @@ export class Station {
     this.group.localToWorld(this.wallRow.set(-3.6, 0, 0.75));
     this.rowDir.set(1, 0, 0).applyAxisAngle(new Vector3(0, 1, 0), this.yaw);
     this.rowOut.set(0, 0, 1).applyAxisAngle(new Vector3(0, 1, 0), this.yaw);
+
+    this.group.add(this.shell);
+    // the airlock, at x 0.9 on the habitat's front (the habitat is set back 1.6)
+    this.doorProxy.position.set(0.9, 1.4, -1.6 + 2.45);
+    this.doorProxy.visible = false;
+    this.group.add(this.doorProxy);
+    this.group.localToWorld(this.doorOutside.set(0.9, 0, -1.6 + 3.45));
+    this.doorOutside.y = terrainHeight(this.doorOutside.x, this.doorOutside.z);
+    this.doorIn.set(0, 0, -1).applyAxisAngle(new Vector3(0, 1, 0), this.yaw);
+    this.interior = new StationInterior(this.group, this.m, audio, dust);
+  }
+
+  /** The mouse is over the airlock's doorway. */
+  doorAt(mouse: import('three').Vector2, camera: import('three').Camera) {
+    this.ray.setFromCamera(
+      new (mouse.constructor as typeof import('three').Vector2)((mouse.x / window.innerWidth) * 2 - 1, -(mouse.y / window.innerHeight) * 2 + 1),
+      camera,
+    );
+    this.doorProxy.updateWorldMatrix(true, false);
+    return this.ray.intersectObject(this.doorProxy, false).length > 0;
+  }
+
+  /** Take away the roof and the near walls (the creature is inside), or put them back. */
+  setCutaway(on: boolean) {
+    this.shell.traverse((o) => {
+      if (on) o.layers.disable(0);
+      else o.layers.enable(0);
+    });
   }
 
   /** Build it a part at a time (see core/builder.ts), then merge it into one mesh per material. */
@@ -132,7 +175,10 @@ export class Station {
     // the tower's legs stand together as one obstacle
     this.rocks.addStatic(footprintOf(this.mastBase, 3));
     yield;
-    bakeStatic(this.group);
+    yield* this.interior.build();
+    this.group.updateMatrixWorld(true);
+    bakeStatic(this.shell);
+    bakeStatic(this.group, [this.shell, this.doorProxy, ...this.interior.keep]);
   }
 
   /** Put a part's group at (x, z) in the station's frame, sitting on the highest ground under it (within r). */
@@ -173,7 +219,38 @@ export class Station {
     return this.add(parent, g, mat, x, y, z);
   }
 
+  /**
+   * Some of the faces of an octagonal prism along x (see `prism`): 0 the
+   * upper front chamfer, 1 the top, 2 the upper back chamfer, 3 the back,
+   * 4 the lower back chamfer, 5 the bottom, 6 the lower front chamfer, 7 the
+   * front. So the hull can be taken apart for the cutaway.
+   */
+  private hullFaces(parent: Object3D, len: number, w: number, h: number, mat: Material, y0: number, faces: number[]) {
+    const k = 1 / Math.cos(Math.PI / 8);
+    const pt = (i: number) => {
+      const t = Math.PI / 8 + (i * Math.PI) / 4;
+      return [Math.cos(t) * (w / 2) * k, y0 + Math.sin(t) * (h / 2) * k];
+    };
+    const pos: number[] = [];
+    for (const f of faces) {
+      const [z0, ya] = pt(f);
+      const [z1, yb] = pt(f + 1);
+      const x0 = -len / 2;
+      const x1 = len / 2;
+      // wound so the face looks outward from the axis
+      pos.push(x0, ya, z0, x1, ya, z0, x1, yb, z1, x0, ya, z0, x1, yb, z1, x0, yb, z1);
+    }
+    const g = new BufferGeometry();
+    g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    const m = new Mesh(g, mat);
+    m.layers.enable(SHADOW_LAYER);
+    parent.add(m);
+    return m;
+  }
+
   private habHull!: Mesh;
+  private habLower!: Mesh;
   private readonly ray = new Raycaster();
 
   /**
@@ -187,11 +264,14 @@ export class Station {
     const origin = G.localToWorld(new Vector3(x, y, 5));
     const dir = new Vector3(0, 0, -1).transformDirection(G.matrixWorld);
     this.ray.set(origin, dir);
-    const hit = this.ray.intersectObject(this.habHull, false)[0];
+    this.habLower.updateWorldMatrix(true, false);
+    const hit = this.ray.intersectObjects([this.habHull, this.habLower], false)[0];
     if (!hit || !hit.face) return;
-    const n = hit.face.normal.clone().transformDirection(this.habHull.matrixWorld);
+    const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
     const p = hit.point.clone().addScaledVector(n, lift);
     const mark = new Mesh(new BoxGeometry(w, h, 0.006), mat);
+    // on the part of the wall it lies on (the upper wall is taken away for the cutaway)
+    G = hit.object.parent!;
     G.add(mark);
     mark.position.copy(G.worldToLocal(p));
     // face along the wall's normal, then turn about it
@@ -220,12 +300,19 @@ export class Station {
 
   // ------------------------------------------------------------------ build
 
-  /** The long habitat: windows, the forced airlock, roof gear, the scorched wall. */
+  /**
+   * The long habitat: windows, the forced airlock, roof gear, the scorched
+   * wall. What the cutaway takes away (roof, front wall, near end) is built
+   * into a twin group in the shell.
+   */
   private buildHab() {
     const m = this.m;
     const G = new Group();
     G.position.set(0, 0, -1.6);
     this.group.add(G);
+    const S = new Group();
+    S.position.copy(G.position);
+    this.shell.add(S);
     const L = 11;
     const W = 4.6;
     const H = 3.0;
@@ -235,27 +322,29 @@ export class Station {
       for (const z of [-1.7, 1.7]) this.add(G, new BoxGeometry(0.22, 0.5, 0.22), m.metal, x, 0.25, z);
     }
     this.add(G, new BoxGeometry(L + 0.2, 0.12, W - 0.4), m.metal, 0, 0.42, 0);
-    this.habHull = this.prism(G, L, W, H, m.hull, 0, y0, 0);
-    // end caps a shade darker, and bands of the orange round it
+    // the hull: its back, underside and low front stay; its roof and front wall come away
+    this.habLower = this.hullFaces(G, L, W, H, m.hull, y0, [3, 4, 5, 6]);
+    this.habHull = this.hullFaces(S, L, W, H, m.hull, y0, [7, 0, 1, 2]);
+    // end caps a shade darker (the near one comes away), and bands of the orange round it
     this.prism(G, 0.3, W + 0.08, H + 0.08, m.panel, -L / 2, y0, 0);
-    this.prism(G, 0.3, W + 0.08, H + 0.08, m.panel, L / 2, y0, 0);
-    for (const x of [-3.6, 3.6]) this.prism(G, 0.22, W + 0.06, H + 0.06, m.accent, x, y0, 0);
+    this.prism(S, 0.3, W + 0.08, H + 0.08, m.panel, L / 2, y0, 0);
+    for (const x of [-3.6, 3.6]) this.prism(S, 0.22, W + 0.06, H + 0.06, m.accent, x, y0, 0);
     // panel seams along the front
-    for (const x of [-1.8, 1.8]) this.add(G, new BoxGeometry(0.04, H * 0.62, 0.04), m.panel, x, y0, W / 2 + 0.02, false);
+    for (const x of [-1.8, 1.8]) this.add(S, new BoxGeometry(0.04, H * 0.62, 0.04), m.panel, x, y0, W / 2 + 0.02, false);
     // the row of windows, high on the front; two smashed in
     const face = W / 2 + 0.01;
     const win = [-4.6, -3.0, -1.0, 2.6, 4.2];
     win.forEach((x, k) => {
       const broken = k === 1 || k === 3;
-      this.add(G, new BoxGeometry(0.95, 0.5, 0.06), m.metal, x, y0 + 0.55, face, false);
-      this.add(G, new BoxGeometry(0.8, 0.36, 0.05), broken ? m.hole : m.glass, x, y0 + 0.55, face + 0.012, false);
+      this.add(S, new BoxGeometry(0.95, 0.5, 0.06), m.metal, x, y0 + 0.55, face, false);
+      this.add(S, new BoxGeometry(0.8, 0.36, 0.05), broken ? m.hole : m.glass, x, y0 + 0.55, face + 0.012, false);
       if (broken) {
         for (const [sx, sy, r] of [
           [-0.3, -0.12, 0.4],
           [0.28, 0.1, -0.6],
           [0.05, -0.15, 1.2],
         ]) {
-          const shard = this.add(G, new BoxGeometry(0.18, 0.08, 0.02), m.glass, x + sx, y0 + 0.55 + sy, face + 0.03, false);
+          const shard = this.add(S, new BoxGeometry(0.18, 0.08, 0.02), m.glass, x + sx, y0 + 0.55 + sy, face + 0.03, false);
           shard.rotation.z = r;
         }
       }
@@ -265,20 +354,21 @@ export class Station {
     G.add(this.sparkFrom);
     // the airlock: a dark doorway, its door forced half open, a red light over it
     const dx = 0.9;
-    this.add(G, new BoxGeometry(1.5, 2.1, 0.08), m.metal, dx, 0.45 + 1.05, face + 0.02);
-    this.add(G, new BoxGeometry(1.1, 1.85, 0.06), m.hole, dx, 0.45 + 0.95, face + 0.05, false);
-    const door = this.add(G, new BoxGeometry(0.62, 1.85, 0.07), m.panel, dx - 0.36, 0.45 + 0.95, face + 0.09);
+    this.add(S, new BoxGeometry(1.5, 2.1, 0.08), m.metal, dx, 0.45 + 1.05, face + 0.02);
+    this.add(S, new BoxGeometry(1.1, 1.85, 0.06), m.hole, dx, 0.45 + 0.95, face + 0.05, false);
+    const door = this.add(S, new BoxGeometry(0.62, 1.85, 0.07), m.panel, dx - 0.36, 0.45 + 0.95, face + 0.09);
     door.rotation.y = 0.12;
-    this.add(G, new BoxGeometry(0.62, 0.06, 0.08), m.accent, dx - 0.36, 0.45 + 1.55, face + 0.12, false);
+    this.add(S, new BoxGeometry(0.62, 0.06, 0.08), m.accent, dx - 0.36, 0.45 + 1.55, face + 0.12, false);
     // scored and burnt where it was forced
-    this.scorch(G, dx + 0.4, 1.3, face + 0.06, 0.8);
-    this.add(G, new BoxGeometry(0.25, 0.08, 0.08), this.doorLight, dx, 0.45 + 2.2, face + 0.06, false);
+    this.scorch(S, dx + 0.4, 1.3, face + 0.06, 0.8);
+    this.add(S, new BoxGeometry(0.25, 0.08, 0.08), this.doorLight, dx, 0.45 + 2.2, face + 0.06, false);
     // steps up to it
     this.add(G, new BoxGeometry(1.4, 0.15, 0.6), m.metal, dx, 0.08, face + 0.4);
     this.add(G, new BoxGeometry(1.4, 0.15, 0.4), m.metal, dx, 0.25, face + 0.2);
     // the wall where they were shot: laser burns and grey-blue blood, at the heights of
     // their chests and heads, a smear where one slid down it, drips running from the spatter
     G.updateMatrixWorld(true);
+    S.updateMatrixWorld(true);
     const blood = toonMaterial({ dark: 0x1e2630, mid: 0x28323e, light: 0x34414f, litAt: 0.6, outline: 0, highlight: 0 });
     for (const [x, y, s] of [
       [-5.15, 1.75, 0.8],
@@ -312,29 +402,42 @@ export class Station {
       [2.0, -0.4, 1.3, 1.0],
       [4.2, 0.4, 0.6, 0.6],
     ]) {
-      this.add(G, new BoxGeometry(w, 0.3, d), x > 0 ? m.panel : m.metal, x, top + 0.1, z);
+      this.add(S, new BoxGeometry(w, 0.3, d), x > 0 ? m.panel : m.metal, x, top + 0.1, z);
     }
-    this.add(G, new CylinderGeometry(0.06, 0.06, L - 1, 5).rotateZ(Math.PI / 2), m.metal, 0, top + 0.02, -1.0);
-    this.add(G, new CylinderGeometry(0.03, 0.03, 1.6, 4), m.metal, -4.5, top + 0.8, -0.8);
+    this.add(S, new CylinderGeometry(0.06, 0.06, L - 1, 5).rotateZ(Math.PI / 2), m.metal, 0, top + 0.02, -1.0);
+    this.add(S, new CylinderGeometry(0.03, 0.03, 1.6, 4), m.metal, -4.5, top + 0.8, -0.8);
     return G;
   }
 
-  /** The domed lab at the habitat's end, joined by a tube; its dome cracked open. */
+  /**
+   * The domed lab at the habitat's end, joined by a short tube; its dome
+   * cracked open. The dome, the tube and the wall's near half come away for
+   * the cutaway, down to a low sill.
+   */
   private buildLab() {
     const m = this.m;
     const G = new Group();
     G.position.set(8.4, 0, -1.2);
     this.group.add(G);
+    const S = new Group();
+    S.position.copy(G.position);
+    this.shell.add(S);
     this.add(G, new CylinderGeometry(2.7, 2.8, 0.4, 8), m.metal, 0, 0.2, 0);
-    this.add(G, new CylinderGeometry(2.6, 2.6, 2.3, 8), m.hull, 0, 0.4 + 1.15, 0);
-    this.add(G, new CylinderGeometry(2.64, 2.64, 0.22, 8, 1, true), m.accent, 0, 1.9, 0);
+    // the wall: its far half whole, its near half (toward the camera) cut down to a sill
+    const near = -Math.PI / 4;
+    const far = (3 * Math.PI) / 4;
+    this.add(G, new CylinderGeometry(2.6, 2.6, 2.3, 8, 1, true, far, Math.PI), m.hull, 0, 0.4 + 1.15, 0);
+    this.add(G, new CylinderGeometry(2.6, 2.6, 0.9, 8, 1, true, near, Math.PI), m.hull, 0, 0.4 + 0.45, 0);
+    this.add(S, new CylinderGeometry(2.6, 2.6, 1.4, 8, 1, true, near, Math.PI), m.hull, 0, 1.3 + 0.7, 0);
+    this.add(G, new CylinderGeometry(2.64, 2.64, 0.22, 8, 1, true, far, Math.PI), m.accent, 0, 1.9, 0);
+    this.add(S, new CylinderGeometry(2.64, 2.64, 0.22, 8, 1, true, near, Math.PI), m.accent, 0, 1.9, 0);
     // the dome: glass on a frame, a wedge of it smashed through
     const dome = new SphereGeometry(2.5, 8, 4, 0, Math.PI * 1.6, 0, Math.PI / 2);
-    this.add(G, dome, m.glass, 0, 2.7, 0);
-    this.add(G, new SphereGeometry(2.48, 8, 4, Math.PI * 1.6, Math.PI * 0.4, 0, Math.PI / 2), m.hole, 0, 2.7, 0, false);
-    this.add(G, new TorusGeometry(2.5, 0.06, 4, 8).rotateX(Math.PI / 2), m.metal, 0, 2.72, 0);
+    this.add(S, dome, m.glass, 0, 2.7, 0);
+    this.add(S, new SphereGeometry(2.48, 8, 4, Math.PI * 1.6, Math.PI * 0.4, 0, Math.PI / 2), m.hole, 0, 2.7, 0, false);
+    this.add(S, new TorusGeometry(2.5, 0.06, 4, 8).rotateX(Math.PI / 2), m.metal, 0, 2.72, 0);
     for (let k = 0; k < 4; k++) {
-      const rib = this.add(G, new TorusGeometry(2.5, 0.04, 3, 8, Math.PI), m.metal, 0, 2.7, 0);
+      const rib = this.add(S, new TorusGeometry(2.5, 0.04, 3, 8, Math.PI), m.metal, 0, 2.7, 0);
       rib.rotation.y = (k / 4) * Math.PI;
     }
     // shards of the dome on the ground
@@ -344,8 +447,8 @@ export class Station {
     }
     // the tube to the habitat
     const tube = new CylinderGeometry(0.8, 0.8, 2.2, 8).rotateZ(Math.PI / 2);
-    this.add(this.group, tube, m.panel, 6.0, 1.6, -1.4);
-    this.add(this.group, new CylinderGeometry(0.84, 0.84, 0.2, 8).rotateZ(Math.PI / 2), m.accent, 6.0, 1.6, -1.4);
+    this.add(this.shell, tube, m.panel, 6.0, 1.6, -1.4);
+    this.add(this.shell, new CylinderGeometry(0.84, 0.84, 0.2, 8).rotateZ(Math.PI / 2), m.accent, 6.0, 1.6, -1.4);
     return G;
   }
 
@@ -490,17 +593,26 @@ export class Station {
   }
 
   addTo(scene: Object3D) {
-    scene.add(this.group, this.redGlow, ...this.lampGlows);
+    scene.add(this.group, this.redGlow, ...this.lampGlows, ...this.interior.glows);
   }
 
   // ----------------------------------------------------------------- update
 
-  update(dt: number, time: number, listener: Vector3) {
+  /** `inside` is how far the creature has gone in (0..1, eased). */
+  update(dt: number, time: number, listener: Vector3, inside = 0) {
     const d = Math.hypot(listener.x - this.center.x, listener.z - this.center.z);
     this.distance = d;
-    // its hum and noises, louder close up
+    // its hum and noises, louder close up, and all round you inside
     const level = d < 60 ? 1 / (1 + (d / 9) * (d / 9)) : 0;
-    this.audio.setSite(this.sound, level, clamp((this.center.x - listener.x) / 12, -0.8, 0.8), 1 - clamp(d / 50, 0, 1), 0.5);
+    const k = inside;
+    this.audio.setSite(
+      this.sound,
+      level + (1 - level) * k,
+      clamp((this.center.x - listener.x) / 12, -0.8, 0.8) * (1 - k),
+      1 - clamp(d / 50, 0, 1) * (1 - k),
+      0.5 + 0.3 * k,
+    );
+    this.interior.update(dt, time, inside, listener);
     if (d > 70) return;
 
     // the red light on the mast: a slow blink

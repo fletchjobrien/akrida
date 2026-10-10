@@ -92,7 +92,7 @@ let pickup: PickupScene | null = null;
 // looking into the escape pods
 let peek: PeekScene | null = null;
 /** Something that can be used, by what it is. */
-type Usable = { kind: 'tracker' } | { kind: 'stranger' } | { kind: 'pad' } | { kind: 'door' } | { kind: 'pod'; site: CrashSite };
+type Usable = { kind: 'tracker' } | { kind: 'stranger' } | { kind: 'pad' } | { kind: 'door' } | { kind: 'pod'; site: CrashSite } | { kind: 'hatch' };
 /**
  * Walking over to use something the player clicked: where to, the nearest it
  * has come, and for how long it has come no nearer (blocked by a hull or rock).
@@ -102,6 +102,48 @@ let going: { use: Usable; to: Vector3; best: number; stuck: number; time: number
 let hoverUse: Usable | null = null;
 /** How far away something can be clicked to walk over and use it. */
 const WALK_RANGE = 30;
+/**
+ * Inside the research station: the roof and near walls are taken away, the
+ * creature walks on its deck among its walls, and the world outside is heard
+ * through them. Going in or out is a short fade through the airlock.
+ */
+let inside = false;
+let insideW = 0;
+let hatchMove: { t: number; out: boolean; swapped: boolean } | null = null;
+const outdoorCliffs = world.cliffs;
+const groundHeight = (x: number, z: number) => (inside && station ? station.interior.floorY : terrainHeight(x, z));
+
+/** Go in (or out): swap the ground and the walls under the creature, and the view. */
+function setInside(on: boolean) {
+  if (!station) return;
+  inside = on;
+  station.setCutaway(on);
+  if (on) {
+    world.height = station.interior.height;
+    world.rocks = station.interior.colliders;
+    world.cliffs = undefined;
+    const sp = station.interior.spawn;
+    creature.teleport(sp.x, sp.z, world);
+    const d = station.interior.inward;
+    creature.setYaw(Math.atan2(d.x, d.z));
+  } else {
+    world.height = terrainHeight;
+    world.rocks = rocks.nearby;
+    world.cliffs = outdoorCliffs;
+    const o = station.doorOutside;
+    creature.teleport(o.x, o.z, world);
+    const d = station.interior.inward;
+    creature.setYaw(Math.atan2(-d.x, -d.z));
+  }
+  camDyn.reset(new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
+}
+
+function beginHatch(out: boolean) {
+  if (hatchMove) return;
+  going = null;
+  hatchMove = { t: 0, out, swapped: false };
+  audio.hatch(0.22);
+}
 /** The left button while the tracker is in hand: a click on it drops it, holding raises it to look at. */
 const press = { down: false, t: 0, onDevice: false, out: false };
 let deviceHover = false;
@@ -371,7 +413,7 @@ const clickGround = new Vector3();
 const clickAt = new Vector2();
 window.addEventListener('pointerdown', (e) => {
   wake.begin();
-  if (e.button !== 0 || wake.active || doorScene?.active || pickup?.active || peek?.active) return;
+  if (e.button !== 0 || wake.active || doorScene?.active || pickup?.active || peek?.active || hatchMove) return;
   clickAt.set(e.clientX, e.clientY);
   // the tracker in hand: what the press means is settled on release (or by holding on)
   if (tracker?.carried) {
@@ -390,7 +432,7 @@ window.addEventListener('pointerdown', (e) => {
   }
   // anything usable under the click: walk over to it and use it
   if (stranger?.busy) return;
-  pr.screenToGround(e.clientX, e.clientY, terrainHeight, clickGround);
+  pr.screenToGround(e.clientX, e.clientY, groundHeight, clickGround);
   const u = usableAt(clickAt, clickGround);
   if (u) {
     if (press.down) endPress();
@@ -408,7 +450,7 @@ function endPress() {
 window.addEventListener('pointerup', (e) => {
   if (e.button !== 0 || !press.down) return;
   // a quick click on it lets it go
-  if (!press.out && press.onDevice && press.t < 0.3 && tracker?.carried) {
+  if (!press.out && press.onDevice && press.t < 0.3 && tracker?.carried && !inside) {
     tracker.drop(creature);
     creature.carrying = false;
   }
@@ -434,6 +476,10 @@ function usableAt(mouse: Vector2, ground: Vector3): Usable | null {
   for (const s of [site, site2]) {
     if (s && peek && near(s.center.x, s.center.z, WALK_RANGE) && s.podAt(mouse, pr.camera)) return { kind: 'pod', site: s };
   }
+  // the station's airlock: in, or (from inside) out
+  if (station && station.interior.floorY && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
+    return { kind: 'hatch' };
+  }
   return null;
 }
 
@@ -448,6 +494,8 @@ function stillUsable(u: Usable) {
       return ship?.state === 'cracked';
     case 'stranger':
       return !!stranger && !stranger.busy && !stranger.dead;
+    case 'hatch':
+      return !!station && !hatchMove;
     default:
       return true;
   }
@@ -472,6 +520,8 @@ function useSpot(u: Usable, out: Vector3) {
     }
     case 'pod':
       return peek!.approachPoint(u.site, creature.pos, out);
+    case 'hatch':
+      return out.copy(inside ? station!.interior.spawn : station!.doorOutside);
   }
 }
 
@@ -488,6 +538,8 @@ function usePoint(u: Usable, out: Vector3) {
       return stranger!.headPosition(out);
     case 'pod':
       return out.copy(u.site.lookPoint);
+    case 'hatch':
+      return out.copy(station!.doorOutside).addScaledVector(station!.interior.inward, 1.2).setY(station!.interior.floorY + 0.8);
   }
 }
 
@@ -503,6 +555,8 @@ function canUse(u: Usable, d: number, stuck: boolean) {
       return !!doorScene && doorScene.canStart(creature.pos) && (near(ship!.doorCenter.x, ship!.doorCenter.z, 1.8) || stuck);
     case 'stranger':
       return near(stranger!.center.x, stranger!.center.z, stuck ? 2.6 : 2.2);
+    case 'hatch':
+      return d < 0.3 || (stuck && d < 1.3);
   }
 }
 
@@ -523,6 +577,9 @@ function use(u: Usable) {
       break;
     case 'pod':
       peek!.begin(u.site);
+      break;
+    case 'hatch':
+      beginHatch(inside);
   }
 }
 
@@ -534,6 +591,9 @@ function goUse(u: Usable) {
 }
 
 const smooth = (w: number) => w * w * (3 - 2 * w);
+/** Going through the airlock: how long the view takes to go dark, and to come back. */
+const HATCH_DARK = 0.35;
+const HATCH_LIGHT = 0.5;
 
 /** Close enough to the keypad to use it. */
 function nearPad() {
@@ -624,6 +684,24 @@ function update(dt: number, now: number) {
     finishFrame(dt, peek.focus(focusTarget));
     return;
   }
+  if (hatchMove) {
+    // through the airlock: the view goes dark, the creature steps through, the view comes back
+    const h = hatchMove;
+    h.t += dt;
+    if (!h.swapped && h.t >= HATCH_DARK) {
+      h.swapped = true;
+      setInside(!h.out);
+    }
+    control.move.set(0, 0);
+    control.sprint = false;
+    control.crouch = false;
+    control.look = null;
+    creature.update(dt, control, world);
+    if (h.t >= HATCH_DARK + HATCH_LIGHT) hatchMove = null;
+    focusTarget.set(creature.pos.x, creature.pos.y + 0.6, creature.pos.z);
+    finishFrame(dt, focusTarget);
+    return;
+  }
 
   // holding the button with the tracker in hand raises it to look at
   if (press.down) {
@@ -642,7 +720,7 @@ function update(dt: number, now: number) {
   const mouseIdle = now - input.lastMouseMove;
   let look: Vector3 | null = null;
   if (input.hasMouse) {
-    pr.screenToGround(input.mouse.x, input.mouse.y, terrainHeight, mouseGround);
+    pr.screenToGround(input.mouse.x, input.mouse.y, groundHeight, mouseGround);
   }
   // stepping away (or the door cracking open behind its work) ends using the keypad
   if (padMode && (input.move.lengthSq() > 0 || !ship || ship.state === 'cracked' || !nearPad())) padMode = false;
@@ -734,17 +812,21 @@ function update(dt: number, now: number) {
   creature.update(dt, control, world);
 
   for (const ev of creature.events) {
+    audio.step(ev);
+    // the deck takes no prints and throws up no sand
+    if (inside) continue;
     footprints.add(ev.x, ev.y, ev.z, ev.yaw, elapsed, 1 - ev.crouch * 0.15);
     const sp = Math.max(creature.speed, 0.001);
     const amount = Math.round(ev.run * 7 + (ev.speed > 1.5 ? 1 : 0) + (ev.scuff ? 1 : 0));
     if (amount > 0) dust.kick(ev.x, ev.y, ev.z, creature.vel.x / sp, creature.vel.z / sp, amount, 0.4 + ev.run);
-    audio.step(ev);
   }
+  // walking out through the doorway goes outside
+  if (inside && station && !hatchMove && station.interior.atDoor(creature.pos)) beginHatch(true);
   for (const cue of creature.cues) audio.cue(cue);
 
   // digging in hard to stop throws sand forward
   const skid = creature.skid;
-  if (skid > 0 && Math.random() < skid * dt * 40) {
+  if (skid > 0 && !inside && Math.random() < skid * dt * 40) {
     const sp = Math.max(creature.speed, 0.001);
     dust.kick(creature.pos.x, creature.pos.y, creature.pos.z, -creature.vel.x / sp, -creature.vel.z / sp, 2, 0.6 + skid);
   }
@@ -820,7 +902,9 @@ function finishFrame(dt: number, target: Vector3) {
       noticeWhat = ship;
     }
   }
-  if (station) station.update(dt, elapsed, creature.pos);
+  insideW = Math.min(1, Math.max(0, insideW + (inside ? dt * 2.5 : -dt * 2.5)));
+  if (station) station.update(dt, elapsed, creature.pos, inside ? Math.max(insideW, 0.6) : 0);
+  audio.setIndoors(insideW);
   if (fallen) fallen.update(dt, creature.pos);
   if (fallen && !fallenSeen && !wake.active && Math.hypot(creature.pos.x - fallen.lookPoint.x, creature.pos.z - fallen.lookPoint.z) < 10) {
     // the three of them, lined up against the wall
@@ -849,7 +933,8 @@ function finishFrame(dt: number, target: Vector3) {
   const eD = sm(doorScene?.weight ?? 0);
   const eK = sm(Math.max(pickup?.weight ?? 0, peek?.weight ?? 0));
   const eH = tracker?.carried ? sm(saturate(creature.holdDyn.y)) : 0;
-  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 3.1 * eP) * (1 + 0.4 * eD) * (1 + 0.45 * eK) * (1 + 0.6 * eH) * debugZoom;
+  const eI = sm(insideW);
+  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 3.1 * eP) * (1 + 0.4 * eD) * (1 + 0.45 * eK) * (1 + 0.6 * eH) * (1 + 0.8 * eI) * debugZoom;
   audio.duck(1 - 0.45 * eS - 0.3 * eP - 0.2 * eD - 0.15 * eK - 0.3 * eH);
   const focus = camDyn.update(dt, debugFocus ?? target);
   // a blast at the ship shakes the ground
@@ -892,6 +977,11 @@ function draw(now: number) {
     } else {
       pr.dark = pr.blur = pr.ghost = pr.desat = pr.vignette = 0;
     }
+  }
+  if (hatchMove) {
+    const t = hatchMove.t;
+    const k = t < HATCH_DARK ? t / HATCH_DARK : 1 - (t - HATCH_DARK) / HATCH_LIGHT;
+    pr.dark = Math.max(pr.dark, Math.min(1, Math.max(0, k)) * 0.97);
   }
   if (fxOff) pr.dark = pr.blur = pr.ghost = pr.desat = pr.vignette = 0;
   pr.render(scene);
@@ -945,6 +1035,14 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     get station() {
       return station;
+    },
+    get inside() {
+      return inside;
+    },
+    /** Step into (or out of) the station at once. */
+    goInside(on = true) {
+      setInside(on);
+      insideW = on ? 1 : 0;
     },
     get fallen() {
       return fallen;
