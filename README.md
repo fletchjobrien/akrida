@@ -316,7 +316,8 @@ doorway, and it pulses softly.
      chime, and a quiet chord hums under everything.
    - In the hand, it uses the way the arm points it (toward the cursor). Held
      out in both hands, it uses the way your creature faces. On the ground, it
-     uses the way its antenna points. Within 3 units of the place, it stays solid.
+     uses the way its antenna points. On the summit (within 12 units of its
+     middle), it stays solid.
    - Sounds are louder while you hold it out. On the ground, they come from
      where it lies.
 4. Click it in your creature's hand to drop it. It falls with your motion,
