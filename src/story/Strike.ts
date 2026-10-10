@@ -161,6 +161,7 @@ export class Strike {
   private spin = 0;
   private settle = 0;
   private landPitch: number | null = null;
+  private victim: 'player' | 'other' = 'player';
   private landTarget = 0;
   private readonly pose: ScriptPose = JSON.parse(JSON.stringify(FLUNG));
   private smokeTimer = 0;
@@ -204,7 +205,8 @@ export class Strike {
   }
 
   /** The blast at `at`, the drone having come along `dir`; `creature` is caught in it. */
-  begin(at: Vector3, dir: Vector3, creature: Creature) {
+  begin(at: Vector3, dir: Vector3, creature: Creature, victim: 'player' | 'other' = 'player') {
+    this.victim = victim;
     this.clear();
     this.active = true;
     this.done = false;
@@ -237,7 +239,7 @@ export class Strike {
     this.maim(creature);
     this.explode();
     this.audio.blast(1);
-    this.audio.deafen(1);
+    if (victim === 'player') this.audio.deafen(1);
   }
 
   /** What the blast does to the body: a forearm torn off, burns, a smouldering chest. */
@@ -436,7 +438,7 @@ export class Strike {
     if (this.beats.length && t > this.beats[0]) {
       const n = this.beats.length;
       this.beats.shift();
-      this.audio.heartbeat(0.25 * (n / 5));
+      if (this.victim === 'player') this.audio.heartbeat(0.25 * (n / 5));
       this.bleedTimer = 0.25;
     }
     if (this.bleedTimer > 0) {

@@ -2470,6 +2470,282 @@ export class AudioEngine {
     }
   }
 
+  /** A short burst of filtered noise at `at`: the building block of clicks, scrapes and slides. */
+  private burst(at: number, dur: number, f0: number, f1: number, q: number, level: number, to: AudioNode, type: BiquadFilterType = 'bandpass') {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.white!;
+    const bp = ctx.createBiquadFilter();
+    bp.type = type;
+    bp.frequency.setValueAtTime(f0, at);
+    bp.frequency.exponentialRampToValueAtTime(f1, at + dur);
+    bp.Q.value = q;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(level, at + Math.min(0.004, dur * 0.2));
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(bp).connect(g).connect(to);
+    src.start(at, Math.random() * 2, dur + 0.05);
+  }
+
+  private tone(at: number, f: number, dur: number, level: number, to: AudioNode, type: OscillatorType = 'sine') {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(level, at + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    o.connect(g).connect(to);
+    o.start(at);
+    o.stop(at + dur + 0.05);
+  }
+
+  /** Picking up a data card: two plastic clicks and a rustle as it goes in with the others. */
+  cardPickup(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    this.burst(now, 0.012, 3800, 3000, 4, level * 0.6, this.master);
+    this.burst(now + 0.05, 0.01, 4600, 3600, 5, level * 0.4, this.master);
+    this.burst(now + 0.32, 0.18, 2400, 1200, 0.8, level * 0.18, this.master);
+    this.burst(now + 0.36, 0.012, 3200, 2600, 4, level * 0.35, this.master);
+  }
+
+  /** A card slid into the reader: taken with a latch and a bright chirp, or refused with a buzz and pushed out. */
+  cardInsert(level: number, ok: boolean) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const r = this.roomBus();
+    const out = ctx.createGain();
+    out.gain.value = 1;
+    out.connect(this.master);
+    if (r) out.connect(r.echo);
+    this.burst(now, 0.12, 1800, 3200, 2, level * 0.25, out);
+    if (ok) {
+      this.burst(now + 0.11, 0.008, 4200, 3400, 5, level * 0.7, out);
+      this.burst(now + 0.13, 0.01, 2600, 2000, 5, level * 0.5, out);
+      this.tone(now + 0.18, 1320, 0.09, level * 0.12, out);
+      this.tone(now + 0.27, 1760, 0.14, level * 0.12, out);
+    } else {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = 96;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 700;
+      bp.Q.value = 1.2;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now + 0.1);
+      g.gain.exponentialRampToValueAtTime(level * 0.35, now + 0.12);
+      g.gain.setValueAtTime(level * 0.35, now + 0.42);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);
+      o.connect(bp).connect(g).connect(out);
+      o.start(now + 0.1);
+      o.stop(now + 0.5);
+      this.burst(now + 0.5, 0.1, 3000, 1800, 2, level * 0.25, out);
+      this.burst(now + 0.58, 0.008, 3600, 3000, 5, level * 0.5, out);
+    }
+  }
+
+  /** All three in: a rising chime, then a heavy relay clunks over. */
+  releaseChime(level: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    for (const [k, f] of [523.25, 659.25, 783.99, 1046.5].entries()) {
+      this.tone(now + k * 0.13, f, 0.5, level * 0.1, this.master);
+      this.tone(now + k * 0.13, f * 2, 0.3, level * 0.03, this.master);
+    }
+    if (this.clanks.length) {
+      const c = ctx.createBufferSource();
+      c.buffer = this.any(this.clanks);
+      c.playbackRate.value = 0.55;
+      const g = ctx.createGain();
+      g.gain.value = level * 0.7;
+      c.connect(g).connect(this.master);
+      c.start(now + 0.75);
+    }
+  }
+
+  /**
+   * The tank draining: pumps start with a deep hum, the fluid goes down in
+   * gulps and glugs, and the last of it is sucked away with a slurp.
+   */
+  tankDrain(level: number, seconds: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime + 0.8;
+    const r = this.roomBus();
+    const out = ctx.createGain();
+    out.gain.value = level;
+    out.connect(this.master);
+    if (r) out.connect(r.echo);
+    // the pump: a motor winding up, labouring under the load
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(30, now);
+    o.frequency.exponentialRampToValueAtTime(58, now + 0.8);
+    o.frequency.setValueAtTime(58, now + seconds - 0.4);
+    o.frequency.exponentialRampToValueAtTime(30, now + seconds + 0.6);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 380;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.35, now + 0.6);
+    g.gain.setValueAtTime(0.35, now + seconds - 0.2);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + seconds + 0.7);
+    o.connect(lp).connect(g).connect(out);
+    o.start(now);
+    o.stop(now + seconds + 0.8);
+    // gulps and glugs: deep bubbles bursting as it goes down
+    let t = now + 0.3;
+    while (t < now + seconds) {
+      const f = 520 + Math.random() * 300;
+      this.burst(t, 0.09 + Math.random() * 0.08, f, f * 0.35, 6, 0.5 * (0.5 + Math.random() * 0.5), out);
+      if (Math.random() < 0.4) this.tone(t + 0.02, 160 + Math.random() * 120, 0.08, 0.12, out);
+      t += 0.06 + Math.random() * 0.18;
+    }
+    // the last of it sucked away
+    this.burst(now + seconds - 0.3, 0.7, 260, 1400, 3, 0.6, out);
+    this.burst(now + seconds + 0.2, 0.25, 900, 300, 4, 0.35, out);
+  }
+
+  /** The tank's door unsealing: a pop, a long hiss of pressure, the door grinding round on its track. */
+  tankHiss(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const r = this.roomBus();
+    const out = ctx.createGain();
+    out.gain.value = level;
+    out.connect(this.master);
+    if (r) out.connect(r.echo);
+    this.tone(now, 110, 0.08, 0.6, out);
+    this.burst(now + 0.01, 0.02, 2600, 1800, 3, 0.8, out);
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.setValueAtTime(3200, now);
+    hp.frequency.exponentialRampToValueAtTime(1600, now + 1.4);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.5, now + 0.04);
+    g.gain.setTargetAtTime(0.0001, now + 0.2, 0.45);
+    src.connect(hp).connect(g).connect(out);
+    src.start(now, 0, 2);
+    this.burst(now + 0.25, 0.8, 700, 450, 4, 0.25, out);
+    if (this.clanks.length) {
+      const c = ctx.createBufferSource();
+      c.buffer = this.any(this.clanks);
+      c.playbackRate.value = 1.2;
+      const cg = ctx.createGain();
+      cg.gain.value = 0.4;
+      c.connect(cg).connect(out);
+      c.start(now + 1.05);
+    }
+  }
+
+  /**
+   * The thing from the tank: small, wet, in pain. A ragged gasp, a thin mewling
+   * cry that cracks and wavers, or a wet rattle in its chest.
+   */
+  specimenVoice(kind: 'gasp' | 'mewl' | 'rattle', level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(this.master);
+    const r = this.roomBus();
+    if (r && this.indoor > 0.5) p.connect(r.echo);
+    const play = (bank: Buf[], rate: number, gain: number, at = now) => {
+      if (!bank.length) return;
+      const src = ctx.createBufferSource();
+      src.buffer = this.any(bank);
+      src.playbackRate.value = rate;
+      const g = ctx.createGain();
+      g.gain.value = gain;
+      src.connect(g).connect(p);
+      src.start(at);
+    };
+    if (kind === 'gasp') play(this.inhales, 1.5 + Math.random() * 0.2, level * 1.4);
+    else if (kind === 'rattle') play(this.gargles, 1.45 + Math.random() * 0.2, level * 1.1);
+    else {
+      // a thin cry, wavering and breaking
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      const f = 620 + Math.random() * 160;
+      const d = 0.45 + Math.random() * 0.4;
+      o.frequency.setValueAtTime(f, now);
+      o.frequency.linearRampToValueAtTime(f * 1.45, now + d * 0.35);
+      o.frequency.linearRampToValueAtTime(f * 0.8, now + d);
+      const vib = ctx.createOscillator();
+      vib.frequency.value = 6 + Math.random() * 3;
+      const vg = ctx.createGain();
+      vg.gain.value = f * 0.04;
+      vib.connect(vg).connect(o.frequency);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1300;
+      bp.Q.value = 1.4;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(level * 0.12, now + 0.05);
+      // it cracks: a stutter in the middle
+      g.gain.setValueAtTime(level * 0.12, now + d * 0.5);
+      g.gain.linearRampToValueAtTime(level * 0.02, now + d * 0.55);
+      g.gain.linearRampToValueAtTime(level * 0.1, now + d * 0.62);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + d);
+      o.connect(bp).connect(g).connect(p);
+      o.start(now);
+      vib.start(now);
+      o.stop(now + d + 0.05);
+      vib.stop(now + d + 0.05);
+      play(this.exhales, 1.55, level * 0.7, now + 0.02);
+    }
+  }
+
+  /** It hauls itself along: a wet scrape over the deck, or a drag through the sand. */
+  specimenDrag(level: number, pan: number, metal: boolean) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white || level < 0.005) return;
+    const now = ctx.currentTime;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(this.master);
+    if (metal) {
+      this.burst(now, 0.25, 2600, 1500, 1.5, level * 0.3, p);
+      this.burst(now + 0.02, 0.06, 900, 500, 3, level * 0.25, p);
+      if (this.metalSteps.length) {
+        const src = ctx.createBufferSource();
+        src.buffer = this.any(this.metalSteps);
+        src.playbackRate.value = 1.7;
+        const g = ctx.createGain();
+        g.gain.value = level * 0.25;
+        src.connect(g).connect(p);
+        src.start(now);
+      }
+    } else if (this.sprays.length) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.any(this.sprays);
+      src.playbackRate.value = 0.6;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 1800;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(level * 0.5, now + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+      src.connect(lp).connect(g).connect(p);
+      src.start(now, 0, 0.5);
+    }
+  }
+
   /** The highlands come into view: a wide, open chord, slowly swelling. */
   vista() {
     const ctx = this.ctx;

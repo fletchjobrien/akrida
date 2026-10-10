@@ -1,4 +1,4 @@
-import { Scene, Vector2, Vector3, type Object3D } from 'three';
+import { Raycaster, Scene, Vector2, Vector3, type Object3D } from 'three';
 import { PixelRenderer } from './render/PixelRenderer';
 import { shared } from './render/shared';
 import { Terrain, terrainHeight } from './world/terrain';
@@ -44,6 +44,8 @@ import { Stranger } from './story/Stranger';
 import { Drone } from './story/Drone';
 import { Strike } from './story/Strike';
 import { Locusts } from './story/Locusts';
+import { DataCards } from './story/DataCards';
+import { Specimen } from './story/Specimen';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const pr = new PixelRenderer(canvas);
@@ -77,6 +79,20 @@ const drone = new Drone(audio);
 drone.addTo(scene);
 const strike = new Strike(dust, audio, world);
 strike.addTo(scene);
+// the drone's other strike: on the thing let out of the tank (it spares the creature)
+const npcStrike = new Strike(dust, audio, world);
+npcStrike.addTo(scene);
+/** The drone has had its kill: it never comes again. */
+let droneDone = false;
+// the data cards, and the specimen they let out of its tank
+let cards: DataCards | null = null;
+let specimen: Specimen | null = null;
+/** Stooping to take a card: seconds left, and what it is looking at. */
+let grabT = 0;
+const grabAt = new Vector3();
+/** Glancing back over its shoulder at the drone while it runs: seconds left of this glance, and until the next. */
+let glanceT = 0;
+let glanceWait = 2;
 /** Where the creature comes back to when it dies: the last checkpoint it passed. */
 interface Checkpoint {
   name: string;
@@ -116,7 +132,15 @@ let pickup: PickupScene | null = null;
 // looking into the escape pods
 let peek: PeekScene | null = null;
 /** Something that can be used, by what it is. */
-type Usable = { kind: 'tracker' } | { kind: 'stranger' } | { kind: 'pad' } | { kind: 'door' } | { kind: 'pod'; site: CrashSite } | { kind: 'hatch' };
+type Usable =
+  | { kind: 'tracker' }
+  | { kind: 'stranger' }
+  | { kind: 'pad' }
+  | { kind: 'door' }
+  | { kind: 'pod'; site: CrashSite }
+  | { kind: 'hatch' }
+  | { kind: 'card'; card: DataCards['cards'][number] }
+  | { kind: 'reader' };
 /**
  * Walking over to use something the player clicked: where to, the nearest it
  * has come, and for how long it has come no nearer (blocked by a hull or rock).
@@ -163,7 +187,7 @@ function setInside(on: boolean) {
   camDyn.reset(new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
   // the first time in is a checkpoint; coming back out, something is waiting
   if (on && !checkpoint) saveCheckpoint('station');
-  if (!on && wasInside && !drone.active && !strike.active) droneWait = 4;
+  if (!on && wasInside && !drone.active && !strike.active && !droneDone) droneWait = 4;
 }
 
 function saveCheckpoint(name: string) {
@@ -449,6 +473,12 @@ function* buildStation(): Generator<unknown, void, unknown> {
   yield compile(f.group);
   const l = new Locusts(f.feedPoints, () => rocks.nearby, dust, audio);
   yield compile(l.group);
+  const dc = new DataCards(st, creature, dust, audio);
+  const sp = new Specimen(st, world, audio, dust);
+  dc.addTo(scene);
+  sp.addTo(scene);
+  cards = dc;
+  specimen = sp;
   st.addTo(scene);
   f.addTo(scene);
   l.addTo(scene);
@@ -536,10 +566,24 @@ function usableAt(mouse: Vector2, ground: Vector3): Usable | null {
     if (s && peek && near(s.center.x, s.center.z, WALK_RANGE) && s.podAt(mouse, pr.camera)) return { kind: 'pod', site: s };
   }
   // the station's airlock: in, or (from inside) out
-  if (station && station.interior.floorY && !drone.active && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
+  // the data cards lying about, and the reader that takes them
+  if (cards && grabT <= 0) {
+    const c = cards.cardAt(mouse, pr.camera, inside);
+    if (c && near(c.mesh.position.x, c.mesh.position.z, WALK_RANGE)) return { kind: 'card', card: c };
+  }
+  if (cards && station && inside && cards.carried.length && !cards.busy && !cards.complete && readerAt(mouse)) return { kind: 'reader' };
+  if (station && station.interior.floorY && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
     return { kind: 'hatch' };
   }
   return null;
+}
+
+const readerRay = new Raycaster();
+function readerAt(mouse: Vector2) {
+  readerRay.setFromCamera(new Vector2((mouse.x / window.innerWidth) * 2 - 1, -(mouse.y / window.innerHeight) * 2 + 1), pr.camera);
+  const proxy = station!.interior.reader.proxy;
+  proxy.updateWorldMatrix(true, false);
+  return readerRay.intersectObject(proxy, false).length > 0;
 }
 
 /** It can still be used (things change on the way over). */
@@ -555,6 +599,10 @@ function stillUsable(u: Usable) {
       return !!stranger && !stranger.busy && !stranger.dead;
     case 'hatch':
       return !!station && !hatchMove;
+    case 'card':
+      return u.card.state === 'lying';
+    case 'reader':
+      return !!cards && cards.carried.length > 0 && !cards.complete;
     default:
       return true;
   }
@@ -581,6 +629,10 @@ function useSpot(u: Usable, out: Vector3) {
       return peek!.approachPoint(u.site, creature.pos, out);
     case 'hatch':
       return out.copy(inside ? station!.interior.spawn : station!.doorOutside);
+    case 'card':
+      return out.copy(u.card.mesh.position);
+    case 'reader':
+      return out.copy(station!.interior.reader.stand);
   }
 }
 
@@ -599,6 +651,10 @@ function usePoint(u: Usable, out: Vector3) {
       return out.copy(u.site.lookPoint);
     case 'hatch':
       return out.copy(station!.doorOutside).addScaledVector(station!.interior.inward, 1.2).setY(station!.interior.floorY + 0.8);
+    case 'card':
+      return out.copy(u.card.mesh.position);
+    case 'reader':
+      return out.copy(station!.interior.reader.look);
   }
 }
 
@@ -616,6 +672,10 @@ function canUse(u: Usable, d: number, stuck: boolean) {
       return near(stranger!.center.x, stranger!.center.z, stuck ? 2.6 : 2.2);
     case 'hatch':
       return d < 0.3 || (stuck && d < 1.3);
+    case 'card':
+      return d < 0.4 || (stuck && d < 1.1);
+    case 'reader':
+      return d < 0.3 || (stuck && d < 1.0);
   }
 }
 
@@ -639,6 +699,15 @@ function use(u: Usable) {
       break;
     case 'hatch':
       beginHatch(inside);
+      break;
+    case 'card':
+      // stoop and take it
+      grabT = 0.55;
+      grabAt.copy(u.card.mesh.position);
+      cards!.grab(u.card);
+      break;
+    case 'reader':
+      cards!.insertAll();
   }
 }
 
@@ -794,9 +863,33 @@ function update(dt: number, now: number) {
   // stepping away (or the door cracking open behind its work) ends using the keypad
   if (padMode && (input.move.lengthSq() > 0 || !ship || ship.state === 'cracked' || !nearPad())) padMode = false;
   const holding = (stranger?.busy ?? false) || padMode;
-  if (drone.active && drone.position.distanceTo(creature.pos) < 26) {
+  creature.glance = 0;
+  const droneNear = drone.active && !drone.prey && !inside && drone.position.distanceTo(creature.pos) < 26;
+  let droneBehind = false;
+  if (droneNear) {
+    const rel = Math.atan2(drone.position.x - creature.pos.x, drone.position.z - creature.pos.z) - creature.yaw;
+    droneBehind = Math.abs(Math.atan2(Math.sin(rel), Math.cos(rel))) > 1.5 && creature.speed > 1.2;
+    if (droneBehind) {
+      // running from it: a quick look back over its shoulder now and then
+      if (glanceT > 0) glanceT -= dt;
+      else {
+        glanceWait -= dt;
+        if (glanceWait <= 0) {
+          glanceT = 0.55 + Math.random() * 0.35;
+          glanceWait = 1.6 + Math.random() * 2.2;
+        }
+      }
+    } else glanceT = 0;
+  }
+  if (grabT > 0) {
+    look = lookPoint.copy(grabAt);
+  } else if (droneNear && (!droneBehind || glanceT > 0)) {
     // it cannot look away from it
     look = lookPoint.copy(drone.position);
+    if (droneBehind) creature.glance = 1;
+  } else if (specimen?.creature && specimen.alive && specimen.creature.pos.distanceTo(creature.pos) < 9) {
+    // the thing from the tank
+    look = specimen.chest(lookPoint);
   } else if (padMode) {
     look = lookPoint.copy(ship!.padCenter);
   } else if (tracker && creature.holdOut > 0) {
@@ -850,6 +943,12 @@ function update(dt: number, now: number) {
       const d = Math.hypot(dx, dz);
       if (d > 0.08) control.move.set((dx / d) * Math.min(0.7, d * 2), (-dz / d) * Math.min(0.7, d * 2));
     }
+  }
+  if (grabT > 0) {
+    grabT -= dt;
+    control.move.set(0, 0);
+    control.sprint = false;
+    control.crouch = true;
   }
   if (going) {
     const g = going;
@@ -910,26 +1009,6 @@ function update(dt: number, now: number) {
 
   rocks.update(creature.pos.x, creature.pos.z);
 
-  // the drone: it comes a few seconds after the creature leaves the station, over the ridge behind it
-  if (droneWait > 0) {
-    droneWait -= dt;
-    // it waits for the creature to come out again
-    if (droneWait <= 0 && inside) droneWait = 0.5;
-    else if (droneWait <= 0 && station) {
-      const from = new Vector3(station.center.x - HIGH.ox * 34, station.center.y + 16, station.center.z - HIGH.oz * 34);
-      drone.launch(from);
-    }
-  }
-  if (drone.active) {
-    creature.rig.chest.getWorldPosition(chest);
-    drone.update(dt, chest, creature.vel, creature.pos, station ? station.center : null);
-    if (drone.hit) {
-      drone.hit = false;
-      going = null;
-      strike.begin(drone.hitAt, drone.hitDir, creature);
-    }
-  }
-
   // camera: lead the motion a little and lean toward the cursor
   focusTarget.set(creature.pos.x, creature.pos.y + 0.6, creature.pos.z);
   focusTarget.addScaledVector(creature.vel, 0.32);
@@ -953,12 +1032,61 @@ function update(dt: number, now: number) {
     // keep it in view
     focusTarget.lerp(drone.position, 0.3);
   }
+  if (specimen?.creature && specimen.phase !== 'dead' && specimen.creature.pos.distanceTo(creature.pos) < 10) {
+    focusTarget.lerp(specimen.creature.pos, 0.25);
+  }
   if (stranger && stranger.weight > 0) {
     // the encounter draws the camera in between the two of them
     const w = stranger.weight;
     focusTarget.lerp(stranger.focus(creature.pos, encounterFocus), w);
   }
   finishFrame(dt, focusTarget);
+}
+
+/**
+ * The drone, every frame whatever else is going on (it never freezes): it
+ * comes a few seconds after the creature leaves the station; it hunts the
+ * creature, but holds off while the creature is inside, busy, or while the
+ * thing from the tank is being let out; once that thing is out on the sand,
+ * it goes for it instead, and then it is done.
+ */
+function updateDrone(dt: number) {
+  const prey = !!specimen && specimen.phase === 'outside' && specimen.outside > 0.5;
+  if (droneWait > 0 && !droneDone) {
+    droneWait -= dt;
+    // it waits for the creature to come out again
+    if (droneWait <= 0 && inside) droneWait = 0.5;
+    else if (droneWait <= 0 && station) droneLaunch();
+  }
+  // the thing on the sand draws it in, whether it was already out or not
+  if (prey && !drone.active && !droneDone && station) droneLaunch();
+  if (!drone.active) return;
+  const scene = !!(doorScene?.active || pickup?.active || peek?.active || hatchMove || grabT > 0 || strike.active);
+  const releasing = !!specimen && specimen.started && !prey && specimen.phase !== 'dead';
+  if (prey) specimen!.chest(chest);
+  else if (inside && station) chest.copy(station.doorOutside).addScaledVector(station.interior.inward, -5).setY(station.doorOutside.y + 1);
+  else creature.rig.chest.getWorldPosition(chest);
+  const allow = prey || (!inside && !scene && !releasing);
+  drone.update(dt, chest, prey ? zero : creature.vel, creature.pos, station ? station.center : null, allow, prey);
+  if (drone.hit) {
+    drone.hit = false;
+    if (drone.prey && specimen?.creature) {
+      // it takes the thing from the tank instead; the creature is safe from it now
+      specimen.kill();
+      npcStrike.begin(drone.hitAt, drone.hitDir, specimen.creature, 'other');
+      droneDone = true;
+      droneWait = -1;
+    } else {
+      going = null;
+      strike.begin(drone.hitAt, drone.hitDir, creature);
+    }
+  }
+}
+const zero = new Vector3();
+
+function droneLaunch() {
+  const st = station!;
+  drone.launch(new Vector3(st.center.x - HIGH.ox * 34, st.center.y + 16, st.center.z - HIGH.oz * 34));
 }
 
 /** Camera, streamed world, particles and sound: shared by play and the opening. */
@@ -1003,6 +1131,18 @@ function finishFrame(dt: number, target: Vector3) {
   audio.setIndoors(insideW);
   if (fallen) fallen.update(dt, creature.pos);
   if (locusts) locusts.update(dt, creature.pos, creature.speed, !inside);
+  if (cards) {
+    cards.update(dt, elapsed, rocks.nearby);
+    if (cards.justCompleted && specimen) {
+      specimen.begin();
+      noticeTime = 2;
+      noticeWhat = { lookPoint: station!.interior.tank.at.clone().setY(station!.interior.tank.at.y + 1) };
+    }
+  }
+  if (specimen) specimen.update(dt, elapsed, creature.pos);
+  updateDrone(dt);
+  npcStrike.update(dt);
+  if (npcStrike.active && specimen) specimen.follow();
   if (fallen && !fallenSeen && !wake.active && Math.hypot(creature.pos.x - fallen.lookPoint.x, creature.pos.z - fallen.lookPoint.z) < 10) {
     // the three of them, lined up against the wall
     fallenSeen = true;
@@ -1036,7 +1176,8 @@ function finishFrame(dt: number, target: Vector3) {
   audio.duck(1 - 0.45 * eS - 0.3 * eP - 0.2 * eD - 0.15 * eK - 0.3 * eH);
   const focus = camDyn.update(dt, debugFocus ?? target);
   // a blast at the ship shakes the ground
-  const shake = Math.max(ship ? ship.shake : 0, strike.shake * 1.8);
+  const npcShake = npcStrike.active && specimen?.creature ? npcStrike.shake * 1.4 / (1 + specimen.creature.pos.distanceTo(creature.pos) * 0.15) : 0;
+  const shake = Math.max(ship ? ship.shake : 0, strike.shake * 1.8, npcShake);
   if (shake > 0.01) {
     shaken.copy(focus);
     shaken.x += (Math.random() - 0.5) * 0.3 * shake;
@@ -1147,6 +1288,13 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     drone,
     strike,
+    npcStrike,
+    get cards() {
+      return cards;
+    },
+    get specimen() {
+      return specimen;
+    },
     get checkpoint() {
       return checkpoint;
     },

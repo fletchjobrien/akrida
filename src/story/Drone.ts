@@ -65,6 +65,8 @@ export class Drone {
   private dartTimer = 2;
   private inspectTimer = 5;
   private inspecting = 0;
+  /** It is after something other than the creature. */
+  prey = false;
   private diveSpeed = 0;
   private lastDist = Infinity;
   private beepTimer = 0;
@@ -188,8 +190,19 @@ export class Drone {
    * Fly. `chest` is the creature's chest in the world, `vel` its velocity;
    * `avoid` lifts it clear of the station (centre and radius).
    */
-  update(dt: number, chest: Vector3, cvel: Vector3, listener: Vector3, avoid: Vector3 | null) {
+  update(dt: number, chest: Vector3, cvel: Vector3, listener: Vector3, avoid: Vector3 | null, allowStrike = true, prey = false) {
     if (this.phase === 'idle') return;
+    // something else to kill: it goes straight for it
+    if (prey !== this.prey) {
+      this.prey = prey;
+      if (prey && (this.phase === 'stalk' || this.phase === 'dive')) this.toLock(chest);
+    }
+    // not now: it backs off and goes on circling
+    if (!allowStrike && (this.phase === 'lock' || this.phase === 'dive')) {
+      this.phase = 'stalk';
+      this.t = Math.min(this.t, STALK_TIME - 4);
+      this.laser.visible = false;
+    }
     this.t += dt;
     const P = this.root.position;
     const time = performance.now() / 1000;
@@ -208,6 +221,7 @@ export class Drone {
       if (flat < 11) {
         this.phase = 'stalk';
         this.t = 0;
+        if (this.prey) this.toLock(chest);
       }
     } else if (this.phase === 'stalk') {
       // circling it, hunting this way and that, now and then darting to a new side
@@ -242,7 +256,8 @@ export class Drone {
         this.chirpTimer = 2.5 + Math.random() * 3;
         if (Math.random() < 0.5) this.audio.droneChirp(this.level(listener) * 0.4);
       }
-      if (this.t > STALK_TIME) {
+      if (this.t > STALK_TIME && !allowStrike) this.t = STALK_TIME - 3;
+      if (this.t > STALK_TIME || this.prey) {
         this.phase = 'lock';
         this.t = 0;
         this.inspecting = 0;
@@ -261,7 +276,7 @@ export class Drone {
         this.beepTimer = Math.max(0.05, 0.42 * (1 - k) * (1 - k) + 0.05);
         this.audio.droneBeep(0.12 + k * 0.08, 1 + k * 0.5);
       }
-      if (this.t > LOCK_TIME) {
+      if (this.t > (this.prey ? LOCK_TIME * 0.75 : LOCK_TIME)) {
         this.phase = 'dive';
         this.t = 0;
         this.diveSpeed = this.vel.length();
@@ -316,6 +331,20 @@ export class Drone {
       this.eyeGlow.strength = 0;
       this.audio.setDrone(0, 0, 0, 0);
     }
+  }
+
+  /** Back and up from its target, and lock on. */
+  private toLock(chest: Vector3) {
+    const P = this.root.position;
+    const dx = chest.x - P.x;
+    const dz = chest.z - P.z;
+    const flat = Math.hypot(dx, dz) || 1;
+    const back = Math.min(9, Math.max(5, flat));
+    this.phase = 'lock';
+    this.t = 0;
+    this.inspecting = 0;
+    this.lockFrom.set(chest.x - (dx / flat) * back, chest.y + 5, chest.z - (dz / flat) * back);
+    this.audio.droneLock(0.6);
   }
 
   /** Hover toward `want`: a damped spring, its push and speed limited, twitching a little. */

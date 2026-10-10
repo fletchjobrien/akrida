@@ -197,10 +197,7 @@ void main() {
   vec3 vn = normalize(vViewNormal);
   outInfo = vec4(vn.xy * 0.5 + 0.5, uOutline, uHighlight);
   // indoors, the world outside the walls is not seen
-  if (outsideRoom(vWorldPos)) {
-    outColor = vec4(ROOM_BLACK, 1.0);
-    outInfo = vec4(0.5, 1.0, 0.0, 0.0);
-  }
+  if (outsideRoom(vWorldPos)) discard;
 }
 `;
 

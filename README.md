@@ -488,6 +488,45 @@ doorway (or click it) to leave.
     cracked screen crackles when it stutters.
   - The airlock door grinds on its broken track and clanks as you pass.
 
+### The data cards and the thing in the tank
+
+- **The reader:** on the work bay's desk, under the three screens, is a card
+  reader with three slots, ringed red, green and blue. A thick black cord
+  runs from under the desk, sprawled across the deck, back through the tube
+  to the specimen tank.
+- **The cards:** twelve little floppy-sized data cards of coloured plastic,
+  each with a sliding metal shutter and a label, were spilled when the
+  station was raided. They catch the light now and then.
+  - Seven are inside: on the top bunk, on the table by the cups, under the
+    suit rack, among the papers, by the smashed tank, on the lab bench and by
+    the lockers.
+  - Five are out on the sand, most half buried: by the dead, past the crates,
+    under the solar panels, by a lamp post, and the green one off among the
+    rocks, out of the way.
+  - Only one is red, one green and one blue.
+- **Taking them:** click a card. Your creature walks to it, stoops and takes
+  it, and it goes into a fan of cards at its hip.
+- **The reader:** click the reader to feed in the cards you carry, one after
+  another. Red, green and blue each click into their own slot, the ring
+  lights and its screen glows the card's colour. Any other card is refused
+  with a buzz, the screen flashes red, and it is pushed back out.
+- **The release:** when all three are in, the reader chimes and a relay
+  clunks.
+  - Pumps start and the tank drains in gulps and glugs, the fluid swirling
+    away. The figure in it sinks to lie curled on the tank's floor, and it
+    gasps.
+  - The tank's door unseals with a pop and a long hiss, and slides round in a
+    gust of steam.
+  - The thing inside uncurls and drags itself out: one of your creature's
+    own kind, bleached and stunted by the tank, with a swollen head, a
+    withered arm, growths on its back and a cut feeding tube. It shakes,
+    gasps and mewls, dripping, and leaves a wet trail as it hauls itself
+    along the cord, through the tube and the habitat.
+  - It goes out of the airlock, tumbles down the steps, and drags itself on
+    across the sand, ploughing a furrow, until the drone finds it. The drone
+    locks on and dives, and the thing is blown apart.
+  - After that, the drone never comes for your creature again.
+
 ### The drone
 
 A few seconds after your creature first comes back out of the station,
@@ -523,6 +562,11 @@ something comes for it.
     the sand. The body smokes.
   - Its ears ring and the world goes dull and far away. The colour drains,
     the view closes in on the body, and everything goes dark.
+- **Running from it:** your creature glances back over its shoulder at it
+  now and then while it runs. It still hunts while your creature does
+  something else (picks something up, looks into a pod), but it never strikes
+  then. If your creature gets back inside, the drone waits outside the
+  airlock.
 - **Checkpoint:** the first time your creature goes into the station is a
   checkpoint. After the strike it wakes there, whole, as if none of it had
   happened. Leave again, and the drone comes again.
@@ -546,6 +590,9 @@ something comes for it.
   lighting (`roomLight` in `src/render/shared.ts`) that lights only what is
   inside the station's walls.
 - The locusts are in `src/story/Locusts.ts`.
+- The data cards are in `src/story/DataCards.ts`; the thing in the tank and its release in
+  `src/story/Specimen.ts`. Glass and fluid are drawn see-through with a dither
+  (`src/render/dither.ts`).
 - The drone is in `src/story/Drone.ts`; the strike (explosion, the body,
   the death) in `src/story/Strike.ts`. The checkpoints and the respawn are in
   `src/main.ts` (`saveCheckpoint`, `respawn`).

@@ -188,6 +188,9 @@ export class Creature {
 
   /** Set to drive the breathing from a script: the -1..1 breath and its size. */
   scriptBreath: { value: number; amp: number } | null = null;
+  /** 0..1: a glance back over its shoulder at what it is looking at, even while running. */
+  glance = 0;
+  private readonly glanceDyn = new Dyn(3.2, 0.8, 0);
 
   constructor(world: World, x = 0, z = 0, skin?: Skin) {
     this.rig = new CreatureRig(skin);
@@ -693,8 +696,9 @@ export class Creature {
       const dist = Math.hypot(lx, lz);
       if (dist > 0.35) {
         const rel = wrapAngle(Math.atan2(lx, lz) - this.yaw);
-        const limit = lerp(1.35, 0.85, moving);
-        const behind = 1 - smoothstep(1.6, 2.3, Math.abs(rel));
+        const gl = saturate(this.glanceDyn.update(dt, this.glance));
+        const limit = lerp(lerp(1.35, 0.85, moving), 2.1, gl);
+        const behind = lerp(1 - smoothstep(1.6, 2.3, Math.abs(rel)), 1, gl);
         lookYaw = clamp(rel, -limit, limit) * (moving > 0.5 ? behind : 1);
         const eyeY = this.pos.y + 1.3;
         lookPitch = clamp(Math.atan2(eyeY - input.look.y, dist), -0.25, 0.5);
@@ -720,7 +724,7 @@ export class Creature {
     const lr = this.lookRollDyn.update(dt, clamp(lookRoll, -0.4, 0.4));
 
     const chestLean = lean * 0.2 - crouch * 0.05;
-    rig.chest.rotation.set(chestLean - breath * 0.015 * breathAmp, -twist * 0.9 + ly * 0.2, -roll * 0.4 - bank * 0.3, 'YXZ');
+    rig.chest.rotation.set(chestLean - breath * 0.015 * breathAmp, -twist * 0.9 + ly * (0.2 + 0.25 * this.glance), -roll * 0.4 - bank * 0.3, 'YXZ');
     const bs = breath * 0.022 * breathAmp;
     rig.chestMesh.scale.set(1 + bs * 0.6, 1 + bs * 0.4, 1 + bs);
     rig.neck.rotation.set(-lean * 0.35 + lp * 0.25, ly * 0.3 + twist * 0.3, lr * 0.3, 'YXZ');

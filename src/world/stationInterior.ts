@@ -17,6 +17,7 @@ import { shared, toonMaterial } from '../render/shared';
 import { rgb } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
 import { Glow } from '../render/glow';
+import { ditherMaterial } from '../render/dither';
 import { convexHull, type RockInfo } from './rocks';
 import type { Dust } from './particles';
 import type { AudioEngine } from '../audio/AudioEngine';
@@ -106,6 +107,33 @@ export class StationInterior {
   private emergency!: ShaderMaterial;
   private readonly lamps: { pos: Vector3; base: number; flicker: boolean }[] = [];
   private specimen!: Group;
+  /** The specimen tank: its fluid, its door, the figure in it (see story/Specimen.ts). */
+  readonly tank = {
+    /** The tank floor's middle, in the world. */
+    at: new Vector3(),
+    /** Its door's middle at the floor, and the way out through it (world). */
+    door: new Vector3(),
+    out: new Vector3(),
+    liquid: null as unknown as Mesh,
+    doorPanel: null as unknown as Object3D,
+    figure: null as unknown as Group,
+    glow: null as unknown as Glow,
+    /** 0..1: how full it is. */
+    level: 1,
+    /** The figure floats on its tether (false once it has been let go). */
+    floating: true,
+  };
+  /** The card reader on the desk: three slots (red, green, blue), where a card goes in each, its lights. */
+  readonly reader = {
+    proxy: new Mesh(new BoxGeometry(0.75, 0.5, 0.55)),
+    slots: [] as Vector3[],
+    leds: [] as ShaderMaterial[],
+    stand: new Vector3(),
+    look: new Vector3(),
+  };
+  /** Screens shown something else for a while: a colour, until a time. */
+  private readonly screenShow: ({ color: number[]; until: number } | null)[] = [null, null, null];
+  private now = 0;
   private readonly tankAt = new Vector3();
   private readonly sunAt = new Vector3();
   private readonly cableAt = new Vector3();
@@ -238,6 +266,57 @@ export class StationInterior {
     const glow = this.glow(color, 0.35, x + Math.sin(yaw) * 0.15, y, z + Math.cos(yaw) * 0.15, 0.4);
     this.screens.push({ mat, on: rgb(color).toArray(), glow, kind });
     return frame;
+  }
+
+  /** A thick cord lying slack on the deck through these points, curling and kinking as it goes. */
+  private cord(pts: [number, number][]) {
+    const m = toonMaterial({ dark: 0x0e0e10, mid: 0x1c1c20, light: 0x34343a, litAt: 0.55, outline: 0.5, highlight: 0.6 });
+    const tag = toonMaterial({ dark: 0x6a5a10, mid: 0xb09a20, light: 0xe0c838, litAt: 0.55, outline: 0.4, highlight: 0.3 });
+    const dense: [number, number][] = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)];
+      const p1 = pts[i];
+      const p2 = pts[i + 1];
+      const p3 = pts[Math.min(pts.length - 1, i + 2)];
+      for (let k = 0; k < 6; k++) {
+        const t = k / 6;
+        const t2 = t * t;
+        const t3 = t2 * t;
+        const cr = (a: number, b: number, c: number, d: number) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+        // a little wander of its own
+        const w = Math.sin((i * 6 + k) * 1.7) * 0.03;
+        dense.push([cr(p0[0], p1[0], p2[0], p3[0]) + w, cr(p0[1], p1[1], p2[1], p3[1]) - w]);
+      }
+    }
+    dense.push(pts[pts.length - 1]);
+    for (let i = 0; i < dense.length - 1; i++) {
+      const [ax, az] = dense[i];
+      const [bx, bz] = dense[i + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      const c = this.add(this.root, new BoxGeometry(0.05, 0.045, len + 0.01), i === 2 || i === dense.length - 3 ? tag : m, (ax + bx) / 2, DECK + 0.024, (az + bz) / 2, false);
+      c.rotation.y = Math.atan2(bx - ax, bz - az);
+    }
+  }
+
+  /** Show a colour on screen `i` (0 left .. 2 right) for `seconds`. */
+  showScreen(i: number, color: number, seconds: number) {
+    this.screenShow[i] = { color: rgb(color).toArray(), until: this.now + seconds };
+  }
+
+  /** Light slot `i`'s ring: dim (empty), full (a card in it), or `flash` (rejected). */
+  setLed(i: number, state: 'dim' | 'full' | 'off') {
+    const c = [0xd02828, 0x30b040, 0x2860d8][i];
+    const v = this.reader.leds[i].uniforms.uLight.value as Vector3;
+    v.copy(rgb(c)).multiplyScalar(state === 'full' ? 1.4 : state === 'dim' ? 0.3 : 0.05);
+  }
+
+  /** Inside the rooms (habitat, tube or lab), for a point in the world. */
+  contains(p: Vector3) {
+    const l = this.root.worldToLocal(this.tmp.copy(p));
+    const hab = Math.abs(l.x) < 5.3 && l.z > -1.6 && l.z < 1.5;
+    const tube = l.x > 5.2 && l.x < 6.3 && l.z > -0.35 && l.z < 0.75;
+    const lab = Math.hypot(l.x - LAB_X, l.z - LAB_Z) < LAB_R;
+    return hab || tube || lab;
   }
 
   // ------------------------------------------------------------------ build
@@ -478,8 +557,45 @@ export class StationInterior {
     ]) this.box(x - 0.14, y - 0.006, -1.43, x + 0.14, y + 0.006, -1.42, M.dead, R, false).rotation.z = r;
     // a keyboard, a mug, papers
     this.box(3.45, 1.55, -1.3, 3.95, 1.57, -1.12, m.metal);
-    this.add(R, new CylinderGeometry(0.05, 0.05, 0.1, 6), m.accent, 2.75, 1.6, -1.2);
+    this.add(R, new CylinderGeometry(0.05, 0.05, 0.1, 6), m.accent, 2.6, 1.6, -1.35);
     for (let k = 0; k < 4; k++) this.box(4.0 + k * 0.12, 1.55, -1.35 + (k % 2) * 0.1, 4.25 + k * 0.12, 1.556 + k * 0.002, -1.1 + (k % 2) * 0.1, M.paper, R, false).rotation.y = k * 0.3;
+    // the card reader at the desk's edge: three slots, ringed red, green and blue
+    {
+      const rx = 3.1;
+      const rz = -1.12;
+      this.box(rx - 0.32, 1.55, rz - 0.1, rx + 0.32, 1.66, rz + 0.1, m.metal);
+      this.box(rx - 0.3, 1.66, rz - 0.08, rx + 0.3, 1.67, rz + 0.08, M.trim, R, false);
+      for (const [k, c] of [0xd02828, 0x30b040, 0x2860d8].entries()) {
+        const x = rx - 0.18 + k * 0.18;
+        this.box(x - 0.07, 1.665, rz - 0.012, x + 0.07, 1.675, rz + 0.012, M.dead, R, false);
+        const led = toonMaterial({ dark: c, mid: c, light: c, unlit: true, outline: 0 });
+        (led.uniforms.uLight.value as Vector3).multiplyScalar(0.3);
+        this.box(x - 0.05, 1.62, rz + 0.1, x + 0.05, 1.64, rz + 0.105, led, R, false);
+        this.reader.leds.push(led);
+        this.reader.slots.push(this.root.localToWorld(new Vector3(x, 1.67, rz)));
+      }
+      this.reader.proxy.position.set(rx, 1.6, rz + 0.05);
+      this.reader.proxy.visible = false;
+      R.add(this.reader.proxy);
+      this.root.localToWorld(this.reader.stand.set(rx, DECK, -0.5));
+      this.root.localToWorld(this.reader.look.set(rx, 1.6, rz));
+      // the cord from under the desk, sprawled across the deck, through the tube to the tank
+      this.cord([
+        [rx + 0.15, -1.0],
+        [rx + 0.5, -0.72],
+        [rx + 1.2, -0.85],
+        [4.6, -0.45],
+        [4.95, -0.62],
+        [5.15, -0.05],
+        [5.55, 0.32],
+        [6.1, 0.12],
+        [6.7, 0.42],
+        [7.2, 0.05],
+        [7.55, -0.3],
+        [7.95, -0.12],
+        [LAB_X + 0.35 - 0.56, LAB_Z - 0.3],
+      ]);
+    }
     // the wall display over it: a scan of one of the creature's own kind
     this.box(2.85, 2.08, -1.62, 4.65, 2.56, -1.57, m.metal, R, false);
     this.box(2.9, 2.12, -1.57, 4.6, 2.52, -1.565, M.display, R, false);
@@ -497,7 +613,7 @@ export class StationInterior {
     this.glow(0x6ad0e0, 0.6, 3.75, 2.32, -1.3, 0.3);
     // the chair, spun away from the desk and rolled out
     const chair = new Group();
-    chair.position.set(3.3, DECK, -0.35);
+    chair.position.set(2.0, DECK, 0.45);
     chair.rotation.y = 2.4;
     R.add(chair);
     this.add(chair, new BoxGeometry(0.42, 0.07, 0.42), M.trim, 0, 0.5, 0);
@@ -508,7 +624,7 @@ export class StationInterior {
       leg.geometry.translate(0, 0, 0.13);
       leg.rotation.y = (k / 5) * Math.PI * 2;
     }
-    this.round(3.3, -0.35, 0.27);
+    this.round(2.0, 0.45, 0.27);
     // papers blown across the deck
     for (let k = 0; k < 9; k++) {
       const a = k * 2.39;
@@ -582,10 +698,30 @@ export class StationInterior {
     this.add(R, new CylinderGeometry(0.5, 0.5, 0.06, 8), M.cold, tx, DECK + 0.32, tz);
     this.add(R, new CylinderGeometry(0.55, 0.5, 0.22, 8), m.metal, tx, DECK + 2.0, tz);
     for (let k = 0; k < 4; k++) {
-      const a = (k / 4) * Math.PI * 2 + 0.4;
+      const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
       this.box(tx + Math.cos(a) * 0.47 - 0.025, DECK + 0.3, tz + Math.sin(a) * 0.47 - 0.025, tx + Math.cos(a) * 0.47 + 0.025, DECK + 1.9, tz + Math.sin(a) * 0.47 + 0.025, m.metal);
     }
-    this.add(R, new CylinderGeometry(0.46, 0.46, 0.04, 8, 1, true), m.glass, tx, DECK + 1.1, tz, false);
+    // the glass, and its door (the quarter of it facing the way out, toward the tube)
+    const glass = ditherMaterial(0x6a9aa8, 0xc8eef4, 0.22);
+    const H = 1.55;
+    const y0 = DECK + 0.33;
+    this.add(R, new CylinderGeometry(0.46, 0.46, H, 12, 1, true, -Math.PI / 4, (Math.PI * 3) / 2), glass, tx, y0 + H / 2, tz, false);
+    const door = new Group();
+    door.position.set(tx, y0, tz);
+    R.add(door);
+    const panel = this.add(door, new CylinderGeometry(0.465, 0.465, H, 4, 1, true, (-Math.PI * 3) / 4, Math.PI / 2), glass, 0, H / 2, 0, false);
+    // its frame and handle
+    for (const a of [(-Math.PI * 3) / 4, -Math.PI / 4]) this.box(Math.sin(a) * 0.47 - 0.02, 0, Math.cos(a) * 0.47 - 0.02, Math.sin(a) * 0.47 + 0.02, H, Math.cos(a) * 0.47 + 0.02, m.accent, door);
+    this.box(-0.5, H * 0.5 - 0.1, -0.03, -0.47, H * 0.5 + 0.1, 0.03, m.metal, door);
+    void panel;
+    this.keep.push(door);
+    // the fluid it floats in, see-through, lit from below
+    const fluid = ditherMaterial(0x2a8a84, 0x6ae8d8, 0.4);
+    const liquid = this.add(R, new CylinderGeometry(0.44, 0.44, 1, 12).translate(0, 0.5, 0), fluid, tx, y0, tz, false);
+    liquid.scale.y = H - 0.08;
+    this.keep.push(liquid);
+    this.tank.liquid = liquid;
+    this.tank.doorPanel = door;
     const sp = new Group();
     sp.position.set(tx, DECK + 1.1, tz);
     R.add(sp);
@@ -601,7 +737,11 @@ export class StationInterior {
     this.specimen = sp;
     this.keep.push(sp);
     this.root.localToWorld(this.tankAt.set(tx, DECK + 0.4, tz));
-    this.glow(0x5ae8d8, 0.75, tx, DECK + 1.1, tz + 0.1, 0.5);
+    this.tank.glow = this.glow(0x5ae8d8, 0.75, tx, DECK + 1.1, tz + 0.1, 0.5);
+    this.tank.figure = sp;
+    this.root.localToWorld(this.tank.at.set(tx, DECK + 0.33, tz));
+    this.root.localToWorld(this.tank.door.set(tx - 0.48, DECK + 0.33, tz));
+    this.tank.out.set(-1, 0, 0).transformDirection(this.root.matrixWorld);
     this.round(tx, tz, 0.68);
     // the second tank, smashed: its frame bent, its fluid spilled across the deck
     const bx = LAB_X - 0.9;
@@ -735,10 +875,18 @@ export class StationInterior {
     this.flick = n > -0.25 ? 1 : Math.random() < 0.4 ? 0.85 : 0.15;
     this.lamps.forEach((l, i) => {
       const v = shared.uRoomLight.value[i];
-      v.set(l.pos.x, l.pos.y, l.pos.z, l.base * (l.flicker ? this.flick : 1) * (i === 4 ? 0.85 + 0.15 * Math.sin(time * 1.3) : 1));
+      v.set(l.pos.x, l.pos.y, l.pos.z, l.base * (l.flicker ? this.flick : 1) * (i === 4 ? (0.85 + 0.15 * Math.sin(time * 1.3)) * (0.35 + 0.65 * this.tank.level) : 1));
     });
-    for (const g of this.glows) g.strength = 0.3 * inside;
-    for (const s of this.screens) {
+    for (const g of this.glows) g.strength = 0.3 * inside * (g === this.tank.glow ? 0.25 + 0.75 * this.tank.level : 1);
+    this.now = time;
+    for (const [i, s] of this.screens.entries()) {
+      const show = i < 3 ? this.screenShow[i] : null;
+      if (show && time < show.until) {
+        const f = 0.75 + 0.25 * Math.sin(time * 18);
+        (s.mat.uniforms.uLight.value as Vector3).set(show.color[0] * f, show.color[1] * f, show.color[2] * f);
+        s.glow.strength = 0.45 * inside;
+        continue;
+      }
       let k = 1;
       if (s.kind === 'cracked') {
         const c = noise1(time * 9, 5);
@@ -755,17 +903,19 @@ export class StationInterior {
     const e = 0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(time * 1.6), 3);
     (this.emergency.uniforms.uLight.value as Vector3).set(0.85 * e + 0.2, 0.08 * e, 0.06 * e);
     // the specimen turns slowly in the fluid
-    this.specimen.rotation.y = time * 0.12;
-    this.specimen.position.y = DECK + 1.1 + Math.sin(time * 0.7) * 0.05;
+    if (this.tank.floating) {
+      this.specimen.rotation.y = time * 0.12;
+      this.specimen.position.y = DECK + 0.33 + 0.77 * Math.max(this.tank.level, 0) + Math.sin(time * 0.7) * 0.05 * this.tank.level;
+    }
 
     if (inside < 0.5) return;
     // bubbles rise through the tank
     this.bubbleTimer -= dt;
-    if (this.bubbleTimer <= 0) {
+    if (this.bubbleTimer <= 0 && this.tank.level > 0.05) {
       this.bubbleTimer = 0.08 + Math.random() * 0.2;
       const a = Math.random() * Math.PI * 2;
       const r = Math.random() * 0.32;
-      this.dust.spawn(this.tankAt.x + Math.cos(a) * r, this.tankAt.y, this.tankAt.z + Math.sin(a) * r, 0, 0.5 + Math.random() * 0.4, 0, 2.6, BUBBLE, 1, { g: -0.1, drag: 0.2, windK: 0, c2: BUBBLE_FADE });
+      this.dust.spawn(this.tankAt.x + Math.cos(a) * r, this.tankAt.y, this.tankAt.z + Math.sin(a) * r, 0, 0.5 + Math.random() * 0.4, 0, 2.6 * this.tank.level, BUBBLE, 1, { g: -0.1, drag: 0.2, windK: 0, c2: BUBBLE_FADE });
       if (Math.random() < 0.12) this.audio.roomBubble(0.05 + Math.random() * 0.04);
     }
     // dust drifting in the sunlight under the broken dome
