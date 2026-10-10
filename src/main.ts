@@ -1215,7 +1215,8 @@ function finishFrame(dt: number, target: Vector3) {
       audio.heartbeat(0.12 * creature.panic);
     }
   } else if (!drone.active || inside) huntT = 0;
-  creature.panic = Math.max(0, Math.min(1, creature.panic + (hunted ? dt * 1.6 : -dt * 0.5)));
+  // safe inside, it calms at once; out of sight of it outside, more slowly
+  creature.panic = Math.max(0, Math.min(1, creature.panic + (hunted ? dt * 1.6 : inside ? -dt * 5 : -dt * 0.5)));
   // reaching the mountain's peak is a checkpoint
   if (!checkpoint && station && !inside && !wake.active && Math.hypot(creature.pos.x - HIGH.x, creature.pos.z - HIGH.z) < 16) saveCheckpoint('peak');
   npcStrike.update(dt);
