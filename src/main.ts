@@ -41,6 +41,8 @@ import { Builder } from './core/builder';
 import { Tracker } from './world/tracker';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
+import { Drone } from './story/Drone';
+import { Strike } from './story/Strike';
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const pr = new PixelRenderer(canvas);
@@ -69,6 +71,25 @@ scene.add(creature.rig.root);
 
 const wind = new Wind();
 const audio = new AudioEngine();
+// the kill drone that comes for the creature once it has been inside the station, and its strike
+const drone = new Drone(audio);
+drone.addTo(scene);
+const strike = new Strike(dust, audio, world);
+strike.addTo(scene);
+/** Where the creature comes back to when it dies: the last checkpoint it passed. */
+interface Checkpoint {
+  name: string;
+  inside: boolean;
+  x: number;
+  z: number;
+  yaw: number;
+}
+let checkpoint: Checkpoint | null = null;
+/** Seconds until the drone comes (after the creature leaves the station), or -1. */
+let droneWait = -1;
+/** The view coming back after a respawn (1 dark .. 0). */
+let respawnFade = 0;
+const chest = new Vector3();
 // the first pod's crater, to the right of the start
 let site: CrashSite | null = null;
 // a second pod lands near the first, and its survivor lies at the end of a trail
@@ -116,6 +137,7 @@ const groundHeight = (x: number, z: number) => (inside && station ? station.inte
 /** Go in (or out): swap the ground and the walls under the creature, and the view. */
 function setInside(on: boolean) {
   if (!station) return;
+  const wasInside = inside;
   inside = on;
   station.setCutaway(on);
   if (on) {
@@ -136,6 +158,36 @@ function setInside(on: boolean) {
     creature.setYaw(Math.atan2(-d.x, -d.z));
   }
   camDyn.reset(new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
+  // the first time in is a checkpoint; coming back out, something is waiting
+  if (on && !checkpoint) saveCheckpoint('station');
+  if (!on && wasInside && !drone.active && !strike.active) droneWait = 4;
+}
+
+function saveCheckpoint(name: string) {
+  checkpoint = { name, inside, x: creature.pos.x, z: creature.pos.z, yaw: creature.yaw };
+}
+
+/** Dead: back to the last checkpoint, as if none of it had happened. */
+function respawn() {
+  strike.clear();
+  drone.reset();
+  audio.deafen(0);
+  droneWait = -1;
+  going = null;
+  hatchMove = null;
+  creature.releaseScript();
+  const cp = checkpoint;
+  if (cp?.inside && station) {
+    inside = false;
+    setInside(true);
+    insideW = 1;
+  } else if (cp) {
+    if (inside) setInside(false);
+    creature.teleport(cp.x, cp.z, world);
+    creature.setYaw(cp.yaw);
+    camDyn.reset(new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
+  }
+  respawnFade = 1;
 }
 
 function beginHatch(out: boolean) {
@@ -413,7 +465,7 @@ const clickGround = new Vector3();
 const clickAt = new Vector2();
 window.addEventListener('pointerdown', (e) => {
   wake.begin();
-  if (e.button !== 0 || wake.active || doorScene?.active || pickup?.active || peek?.active || hatchMove) return;
+  if (e.button !== 0 || wake.active || doorScene?.active || pickup?.active || peek?.active || hatchMove || strike.active) return;
   clickAt.set(e.clientX, e.clientY);
   // the tracker in hand: what the press means is settled on release (or by holding on)
   if (tracker?.carried) {
@@ -477,7 +529,7 @@ function usableAt(mouse: Vector2, ground: Vector3): Usable | null {
     if (s && peek && near(s.center.x, s.center.z, WALK_RANGE) && s.podAt(mouse, pr.camera)) return { kind: 'pod', site: s };
   }
   // the station's airlock: in, or (from inside) out
-  if (station && station.interior.floorY && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
+  if (station && station.interior.floorY && !drone.active && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
     return { kind: 'hatch' };
   }
   return null;
@@ -665,6 +717,16 @@ function update(dt: number, now: number) {
     finishFrame(dt, wake.focus(focusTarget));
     return;
   }
+  respawnFade = Math.max(0, respawnFade - dt / 1.4);
+  if (strike.active) {
+    // the strike: the world slows almost to a stop, then crawls on round the body
+    strike.update(dt);
+    const g = dt * strike.timeScale;
+    rocks.update(creature.pos.x, creature.pos.z);
+    finishFrame(g, strike.focus(focusTarget));
+    if (strike.done) respawn();
+    return;
+  }
   if (doorScene?.active) {
     padMode = false;
     doorScene.update(dt);
@@ -725,7 +787,10 @@ function update(dt: number, now: number) {
   // stepping away (or the door cracking open behind its work) ends using the keypad
   if (padMode && (input.move.lengthSq() > 0 || !ship || ship.state === 'cracked' || !nearPad())) padMode = false;
   const holding = (stranger?.busy ?? false) || padMode;
-  if (padMode) {
+  if (drone.active && drone.position.distanceTo(creature.pos) < 26) {
+    // it cannot look away from it
+    look = lookPoint.copy(drone.position);
+  } else if (padMode) {
     look = lookPoint.copy(ship!.padCenter);
   } else if (tracker && creature.holdOut > 0) {
     look = lookPoint.copy(tracker.position);
@@ -838,6 +903,26 @@ function update(dt: number, now: number) {
 
   rocks.update(creature.pos.x, creature.pos.z);
 
+  // the drone: it comes a few seconds after the creature leaves the station, over the ridge behind it
+  if (droneWait > 0) {
+    droneWait -= dt;
+    // it waits for the creature to come out again
+    if (droneWait <= 0 && inside) droneWait = 0.5;
+    else if (droneWait <= 0 && station) {
+      const from = new Vector3(station.center.x - HIGH.ox * 34, station.center.y + 16, station.center.z - HIGH.oz * 34);
+      drone.launch(from);
+    }
+  }
+  if (drone.active) {
+    creature.rig.chest.getWorldPosition(chest);
+    drone.update(dt, chest, creature.vel, creature.pos, station ? station.center : null);
+    if (drone.hit) {
+      drone.hit = false;
+      going = null;
+      strike.begin(drone.hitAt, drone.hitDir, creature);
+    }
+  }
+
   // camera: lead the motion a little and lean toward the cursor
   focusTarget.set(creature.pos.x, creature.pos.y + 0.6, creature.pos.z);
   focusTarget.addScaledVector(creature.vel, 0.32);
@@ -856,6 +941,10 @@ function update(dt: number, now: number) {
   if (tracker && eH > 0) {
     // held out to look at: lean the view in toward it
     focusTarget.lerp(encounterFocus.copy(tracker.position), 0.35 * eH);
+  }
+  if (drone.active && drone.position.distanceTo(creature.pos) < 14) {
+    // keep it in view
+    focusTarget.lerp(drone.position, 0.3);
   }
   if (stranger && stranger.weight > 0) {
     // the encounter draws the camera in between the two of them
@@ -934,11 +1023,12 @@ function finishFrame(dt: number, target: Vector3) {
   const eK = sm(Math.max(pickup?.weight ?? 0, peek?.weight ?? 0));
   const eH = tracker?.carried ? sm(saturate(creature.holdDyn.y)) : 0;
   const eI = sm(insideW);
-  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 3.1 * eP) * (1 + 0.4 * eD) * (1 + 0.45 * eK) * (1 + 0.6 * eH) * (1 + 0.8 * eI) * debugZoom;
+  const eX = sm(strike.fade);
+  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 3.1 * eP) * (1 + 0.4 * eD) * (1 + 0.45 * eK) * (1 + 0.6 * eH) * (1 + 0.8 * eI) * (1 + 0.8 * eX) * debugZoom;
   audio.duck(1 - 0.45 * eS - 0.3 * eP - 0.2 * eD - 0.15 * eK - 0.3 * eH);
   const focus = camDyn.update(dt, debugFocus ?? target);
   // a blast at the ship shakes the ground
-  const shake = ship ? ship.shake : 0;
+  const shake = Math.max(ship ? ship.shake : 0, strike.shake * 1.8);
   if (shake > 0.01) {
     shaken.copy(focus);
     shaken.x += (Math.random() - 0.5) * 0.3 * shake;
@@ -978,6 +1068,14 @@ function draw(now: number) {
       pr.dark = pr.blur = pr.ghost = pr.desat = pr.vignette = 0;
     }
   }
+  if (strike.active) {
+    // the colour drains away, the edges darken and blur, then it all goes dark
+    pr.desat = Math.max(pr.desat, strike.fade * 0.92);
+    pr.vignette = Math.max(pr.vignette, strike.fade);
+    pr.blur = Math.max(pr.blur, strike.fade * 0.35);
+    pr.dark = Math.max(pr.dark, strike.dark);
+  }
+  pr.dark = Math.max(pr.dark, respawnFade);
   if (hatchMove) {
     const t = hatchMove.t;
     const k = t < HATCH_DARK ? t / HATCH_DARK : 1 - (t - HATCH_DARK) / HATCH_LIGHT;
@@ -1038,6 +1136,15 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     get inside() {
       return inside;
+    },
+    drone,
+    strike,
+    get checkpoint() {
+      return checkpoint;
+    },
+    /** Send the drone now. */
+    launchDrone() {
+      droneWait = 0.001;
     },
     /** Step into (or out of) the station at once. */
     goInside(on = true) {

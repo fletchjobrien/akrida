@@ -473,6 +473,42 @@ doorway (or click it) to leave.
     cracked screen crackles when it stutters.
   - The airlock door grinds on its broken track and clanks as you pass.
 
+### The drone
+
+A few seconds after your creature first comes back out of the station,
+something comes for it.
+
+- **What it is:** a loitering munition. It is a small, matte, angular
+  quadcopter with a warhead slung under its belly and a stencilled yellow
+  band round the warhead. It has one red sensor eye in a turret under its
+  nose, a whip antenna and a tail strobe.
+- **How it comes:** you hear the whine of its props before you see it. A low,
+  dissonant chord swells. It comes in high over the ridge behind the station
+  and drops to hang round your creature.
+- **How it hunts:** it circles, twitching and hunting in the air, now one way
+  and now the other, and it keeps pace however you run. Now and then it darts
+  in to hover a hand's breadth from your creature's face: the eye flares,
+  the turret whirs and its sensor chirps. Your creature cannot take its eyes
+  off it. While it hunts, the airlock will not let you back in.
+- **The end:** it pulls back and up and stops dead. A red line reaches from
+  its eye to your creature's chest, and a tone climbs faster and faster. Then
+  it dives, its props screaming.
+- **The strike:**
+  - A white flash; the fireball blooms, boils and blackens into smoke.
+  - Shrapnel, sparks and the drone's pieces spray out, some of them burning.
+    A ring of sand blasts outward, and the ground is scorched.
+  - Time all but stops, then crawls back. Your creature is thrown backward,
+    cartwheeling, a forearm torn away and its front burnt black. It slams
+    into anything in its way, lands hard, bounces, slides and comes to rest
+    broken.
+  - Blood pumps from the stump with its last few heartbeats and spreads in
+    the sand. The body smokes.
+  - Its ears ring and the world goes dull and far away. The colour drains,
+    the view closes in on the body, and everything goes dark.
+- **Checkpoint:** the first time your creature goes into the station is a
+  checkpoint. After the strike it wakes there, whole, as if none of it had
+  happened. Leave again, and the drone comes again.
+
 **Code:**
 - The ground and the path are in `src/world/highlands.ts`. The ground's
   height is worked out once, on the CPU, at every point of a triangular
@@ -491,6 +527,9 @@ doorway (or click it) to leave.
   camera but still cast their shadow. The lamps are a term in the shared toon
   lighting (`roomLight` in `src/render/shared.ts`) that lights only what is
   inside the station's walls.
+- The drone is in `src/story/Drone.ts`; the strike (explosion, the body,
+  the death) in `src/story/Strike.ts`. The checkpoints and the respawn are in
+  `src/main.ts` (`saveCheckpoint`, `respawn`).
 - The station is in `src/world/station.ts`; the three dead in
   `src/story/Fallen.ts` (scripted poses on the creature's own rig).
 

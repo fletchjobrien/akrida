@@ -449,6 +449,9 @@ export class AudioEngine {
   /** How far indoors the creature is (0..1), and the room's own sound once built. */
   private indoor = 0;
   private room: { bus: GainNode; buzz: GainNode; echo: GainNode } | null = null;
+  /** The drone's rotors: their level, pan, pitch, and the scream of the dive. */
+  private drone: { bus: GainNode; pan: StereoPannerNode; oscs: OscillatorNode[]; base: number[]; wash: BiquadFilterNode; tone: BiquadFilterNode } | null = null;
+  private ring: GainNode | null = null;
 
   private windGain!: GainNode;
   private whoosh!: BiquadFilterNode;
@@ -1961,6 +1964,317 @@ export class AudioEngine {
       o.connect(g).connect(p);
       o.start(now);
       o.stop(now + d + 0.02);
+    }
+  }
+
+  private droneBus() {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return null;
+    if (this.drone) return this.drone;
+    const bus = ctx.createGain();
+    bus.gain.value = 0;
+    const pan = ctx.createStereoPanner();
+    bus.connect(pan).connect(this.master);
+    const send = ctx.createGain();
+    send.gain.value = 0.35;
+    pan.connect(send).connect(this.reverbSend);
+    // four props, each a harsh buzz at its blade rate, a little apart so they beat and snarl
+    // a slow, sick throb through it all
+    const throb = ctx.createGain();
+    throb.gain.value = 0.8;
+    throb.connect(bus);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 7.3;
+    const lg = ctx.createGain();
+    lg.gain.value = 0.2;
+    lfo.connect(lg).connect(throb.gain);
+    lfo.start();
+    const tone = ctx.createBiquadFilter();
+    tone.type = 'bandpass';
+    tone.frequency.value = 900;
+    tone.Q.value = 0.7;
+    tone.connect(throb);
+    const base = [196, 203.5, 211, 219.2];
+    const oscs: OscillatorNode[] = [];
+    for (const f of base) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = 0.12;
+      o.connect(og).connect(tone);
+      o.start();
+      oscs.push(o);
+      // and its octave, thin and nasty
+      const o2 = ctx.createOscillator();
+      o2.type = 'square';
+      o2.frequency.value = f * 2.01;
+      const g2 = ctx.createGain();
+      g2.gain.value = 0.03;
+      o2.connect(g2).connect(tone);
+      o2.start();
+      oscs.push(o2);
+    }
+    // the rush of air off the props
+    const src = this.loop(ctx, this.white);
+    const wash = ctx.createBiquadFilter();
+    wash.type = 'bandpass';
+    wash.frequency.value = 1400;
+    wash.Q.value = 0.9;
+    const wg = ctx.createGain();
+    wg.gain.value = 0.35;
+    src.connect(wash).connect(wg).connect(throb);
+    this.drone = { bus, pan, oscs, base: base.flatMap((f) => [f, f * 2.01]), wash, tone };
+    return this.drone;
+  }
+
+  /** The drone, heard from here: 0..1 level, pan, how hard its props work, and the dive's scream (0..1). */
+  setDrone(level: number, pan: number, throttle: number, scream: number) {
+    const ctx = this.ctx;
+    if (!ctx || (level <= 0 && !this.drone)) return;
+    const d = this.droneBus();
+    if (!d) return;
+    const now = ctx.currentTime;
+    d.bus.gain.setTargetAtTime(level * 0.45 * this.envLevel, now, 0.05);
+    d.pan.pan.setTargetAtTime(pan, now, 0.05);
+    const k = (1 + throttle * 0.28) * (1 + scream * 0.75);
+    d.oscs.forEach((o, i) => o.frequency.setTargetAtTime(d.base[i] * k, now, scream > 0 ? 0.25 : 0.12));
+    d.tone.frequency.setTargetAtTime(900 * k * (0.6 + 0.4 * level), now, 0.1);
+    d.wash.frequency.setTargetAtTime(1400 * k, now, 0.1);
+  }
+
+  /** The drone's sensor studying something: a servo's whir and a few quick, cold chirps. */
+  droneChirp(level: number) {
+    const ctx = this.ctx;
+    const d = this.droneBus();
+    if (!ctx || !d || level < 0.01) return;
+    const now = ctx.currentTime;
+    for (let k = 0; k < 3; k++) {
+      const t = now + 0.1 + k * 0.09;
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(2400 + k * 300, t);
+      o.frequency.exponentialRampToValueAtTime(3600 + k * 200, t + 0.05);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(level * 0.1, t + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+      o.connect(g).connect(d.pan);
+      o.start(t);
+      o.stop(t + 0.08);
+    }
+    // the turret turning
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.setValueAtTime(140, now);
+    o.frequency.linearRampToValueAtTime(260, now + 0.35);
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = 1800;
+    f.Q.value = 4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level * 0.06, now + 0.03);
+    g.gain.setTargetAtTime(0.0001, now + 0.3, 0.04);
+    o.connect(f).connect(g).connect(d.pan);
+    o.start(now);
+    o.stop(now + 0.5);
+  }
+
+  /** Lock: a hard electronic tone that rises and holds. */
+  droneLock(level: number) {
+    const ctx = this.ctx;
+    const d = this.droneBus();
+    if (!ctx || !d) return;
+    const now = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.setValueAtTime(880, now);
+    o.frequency.exponentialRampToValueAtTime(1760, now + 0.4);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 3000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.07 + level * 0.05, now + 0.02);
+    g.gain.setTargetAtTime(0.0001, now + 0.55, 0.05);
+    o.connect(f).connect(g).connect(this.master);
+    o.start(now);
+    o.stop(now + 0.9);
+  }
+
+  /** The targeting beep, faster and higher as the lock closes. */
+  droneBeep(level: number, pitch: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = 2200 * pitch;
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.value = 4000;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level * 0.5, now + 0.004);
+    g.gain.setValueAtTime(level * 0.5, now + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.07);
+    o.connect(f).connect(g).connect(this.master);
+    o.start(now);
+    o.stop(now + 0.1);
+  }
+
+  /** The dive: the props go to full and scream. */
+  droneDive(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(900, now);
+    bp.frequency.exponentialRampToValueAtTime(3200, now + 0.7);
+    bp.Q.value = 2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.1 + level * 0.15, now + 0.5);
+    g.gain.setTargetAtTime(0.0001, now + 0.9, 0.1);
+    src.connect(bp).connect(g).connect(this.master);
+    src.start(now, Math.random(), 1.5);
+  }
+
+  /** Dread: something is coming. A low, dissonant cluster swells and hangs. */
+  dread() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.exponentialRampToValueAtTime(0.12, now + 4);
+    out.gain.setTargetAtTime(0.0001, now + 7, 1.6);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(220, now);
+    lp.frequency.linearRampToValueAtTime(700, now + 5);
+    lp.connect(out).connect(this.master);
+    out.connect(this.reverbSend);
+    for (const [f, type, g] of [
+      [55, 'sawtooth', 0.35],
+      [58.3, 'sawtooth', 0.3],
+      [77.8, 'triangle', 0.3],
+      [82.4, 'sine', 0.25],
+      [116.5, 'sine', 0.12],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(lp);
+      o.start(now);
+      o.stop(now + 14);
+    }
+  }
+
+  /**
+   * The warhead: a cracking report, a punch felt in the chest, a deep boom
+   * that rolls away off the rock, and shrapnel and pieces raining down.
+   */
+  blast(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    // the crack
+    const crack = ctx.createBufferSource();
+    crack.buffer = this.white;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 900;
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(level * 1.8, now);
+    cg.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+    crack.connect(hp).connect(cg).connect(this.out);
+    crack.start(now, 0, 0.2);
+    // the punch: a sub thump that drops
+    const sub = ctx.createOscillator();
+    sub.frequency.setValueAtTime(95, now);
+    sub.frequency.exponentialRampToValueAtTime(28, now + 0.5);
+    const sg = ctx.createGain();
+    sg.gain.setValueAtTime(level * 1.4, now);
+    sg.gain.exponentialRampToValueAtTime(0.0001, now + 0.8);
+    sub.connect(sg).connect(this.out);
+    sub.start(now);
+    sub.stop(now + 0.9);
+    // the boom and its long rumble
+    const boom = ctx.createBufferSource();
+    boom.buffer = this.white;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1600, now);
+    lp.frequency.exponentialRampToValueAtTime(110, now + 2.5);
+    const bg = ctx.createGain();
+    bg.gain.setValueAtTime(level * 1.5, now);
+    bg.gain.setTargetAtTime(level * 0.5, now + 0.1, 0.25);
+    bg.gain.setTargetAtTime(0.0001, now + 1.2, 1.1);
+    boom.connect(lp).connect(bg).connect(this.master);
+    const verb = ctx.createGain();
+    verb.gain.value = 2.2;
+    bg.connect(verb).connect(this.reverbSend);
+    boom.start(now, 0, 2.2);
+    // shrapnel and pieces coming down
+    for (let k = 0; k < 14; k++) {
+      const c = ctx.createBufferSource();
+      c.buffer = this.any(k % 3 === 0 ? this.clanks : this.ticks);
+      c.playbackRate.value = 0.8 + Math.random() * 0.9;
+      const g = ctx.createGain();
+      g.gain.value = level * 0.25 * (1 - k / 16);
+      c.connect(g).connect(this.master);
+      c.start(now + 0.3 + k * (0.06 + Math.random() * 0.12));
+    }
+  }
+
+  /**
+   * Deafened (1) by the blast: everything goes far away and dull, and a thin
+   * high ringing fills the ears, slowly fading. 0 brings the world back.
+   */
+  deafen(amount: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const f = this.muffle.frequency;
+    f.cancelScheduledValues(now);
+    if (amount > 0) {
+      f.setValueAtTime(f.value, now);
+      f.setValueAtTime(20000, now + 0.08);
+      f.exponentialRampToValueAtTime(260, now + 0.35);
+      if (!this.ring) {
+        this.ring = ctx.createGain();
+        this.ring.connect(this.out);
+        for (const [fr, g] of [
+          [4180, 0.05],
+          [4196, 0.04],
+          [6250, 0.012],
+        ]) {
+          const o = ctx.createOscillator();
+          o.frequency.value = fr;
+          const og = ctx.createGain();
+          og.gain.value = g;
+          o.connect(og).connect(this.ring);
+          o.start();
+        }
+      }
+      this.ring.gain.cancelScheduledValues(now);
+      this.ring.gain.setValueAtTime(0.0001, now);
+      this.ring.gain.exponentialRampToValueAtTime(amount * 1.2, now + 0.3);
+      this.ring.gain.setTargetAtTime(amount * 0.25, now + 0.8, 2.5);
+    } else {
+      f.setValueAtTime(Math.max(200, f.value), now);
+      f.exponentialRampToValueAtTime(20000, now + 1.5);
+      if (this.ring) {
+        this.ring.gain.cancelScheduledValues(now);
+        this.ring.gain.setTargetAtTime(0, now, 0.3);
+      }
     }
   }
 
