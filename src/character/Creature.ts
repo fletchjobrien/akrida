@@ -168,6 +168,13 @@ export class Creature {
   breath = 0;
   breathRate = 0.3;
 
+  /** 0..1 target: hold something out in both hands in front of the chest and look down at it. */
+  holdOut = 0;
+  /** Carrying something in the right hand: that arm swings less and its elbow bends. */
+  carrying = false;
+  /** How far the hold-out has come (eased toward holdOut). */
+  readonly holdDyn = new Dyn(1.6, 0.95, 0);
+
   /** Set to drive the breathing from a script: the -1..1 breath and its size. */
   scriptBreath: { value: number; amp: number } | null = null;
 
@@ -663,6 +670,11 @@ export class Creature {
     lookPitch += noise1(t * 0.27, 11) * 0.03 * (1 - moving);
     lookYaw *= 1 - tired * 0.35;
     lookPitch += strain * 0.15 + tiredWalk * 0.32 + tiredIdle * 0.35 - sigh * 0.45;
+    // holding something out: eyes down on it, whatever else is going on
+    const hold = saturate(this.holdDyn.update(dt, this.holdOut));
+    lookPitch = lerp(lookPitch, 0.78, hold);
+    lookYaw = lerp(lookYaw, 0, hold);
+    lookRoll = lerp(lookRoll, 0, hold);
     const ly = this.lookYawDyn.update(dt, lookYaw);
     const lp = this.lookPitchDyn.update(dt, lookPitch);
     const lr = this.lookRollDyn.update(dt, clamp(lookRoll, -0.4, 0.4));
@@ -689,7 +701,8 @@ export class Creature {
       const side = i === 0 ? 1 : -1;
       const legPhase = i === 0 ? 0 : 0.5;
       // straining arms stop pumping and flail lower; tired arms hang limp
-      const swingAmp = lerp(0.3, 0.95, run) * moving * (1 - strain * 0.35 - tiredWalk * 0.65);
+      const holding = this.carrying && i === 1;
+      const swingAmp = lerp(0.3, 0.95, run) * moving * (1 - strain * 0.35 - tiredWalk * 0.65) * (holding ? 0.55 : 1);
       const swing = Math.cos(TAU * (phase - legPhase - S)) * swingAmp;
       let target =
         swing -
@@ -705,7 +718,7 @@ export class Creature {
         -(0.18 * (1 - tired * 0.6) + run * 1.05 * (1 - strain * 0.4) + crouch * 0.5) -
         Math.max(0, -swing) * 0.5 * (0.4 + run) +
         noise1(t * 0.4, 20 + i) * 0.04;
-      elbowTarget = lerp(elbowTarget, -0.22, tiredIdle);
+      elbowTarget = lerp(elbowTarget, -0.22, tiredIdle) - (holding ? 0.4 : 0);
       const el = this.elbowDyn[i].update(dt, elbowTarget);
       const out = this.armOutDyn[i].update(
         dt,
@@ -715,6 +728,13 @@ export class Creature {
       // shoulders slump when tired and rise with each panting breath
       arm.shoulder.position.y = 0.235 + breath * 0.006 * breathAmp - tired * 0.015 + tiredIdle * breath * 0.01;
       arm.elbow.rotation.set(el, 0, -side * 0.05, 'YXZ');
+      if (hold > 0.001) {
+        // both hands brought together in front of the chest, cradling what they hold
+        _v.set(side * 0.11, 0.13, 0.3);
+        solveArm(arm.shoulder.position, _v, side, _arm);
+        arm.shoulder.rotation.set(lerp(a, _arm.a, hold), _arm.y * hold, lerp(side * out, _arm.b, hold), 'YXZ');
+        arm.elbow.rotation.set(lerp(el, _arm.e, hold), 0, -side * 0.05 * (1 - hold), 'YXZ');
+      }
     }
 
     // ---- legs (IK, in world space)

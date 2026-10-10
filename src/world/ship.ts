@@ -1096,6 +1096,13 @@ export class Ship {
     return this.group.localToWorld(out.set(x, DOOR.y0 + y - 0.04, this.cs * (w + 0.02)));
   }
 
+  /** A point on the airlock's floor: `along` the door from its middle, `inward` from the hull's face. */
+  thresholdPoint(along: number, inward: number, out: Vector3) {
+    const xc = (DOOR.x0 + DOOR.x1) / 2;
+    const w = stationAt(xc).w;
+    return this.group.localToWorld(out.set(xc + along, DOOR.y0 + 0.01, this.cs * (w - inward)));
+  }
+
   /** Add everything to the scene. */
   addTo(scene: Object3D) {
     scene.add(this.group);

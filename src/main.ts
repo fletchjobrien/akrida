@@ -30,6 +30,8 @@ import {
 } from './world/crater';
 import { Ship } from './world/ship';
 import { DoorScene } from './story/DoorScene';
+import { PickupScene } from './story/PickupScene';
+import { Tracker } from './world/tracker';
 import { StainMap } from './world/stains';
 import { Stranger } from './story/Stranger';
 
@@ -73,6 +75,22 @@ let padWeight = 0;
 let doorHover = false;
 let padHover = false;
 let stranger: Stranger | null = null;
+// the tracker left in the ship's doorway, and taking it up
+let tracker: Tracker | null = null;
+let pickup: PickupScene | null = null;
+/** Walking up to the tracker to take it. */
+let approach = false;
+let approachTime = 0;
+/** The nearest it has come, and for how long it has come no nearer (blocked by the hull or a rock). */
+let approachBest = Infinity;
+let approachStuck = 0;
+const approachTo = new Vector3();
+/** The left button while the tracker is in hand: a click on it drops it, holding raises it to look at. */
+const press = { down: false, t: 0, onDevice: false, out: false };
+let deviceHover = false;
+/** How near the cursor (CSS pixels) must be to the tracker to use it, and how far the creature walks to it. */
+const DEVICE_PX = 30;
+const DEVICE_WALK = 7;
 
 interface SecondPodLayout {
   pod: Vector2;
@@ -240,6 +258,9 @@ function layoutWorld() {
       ship = new Ship(rocks, dust, audio);
       ship.addTo(scene);
       doorScene = new DoorScene(creature, world, ship, audio, dust);
+      tracker = new Tracker(ship, dust, audio, rocks.nearby);
+      tracker.addTo(scene);
+      pickup = new PickupScene(creature, world, tracker, audio);
       rocks.refresh();
     }
   }
@@ -260,8 +281,16 @@ const clickGround = new Vector3();
 const clickAt = new Vector2();
 window.addEventListener('pointerdown', (e) => {
   wake.begin();
-  if (e.button !== 0 || wake.active || doorScene?.active) return;
+  if (e.button !== 0 || wake.active || doorScene?.active || pickup?.active) return;
   clickAt.set(e.clientX, e.clientY);
+  // the tracker in hand: what the press means is settled on release (or by holding on)
+  if (tracker?.carried) {
+    press.down = true;
+    press.t = 0;
+    press.out = false;
+    press.onDevice = tracker.screenDistance(clickAt, pr.camera) < DEVICE_PX;
+    if (press.onDevice) return;
+  }
   // the keypad: press the button under the click; a click off the pad steps back from it
   if (ship && padMode) {
     const b = ship.buttonAt(clickAt, pr.camera);
@@ -277,11 +306,45 @@ window.addEventListener('pointerdown', (e) => {
     doorScene.begin();
     return;
   }
+  // the tracker where it lies: walk up to it and take it
+  if (tracker && pickup && canTakeTracker(clickAt)) {
+    approach = true;
+    approachTime = 0;
+    approachBest = Infinity;
+    approachStuck = 0;
+    pickup.approachPoint(creature.pos, approachTo);
+    return;
+  }
   // kneel by the stranger: judged where the click lands, not where the cursor was last frame
   if (!stranger || stranger.busy) return;
   pr.screenToGround(e.clientX, e.clientY, terrainHeight, clickGround);
   if (stranger.canInteract(creature.pos, clickGround)) stranger.interact();
 });
+
+function endPress() {
+  press.down = false;
+  creature.holdOut = 0;
+}
+window.addEventListener('pointerup', (e) => {
+  if (e.button !== 0 || !press.down) return;
+  // a quick click on it lets it go
+  if (!press.out && press.onDevice && press.t < 0.3 && tracker?.carried) {
+    tracker.drop(creature);
+    creature.carrying = false;
+  }
+  endPress();
+});
+window.addEventListener('blur', endPress);
+
+/** The tracker lies under the cursor, near enough to walk to and take. */
+function canTakeTracker(mouse: Vector2) {
+  if (!tracker || !tracker.takeable || tracker.carried) return false;
+  const p = tracker.position;
+  if (Math.hypot(p.x - creature.pos.x, p.z - creature.pos.z) > DEVICE_WALK) return false;
+  return tracker.screenDistance(mouse, pr.camera) < DEVICE_PX;
+}
+
+const smooth = (w: number) => w * w * (3 - 2 * w);
 
 /** Close enough to the keypad to use it. */
 function nearPad() {
@@ -357,6 +420,25 @@ function update(dt: number, now: number) {
     finishFrame(dt, doorScene.focus(focusTarget));
     return;
   }
+  if (pickup?.active) {
+    pickup.update(dt);
+    rocks.update(creature.pos.x, creature.pos.z);
+    finishFrame(dt, pickup.focus(focusTarget));
+    return;
+  }
+
+  // holding the button with the tracker in hand raises it to look at
+  if (press.down) {
+    press.t += dt;
+    if (!tracker?.carried) endPress();
+    else if (press.t > 0.18 && !press.out) {
+      press.out = true;
+      creature.holdOut = 1;
+      audio.trackerRaise(0.06);
+    }
+  }
+  // walking up to take the tracker: any move of the player's own calls it off
+  if (approach && (input.move.lengthSq() > 0 || !tracker?.takeable)) approach = false;
 
   // where the creature looks
   const mouseIdle = now - input.lastMouseMove;
@@ -369,6 +451,8 @@ function update(dt: number, now: number) {
   const holding = (stranger?.busy ?? false) || padMode;
   if (padMode) {
     look = lookPoint.copy(ship!.padCenter);
+  } else if (tracker && (approach || creature.holdOut > 0)) {
+    look = lookPoint.copy(tracker.position);
   } else if (holding) {
     // kneeling by the stranger: eyes on it, whatever the mouse is doing
     look = stranger!.headPosition(lookPoint);
@@ -417,7 +501,31 @@ function update(dt: number, now: number) {
       if (d > 0.08) control.move.set((dx / d) * Math.min(0.7, d * 2), (-dz / d) * Math.min(0.7, d * 2));
     }
   }
+  if (approach && pickup) {
+    approachTime += dt;
+    const dx = approachTo.x - creature.pos.x;
+    const dz = approachTo.z - creature.pos.z;
+    const d = Math.hypot(dx, dz);
+    control.sprint = false;
+    control.crouch = false;
+    if (d < approachBest - 0.01) {
+      approachBest = d;
+      approachStuck = 0;
+    } else approachStuck += dt;
+    if (d < 0.12 || (approachStuck > 0.35 && d < 0.8)) {
+      approach = false;
+      pickup.begin();
+    } else if (approachTime > 6) approach = false;
+    else control.move.set((dx / d) * Math.min(0.75, d * 2.2), (-dz / d) * Math.min(0.75, d * 2.2));
+  }
+  if (creature.holdOut > 0) {
+    // looking down at it: an unhurried walk
+    control.move.multiplyScalar(0.55);
+    control.sprint = false;
+  }
   strangerHover = !!stranger && input.hasMouse && !holding && stranger.canInteract(creature.pos, mouseGround);
+  deviceHover =
+    !!tracker && input.hasMouse && (tracker.carried ? tracker.screenDistance(input.mouse, pr.camera) < DEVICE_PX : canTakeTracker(input.mouse));
   // what the cursor is over at the ship: a keypad button, the keypad, the cracked door
   padHover = doorHover = false;
   if (ship && input.hasMouse) {
@@ -464,6 +572,11 @@ function update(dt: number, now: number) {
     const e = padWeight * padWeight * (3 - 2 * padWeight);
     focusTarget.lerp(encounterFocus.copy(ship.padCenter).setY(ship.padCenter.y - 0.1), e);
   }
+  const eH = tracker?.carried ? smooth(saturate(creature.holdDyn.y)) : 0;
+  if (tracker && eH > 0) {
+    // held out to look at: lean the view in toward it
+    focusTarget.lerp(encounterFocus.copy(tracker.position), 0.35 * eH);
+  }
   if (stranger && stranger.weight > 0) {
     // the encounter draws the camera in between the two of them
     const w = stranger.weight;
@@ -502,14 +615,18 @@ function finishFrame(dt: number, target: Vector3) {
     }
   }
   if (doorScene && !doorScene.active) doorScene.update(dt); // eases the camera back out
+  if (pickup && !pickup.active) pickup.update(dt);
+  tracker?.update(dt, creature, creature.pos);
   padWeight = Math.min(1, Math.max(0, padWeight + (padMode ? dt * 1.4 : -dt * 1.8)));
   // close in and quieten the world for the moments that need it
   const sm = (w: number) => w * w * (3 - 2 * w);
   const eS = sm(stranger?.weight ?? 0);
   const eP = sm(padWeight);
   const eD = sm(doorScene?.weight ?? 0);
-  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 1.9 * eP) * (1 + 0.4 * eD) * debugZoom;
-  audio.duck(1 - 0.45 * eS - 0.3 * eP - 0.2 * eD);
+  const eK = sm(pickup?.weight ?? 0);
+  const eH = tracker?.carried ? sm(saturate(creature.holdDyn.y)) : 0;
+  if (!wake.active) pr.zoomMul = (1 + 0.32 * eS) * (1 + 1.9 * eP) * (1 + 0.4 * eD) * (1 + 0.45 * eK) * (1 + 0.6 * eH) * debugZoom;
+  audio.duck(1 - 0.45 * eS - 0.3 * eP - 0.2 * eD - 0.15 * eK - 0.3 * eH);
   const focus = camDyn.update(dt, debugFocus ?? target);
   // a blast at the ship shakes the ground
   const shake = ship ? ship.shake : 0;
@@ -543,7 +660,7 @@ function draw(now: number) {
     pr.cursorAlpha = input.hasMouse ? wake.cursorAlpha : 0;
   } else {
     pr.cursorAlpha = idleAlpha;
-    pr.cursorGlow = strangerHover || padHover || doorHover || (padMode && ship!.hoveredButton >= 0) ? 1 : 0;
+    pr.cursorGlow = strangerHover || padHover || doorHover || deviceHover || (padMode && ship!.hoveredButton >= 0) ? 1 : 0;
     if (wokeAt < 0) {
       // skipped the opening: a short fade in from black
       pr.dark = 1 - saturate((now - bootTime) / 1400);
@@ -584,8 +701,17 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     get padMode() {
       return padMode;
     },
+    get tracker() {
+      return tracker;
+    },
+    get pickup() {
+      return pickup;
+    },
+    get press() {
+      return { ...press, approach, deviceHover };
+    },
     get hovers() {
-      return { padHover, doorHover, strangerHover, nearPad: nearPad() };
+      return { padHover, doorHover, strangerHover, deviceHover, nearPad: nearPad() };
     },
     SITE3,
     SITE2,

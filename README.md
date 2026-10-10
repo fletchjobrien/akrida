@@ -11,6 +11,8 @@ low resolution so that it looks like hand-made 2D pixel art.
 | Shift (hold) | Sprint (uses stamina, see below) |
 | Ctrl or C (tap) | Crouch on or off. Sprinting also stands the creature up. |
 | Mouse | Look. When the creature stands still, it looks at the cursor. When it runs, it tilts its head toward the cursor. |
+| Left click (hold), with the tracker in hand | Hold the tracker out in both hands and look at it. You can walk slowly while you do. |
+| Left click on the tracker | In hand: drop it. On the ground: walk to it and pick it up. |
 | Mouse wheel | Zoom in (wheel up) or out (wheel down). The game remembers your zoom. |
 | Double-click | Fullscreen |
 
@@ -238,8 +240,52 @@ buttons stutter, and it spits the odd spark. It calms down while you press it.
    catches itself doubled over, and straightens beside the open doorway. A red
    emergency light flickers inside.
 
+### The tracker
+
+A small device lies on the airlock floor, just inside the door. It looks like a
+walkie-talkie in the pods' colours: an off-white shell, an orange band, a dark
+rubber grip, a ribbed grille, a dial, and an antenna with a glowing tip. A
+small light sits in a dark window on its face. Before the door opens, nothing
+shows. After the door opens, its green light throbs faintly in the dark
+doorway, and it pulses softly.
+
+1. Click it (the cursor glows over it). Your creature walks up beside the
+   doorway, sinks onto one knee and takes it in its right hand. The first time,
+   it rises, turns, and holds it up in both hands. The device wakes with a
+   sweep of sound out of static, and the creature looks at it.
+2. It carries the device in its right hand. Hold the left button to hold it out
+   in both hands and look down at it. The camera leans in, and the world goes a
+   little quieter.
+3. **Hot or cold.** The device knows where something lies, 50 units north-east
+   of the ship (up and to the right on screen):
+   - **Wrong way:** the light throbs very slowly (one throb in about 2.3 to 3.4
+     seconds, a little quicker the nearer you point). Each throb comes with a
+     deep, soft pulse of sound and faint radio static.
+   - **Right way** (within about 26 degrees of it, until you turn 34 degrees
+     off): the light and the antenna burn a solid green. Two bell notes chime,
+     a soft chord hums, and motes of green light drift up off the antenna.
+   - It uses the way your creature faces. On the ground, it uses the way its
+     antenna points. Within 3 units of the place, it stays solid.
+   - Sounds are louder while you hold it out. On the ground, they come from
+     where it lies.
+4. Click it in your creature's hand to drop it. It falls with your motion,
+   knocks on the sand with a clatter and a puff of sand, hops, and settles on
+   its back. It glances off the hull and the rocks. Its light keeps going, and
+   it casts a faint green pool on the ground. Click it again to walk over and
+   pick it up.
+
+Nothing lies at the place yet.
+
 **Code:**
 - The ship, its effects, the keypad and the door are in `src/world/ship.ts`.
+- The tracker (model, light, hot or cold, falling, sound levels) is in
+  `src/world/tracker.ts`. Its target is `TRACK_OFFSET` from the ship's centre.
+- Picking it up is a scripted pose sequence in `src/story/PickupScene.ts`.
+  Holding it out is a blend in the creature's normal update (`holdOut` in
+  `src/character/Creature.ts`): both arms reach by IK to a point in front of
+  the chest, and the head looks down.
+- The glows are additive, camera-facing halos (and a flat pool on the ground),
+  quantised to four dithered steps so they stay pixel art (`src/render/glow.ts`).
 - The trench and bank are part of the terrain height, on the CPU and the GPU
   (`src/world/crater.ts`, uniforms `uSite3` and `uSite3On`).
 - The pull is a scripted pose sequence, in `src/story/DoorScene.ts`.
@@ -346,6 +392,11 @@ There are no audio files. The Web Audio API makes all sound at start-up:
   sound starts, only the heartbeat is made at once. The other sounds are built
   a few milliseconds at a time over the next frames, and the voices below are
   built in a Web Worker (`src/audio/voiceWorker.ts`), off the main thread.
+- **The tracker** has its own sound bus. It plays a slow sine throb (about
+  104 Hz with a triangle an octave up and a faint ring at 1568 Hz), a held open
+  fifth on G (each note doubled a fraction of a hertz apart, so it shimmers)
+  when it points true, band-passed static while it searches, and two bell
+  notes (a sine plus a partial at 2.76 times the pitch) when it finds the way.
 - **The stranger's voice** is made sample by sample (`src/audio/voice.ts`).
   A glottal pulse (Rosenberg's shape) with jitter, shimmer and period
   doubling goes through a cascade of formant resonators (Klatt's design).
@@ -361,11 +412,12 @@ src/
   core/                   maths helpers, input
   render/                 pixel renderer, palette, shared lighting
   world/                  terrain, noise, rocks, wind, particles, footprints,
-                          crater, pods and ship, stain map (blood, drag marks)
+                          crater, pods and ship, stain map (blood, drag marks),
+                          the tracker
   character/              creature rig and procedural animation
   audio/                  synthesised sound, the stranger's voice
   story/                  the opening, the stranger, the tune,
-                          pulling the ship's door open
+                          pulling the ship's door open, picking up the tracker
 ```
 
 ## Sources

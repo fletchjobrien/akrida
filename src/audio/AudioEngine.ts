@@ -425,6 +425,14 @@ export class AudioEngine {
   private exhales: Buf[] = [];
   private notes: Buf[][] = [];
   private padVoices: Buf[] = [];
+  // the tracker: its own bus, a held chord for when it points true, and radio static
+  private tracker: {
+    bus: GainNode;
+    pan: StereoPannerNode;
+    low: BiquadFilterNode;
+    hot: GainNode;
+    fizz: GainNode | null;
+  } | null = null;
   /** 0..1 multiplier on the surroundings (wind, the wreck), lowered for close moments. */
   private envLevel = 1;
 
@@ -1274,6 +1282,213 @@ export class AudioEngine {
   }
 
   /** A low swell when the wreck first comes into view. */
+  // ----------------------------------------------------------------- tracker
+
+  private trackerBus() {
+    const ctx = this.ctx;
+    if (!ctx) return null;
+    if (this.tracker) {
+      // the static needs the noise, which is built a little after the start
+      if (!this.tracker.fizz && this.white) this.tracker.fizz = this.trackerFizz(ctx, this.white, this.tracker.bus);
+      return this.tracker;
+    }
+    const bus = ctx.createGain();
+    bus.gain.value = 0;
+    const pan = ctx.createStereoPanner();
+    const low = ctx.createBiquadFilter();
+    low.type = 'lowpass';
+    low.frequency.value = 6000;
+    bus.connect(pan).connect(low).connect(this.master);
+    const send = ctx.createGain();
+    send.gain.value = 0.55;
+    low.connect(send).connect(this.reverbSend);
+    // pointing true: a soft open fifth on G, two voices a hair apart on each note so it shimmers
+    const hot = ctx.createGain();
+    hot.gain.value = 0;
+    const warm = ctx.createBiquadFilter();
+    warm.type = 'lowpass';
+    warm.frequency.value = 1500;
+    warm.connect(hot).connect(bus);
+    for (const [f, g] of [
+      [196.0, 0.32],
+      [196.45, 0.26],
+      [293.66, 0.22],
+      [294.2, 0.18],
+      [392.0, 0.14],
+      [783.99, 0.035],
+    ]) {
+      const o = ctx.createOscillator();
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(warm);
+      o.start();
+    }
+    // a slow swell on the chord, like breath
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.23;
+    const lg = ctx.createGain();
+    lg.gain.value = 260;
+    lfo.connect(lg).connect(warm.frequency);
+    lfo.start();
+    this.tracker = { bus, pan, low, hot, fizz: this.white ? this.trackerFizz(ctx, this.white, bus) : null };
+    return this.tracker;
+  }
+
+  private trackerFizz(ctx: AudioContext, white: Buf, bus: GainNode) {
+    const src = this.loop(ctx, white);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2400;
+    bp.Q.value = 0.9;
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    src.connect(bp).connect(g).connect(bus);
+    return g;
+  }
+
+  /**
+   * Place the tracker: 0..1 loudness, -1..1 pan, 0..1 clarity, how much it hums
+   * (pointing true) and how much it hisses (searching).
+   */
+  setTracker(level: number, pan: number, clarity: number, hot: number, fizz: number) {
+    const ctx = this.ctx;
+    const t = this.trackerBus();
+    if (!ctx || !t) return;
+    const now = ctx.currentTime;
+    t.bus.gain.setTargetAtTime(level, now, 0.12);
+    t.pan.pan.setTargetAtTime(pan, now, 0.12);
+    t.low.frequency.setTargetAtTime(700 * Math.pow(12, clarity), now, 0.12);
+    t.hot.gain.setTargetAtTime(hot * 0.075, now, 0.25);
+    t.fizz?.gain.setTargetAtTime(fizz * 0.012, now, 0.2);
+  }
+
+  /** A sine with an envelope into the tracker's bus (or `to`). */
+  private trackerVoice(
+    f0: number,
+    f1: number,
+    at: number,
+    attack: number,
+    hold: number,
+    decay: number,
+    level: number,
+    type: OscillatorType = 'sine',
+    to?: AudioNode,
+  ) {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, at);
+    o.frequency.exponentialRampToValueAtTime(f1, at + attack + hold + decay * 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(level, at + attack);
+    g.gain.setTargetAtTime(0.0001, at + attack + hold, decay / 3);
+    o.connect(g).connect(to ?? this.tracker!.bus);
+    o.start(at);
+    o.stop(at + attack + hold + decay * 2 + 0.1);
+  }
+
+  /**
+   * One slow throb while it searches: a deep, soft swell like a heartbeat
+   * heard through a wall, with a faint glassy ring over it.
+   */
+  trackerPulse(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.trackerBus()) return;
+    const now = ctx.currentTime;
+    this.trackerVoice(104, 88, now, 0.28, 0.08, 0.9, level);
+    this.trackerVoice(208, 176, now, 0.3, 0.05, 0.7, level * 0.35, 'triangle');
+    this.trackerVoice(1567.98, 1561, now + 0.12, 0.2, 0.0, 1.4, level * 0.05);
+  }
+
+  /** It finds the way: two bright bell notes, rising. */
+  trackerLock(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.trackerBus()) return;
+    const now = ctx.currentTime;
+    [783.99, 1174.66].forEach((f, k) => {
+      const t = now + k * 0.085;
+      this.trackerVoice(f, f, t, 0.006, 0.02, 1.1, level);
+      this.trackerVoice(f * 2.76, f * 2.76, t, 0.004, 0.0, 0.35, level * 0.18);
+    });
+  }
+
+  /** It loses the way: a soft falling pair. */
+  trackerLose(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.trackerBus()) return;
+    const now = ctx.currentTime;
+    this.trackerVoice(587.33, 580, now, 0.01, 0.03, 0.4, level);
+    this.trackerVoice(392, 386, now + 0.11, 0.01, 0.03, 0.6, level);
+  }
+
+  /** Waking in the hand: a rising sweep out of static, settling on a pure note. */
+  trackerWake(level: number) {
+    const ctx = this.ctx;
+    const t = this.trackerBus();
+    if (!ctx || !t) return;
+    const now = ctx.currentTime;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(300, now);
+    lp.frequency.exponentialRampToValueAtTime(5000, now + 0.7);
+    lp.connect(t.bus);
+    this.trackerVoice(140, 784, now, 0.5, 0.15, 0.5, level * 0.5, 'triangle', lp);
+    this.trackerVoice(147, 790, now + 0.03, 0.5, 0.15, 0.5, level * 0.25, 'sawtooth', lp);
+    this.trackerVoice(1567.98, 1567.98, now + 0.62, 0.01, 0.1, 1.6, level * 0.22);
+    if (this.white) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.white;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(900, now);
+      bp.frequency.exponentialRampToValueAtTime(4200, now + 0.6);
+      bp.Q.value = 1.4;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(level * 0.12, now + 0.15);
+      g.gain.setTargetAtTime(0.0001, now + 0.45, 0.08);
+      src.connect(bp).connect(g).connect(t.bus);
+      src.start(now, Math.random() * 1.5, 1);
+    }
+  }
+
+  /** Picked up: the hoof closing on its shell. */
+  trackerGrab(level: number) {
+    this.tickAt(level, 1.5);
+    this.tickAt(level * 0.5, 2.6);
+  }
+
+  /** Lifted up to look at: a soft little rising chirp. */
+  trackerRaise(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.trackerBus()) return;
+    const now = ctx.currentTime;
+    this.trackerVoice(1046.5, 1318.5, now, 0.01, 0.04, 0.25, level);
+  }
+
+  /** Dropped: it knocks on the sand and rattles. */
+  trackerDrop(level: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.thud(level * 0.6);
+    this.tickAt(level, 1.15);
+    const now = ctx.currentTime;
+    for (const [d, r, l] of [
+      [0.07, 1.6, 0.6],
+      [0.16, 1.35, 0.3],
+    ]) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.any(this.ticks);
+      src.playbackRate.value = r;
+      const g = ctx.createGain();
+      g.gain.value = level * l;
+      src.connect(g).connect(this.master);
+      src.start(now + d);
+    }
+  }
+
   stinger() {
     const ctx = this.ctx;
     if (!ctx) return;
