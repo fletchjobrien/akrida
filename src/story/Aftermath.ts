@@ -92,6 +92,9 @@ export class Aftermath {
   readonly fallenAt = new Vector3();
   readonly humanAt = new Vector3();
   readonly dogAt = new Vector3();
+  /** Where the two rifles lie. */
+  readonly rifleAt = new Vector3();
+  readonly humanRifleAt = new Vector3();
   private readonly world: World = { height: terrainHeight, rocks: [] };
   private readonly smokeFrom: Object3D[] = [];
   private readonly cellMat: ShaderMaterial;
@@ -254,40 +257,57 @@ export class Aftermath {
     // its rifle, by its reaching hand
     const hp = rig.arms[1].hand.getWorldPosition(new Vector3());
     const r = new Group();
-    r.position.set(hp.x + 0.15, terrainHeight(hp.x + 0.15, hp.z + 0.1) + 0.06, hp.z + 0.1);
+    r.position.set(hp.x + 0.35, terrainHeight(hp.x + 0.35, hp.z + 0.3) + 0.06, hp.z + 0.3);
     r.rotation.y = this.facility.yaw + 0.6;
     this.group.add(r);
+    this.rifleAt.copy(r.position);
     this.alienRifle(r);
   }
 
   /**
-   * The creature's kind's rifle, of the ship's make: an off-white chamfered
-   * body banded in orange, a long hexagonal barrel ringed with coils, an
-   * emitter at its muzzle, a power cell in its side. It lies on its side.
+   * The creature's kind's rifle, of the ship's make: a long, slim off-white
+   * body swept back into a thumbhole stock, banded in orange; a long scope
+   * along its spine; and in front, instead of a barrel, two parallel rails
+   * with coils glowing faintly between them, joined at the muzzle by an
+   * emitter ring. A power cell sits in its flank. It lies on its side.
    */
   private alienRifle(G: Object3D) {
     const M = this.M;
     const R = new Group();
     R.rotation.z = Math.PI / 2;
     G.add(R);
-    this.box(R, 0.1, 0.13, 0.5, M.hull, 0, 0, 0);
-    this.box(R, 0.104, 0.03, 0.4, M.accent, 0, 0.06, 0.02);
-    const top = this.box(R, 0.07, 0.05, 0.3, M.panel, 0, 0.09, 0.05);
-    top.rotation.x = 0.06;
-    // the barrel, ringed with coils, and the emitter at its end
-    this.add(R, new CylinderGeometry(0.035, 0.035, 0.46, 6).rotateX(Math.PI / 2), M.metal, 0, 0.02, 0.48);
-    for (const zz of [0.32, 0.42, 0.52]) this.add(R, new CylinderGeometry(0.05, 0.05, 0.035, 6).rotateX(Math.PI / 2), M.accent, 0, 0.02, zz);
-    this.add(R, new CylinderGeometry(0.055, 0.045, 0.07, 6).rotateX(Math.PI / 2), M.panel, 0, 0.02, 0.72);
-    this.add(R, new CylinderGeometry(0.025, 0.025, 0.02, 6).rotateX(Math.PI / 2), M.cyanDead, 0, 0.02, 0.76, false);
-    // grip, stock and scope
-    const grip = this.box(R, 0.06, 0.14, 0.07, M.metal, 0, -0.11, -0.08);
-    grip.rotation.x = -0.3;
-    const stock = this.box(R, 0.07, 0.11, 0.3, M.panel, 0, -0.02, -0.38);
-    stock.rotation.x = 0.12;
-    this.box(R, 0.05, 0.06, 0.16, M.metal, 0, 0.13, 0.0);
+    // the body: a chamfered slab, a fin swept forward under it, orange down its spine
+    const body = this.box(R, 0.09, 0.12, 0.46, M.hull, 0, 0, 0);
+    body.rotation.x = -0.02;
+    this.box(R, 0.094, 0.03, 0.36, M.accent, 0, 0.06, 0.03);
+    const fin = this.box(R, 0.05, 0.08, 0.22, M.panel, 0, -0.08, 0.14);
+    fin.rotation.x = -0.35;
+    // the stock: swept back and down, open in the middle for the thumb
+    const st = new Group();
+    st.position.set(0, -0.01, -0.23);
+    st.rotation.x = 0.16;
+    R.add(st);
+    this.box(st, 0.07, 0.035, 0.32, M.hull, 0, 0.045, -0.14);
+    this.box(st, 0.07, 0.035, 0.28, M.panel, 0, -0.06, -0.16);
+    this.box(st, 0.075, 0.14, 0.05, M.hull, 0, -0.005, -0.3);
+    this.box(st, 0.08, 0.15, 0.02, M.metal, 0, -0.005, -0.33);
+    // the grip, raked back, and a long scope along the top
+    const grip = this.box(R, 0.055, 0.15, 0.06, M.metal, 0, -0.12, -0.1);
+    grip.rotation.x = -0.4;
+    this.box(R, 0.05, 0.05, 0.3, M.metal, 0, 0.11, 0.03);
+    this.box(R, 0.06, 0.06, 0.03, M.accent, 0, 0.11, 0.19);
+    this.box(R, 0.04, 0.04, 0.01, M.cyanDead, 0, 0.11, 0.206, false);
+    // the twin rails, coils glowing between them, an emitter ring at the muzzle
+    for (const sy of [-1, 1]) {
+      this.box(R, 0.035, 0.03, 0.5, M.metal, 0, 0.01 + sy * 0.035, 0.46);
+      this.box(R, 0.04, 0.012, 0.44, M.hull, 0, 0.01 + sy * 0.052, 0.44);
+    }
+    for (const zz of [0.3, 0.38, 0.46, 0.54, 0.62]) this.add(R, new BoxGeometry(0.02, 0.04, 0.025), this.cellMat, 0, 0.01, zz, false);
+    this.add(R, new CylinderGeometry(0.065, 0.065, 0.04, 8).rotateX(Math.PI / 2), M.accent, 0, 0.01, 0.72);
+    this.add(R, new CylinderGeometry(0.035, 0.035, 0.042, 8).rotateX(Math.PI / 2), M.cyanDead, 0, 0.01, 0.722, false);
     // the power cell, still faintly alive
-    this.add(R, new BoxGeometry(0.03, 0.06, 0.12), this.cellMat, 0.055, -0.01, 0.06, false);
-    this.cellAt.position.set(0.08, -0.01, 0.06);
+    this.add(R, new BoxGeometry(0.025, 0.05, 0.12), this.cellMat, 0.05, -0.005, -0.02, false);
+    this.cellAt.position.set(0.07, 0.0, 0.3);
     R.add(this.cellAt);
   }
 
@@ -381,102 +401,164 @@ export class Aftermath {
     r.rotation.y = H.rotation.y + 0.7;
     this.group.add(r);
     r.position.y += 0.07;
+    this.humanRifleAt.copy(r.position);
     this.humanRifle(r);
   }
 
-  /** The human's rifle: black, heavy and angular, a long shrouded barrel, a red-lensed sight. On its side. */
+  /**
+   * The human's rifle: an M16's lines made black and new. A straight stock in
+   * line with the barrel, a raked pistol grip and a curved magazine, the carry
+   * handle over the receiver turned into a sight with a red lens, a long
+   * angular handguard slotted for cooling with a thin red light down it, the
+   * triangle of the front sight, and a slim barrel ending in a flash hider.
+   * It lies on its side.
+   */
   private humanRifle(G: Object3D) {
     const M = this.M;
     const R = new Group();
     R.rotation.z = Math.PI / 2;
     G.add(R);
-    this.box(R, 0.09, 0.14, 0.56, M.black, 0, 0, 0);
-    this.box(R, 0.1, 0.05, 0.4, M.blacker, 0, 0.09, 0.05);
-    // a long shrouded barrel and a muzzle brake
-    this.box(R, 0.07, 0.08, 0.42, M.blacker, 0, 0.02, 0.48);
-    this.box(R, 0.035, 0.035, 0.16, M.black, 0, 0.02, 0.76);
-    this.box(R, 0.08, 0.06, 0.08, M.blacker, 0, 0.02, 0.86);
-    // the magazine, the grip, the stock
-    const mag = this.box(R, 0.06, 0.18, 0.1, M.blacker, 0, -0.14, 0.12);
-    mag.rotation.x = 0.2;
-    const grip = this.box(R, 0.06, 0.14, 0.07, M.black, 0, -0.12, -0.12);
-    grip.rotation.x = -0.35;
-    this.box(R, 0.07, 0.13, 0.26, M.black, 0, -0.01, -0.4);
-    this.box(R, 0.08, 0.04, 0.1, M.blacker, 0, -0.08, -0.52);
-    // its sight, the lens a dull red, and the faction's band
-    this.box(R, 0.06, 0.07, 0.18, M.blacker, 0, 0.15, 0.02);
-    this.box(R, 0.04, 0.04, 0.01, M.redLine, 0, 0.15, 0.115, false);
-    this.box(R, 0.092, 0.142, 0.03, M.band, 0, 0, -0.2, false);
+    // the stock, straight back in line with the bore, its butt plate, a cheek rest
+    const stock = this.box(R, 0.06, 0.09, 0.26, M.black, 0, -0.005, -0.34);
+    stock.rotation.x = 0.04;
+    this.box(R, 0.065, 0.13, 0.04, M.blacker, 0, -0.02, -0.48);
+    this.box(R, 0.05, 0.03, 0.16, M.blacker, 0, 0.05, -0.33);
+    // the lower receiver, the raked pistol grip, the trigger guard
+    this.box(R, 0.06, 0.07, 0.24, M.black, 0, -0.01, -0.09);
+    const grip = this.box(R, 0.045, 0.13, 0.055, M.blacker, 0, -0.1, -0.15);
+    grip.rotation.x = 0.4;
+    this.box(R, 0.012, 0.012, 0.09, M.blacker, 0, -0.07, -0.06, false);
+    // the curved magazine, in two pieces bending forward
+    const m1 = this.box(R, 0.035, 0.11, 0.07, M.blacker, 0, -0.1, -0.01);
+    m1.rotation.x = -0.1;
+    const m2 = this.box(R, 0.035, 0.1, 0.066, M.blacker, 0, -0.195, 0.015);
+    m2.rotation.x = -0.32;
+    // the upper receiver, its ejection port, the forward assist, the charging handle
+    this.box(R, 0.064, 0.07, 0.3, M.black, 0, 0.06, -0.07);
+    this.box(R, 0.01, 0.025, 0.07, M.blacker, 0.033, 0.06, -0.03, false);
+    this.add(R, new CylinderGeometry(0.014, 0.014, 0.05, 6).rotateX(Math.PI / 2), M.blacker, -0.035, 0.07, -0.16);
+    this.box(R, 0.05, 0.015, 0.03, M.blacker, 0, 0.1, -0.2);
+    // the carry handle, made a sight: two posts, the bar, a red lens at its back
+    this.box(R, 0.03, 0.05, 0.03, M.blacker, 0, 0.12, -0.17);
+    this.box(R, 0.03, 0.05, 0.03, M.blacker, 0, 0.12, 0.04);
+    this.box(R, 0.045, 0.035, 0.25, M.black, 0, 0.16, -0.065);
+    this.box(R, 0.032, 0.022, 0.01, M.redLine, 0, 0.16, -0.193, false);
+    // the handguard: long, angular, slotted, a thin red light along it
+    this.add(R, new CylinderGeometry(0.045, 0.04, 0.28, 8).rotateX(Math.PI / 2), M.black, 0, 0.045, 0.22);
+    for (const zz of [0.12, 0.17, 0.22, 0.27, 0.32]) this.box(R, 0.092, 0.012, 0.025, M.blacker, 0, 0.05, zz, false);
+    this.box(R, 0.006, 0.006, 0.2, M.redLine, 0.046, 0.06, 0.22, false);
+    // the front sight: a triangle standing up off the barrel
+    const fs = this.box(R, 0.02, 0.1, 0.035, M.blacker, 0, 0.1, 0.38);
+    fs.rotation.x = 0.25;
+    this.add(R, new CylinderGeometry(0.024, 0.024, 0.03, 6).rotateX(Math.PI / 2), M.blacker, 0, 0.045, 0.38);
+    // the barrel and the flash hider
+    this.add(R, new CylinderGeometry(0.012, 0.012, 0.22, 6).rotateX(Math.PI / 2), M.blacker, 0, 0.045, 0.48);
+    this.add(R, new CylinderGeometry(0.02, 0.018, 0.06, 6).rotateX(Math.PI / 2), M.black, 0, 0.045, 0.61);
+    // the faction's band on the stock
+    this.box(R, 0.062, 0.092, 0.025, M.band, 0, -0.005, -0.3, false);
   }
 
   // ---------------------------------------------------------------- the dog
 
   /**
-   * The machine dog, half sunk in a shell crater: a black body, its gun on its
-   * back, a wedge of a head with the red eye, four jointed legs, the front
-   * right snapped at the knee, the lower half lying in the sand beside it.
+   * The machine dog: a four-legged walking robot of the kind that carries a
+   * load, black like the drone. A long, flat body with blunt chamfered ends,
+   * a dark camera panel on its front and on each side, a pair of rails along
+   * its back carrying a gun, an arm folded up off its front with a camera
+   * head on the end of it where the red eye is, and four legs on chunky hip
+   * drives, every knee bending back. It is half sunk in a shell crater,
+   * slumped on its folded hind legs, its right foreleg snapped at the knee,
+   * the lower half lying in the sand beside it.
    */
   private buildDog() {
     const M = this.M;
     const x = 9.3;
     const z = 12.0;
-    const D = this.seat(x, z, -0.9, 0.08);
-    D.rotation.x = 0.16;
-    D.rotation.z = -0.22;
+    const D = this.seat(x, z, -0.9, 0.06);
+    D.rotation.x = -0.12;
+    D.rotation.z = -0.2;
     D.updateMatrixWorld(true);
     this.dogAt.copy(D.position);
-    const S = 1.4;
+    const S = 1.35;
     const B = new Group();
     B.scale.setScalar(S);
-    B.position.y = 0.42;
+    B.position.y = 0.36;
     D.add(B);
-    // the body: a faceted black hull, plated on top, a vent down each side
-    this.box(B, 0.36, 0.3, 0.86, M.black, 0, 0, 0);
-    this.box(B, 0.3, 0.07, 0.7, M.blacker, 0, 0.18, -0.02);
-    for (const sx of [-1, 1]) this.box(B, 0.02, 0.1, 0.4, M.blacker, sx * 0.185, 0.02, -0.05, false);
-    const nose = this.box(B, 0.3, 0.2, 0.2, M.black, 0, 0.04, 0.48);
-    nose.rotation.x = -0.3;
-    this.box(B, 0.366, 0.04, 0.12, M.band, 0, 0.1, -0.3, false);
-    // the gun on its back, its barrel still pointing at the door
+    // the body: a long flat block, its ends chamfered, a seam round its middle
+    this.box(B, 0.34, 0.17, 0.66, M.black, 0, 0, 0);
+    for (const sz of [-1, 1]) {
+      const end = this.box(B, 0.3, 0.13, 0.12, M.black, 0, 0.0, sz * 0.36);
+      end.rotation.x = sz * 0.0;
+      this.box(B, 0.32, 0.1, 0.04, M.blacker, 0, -0.01, sz * 0.425);
+    }
+    this.box(B, 0.345, 0.012, 0.67, M.blacker, 0, 0.0, 0, false);
+    // its cameras: a dark panel on its front, and one on each flank
+    this.box(B, 0.22, 0.07, 0.012, M.visor, 0, 0.0, 0.447, false);
+    for (const sx of [-0.06, 0.06]) this.box(B, 0.035, 0.035, 0.012, M.blacker, sx, 0.0, 0.455, false);
+    for (const sx of [-1, 1]) this.box(B, 0.012, 0.06, 0.14, M.visor, sx * 0.172, 0.0, 0.05, false);
+    this.box(B, 0.346, 0.03, 0.08, M.band, 0, 0.05, -0.22, false);
+    // the rails along its back, and the gun they carry
+    for (const sx of [-1, 1]) {
+      this.box(B, 0.025, 0.03, 0.56, M.blacker, sx * 0.11, 0.1, 0);
+      for (const sz of [-0.24, 0.24]) this.box(B, 0.025, 0.05, 0.025, M.blacker, sx * 0.11, 0.08, sz);
+    }
     const T = new Group();
-    T.position.set(0, 0.24, -0.05);
+    T.position.set(0, 0.14, -0.1);
     T.rotation.y = 0.5;
     B.add(T);
-    this.box(T, 0.16, 0.1, 0.22, M.blacker, 0, 0.04, 0);
-    this.box(T, 0.04, 0.04, 0.4, M.black, 0.03, 0.06, 0.28);
-    this.box(T, 0.06, 0.06, 0.06, M.blacker, 0.03, 0.06, 0.5);
-    // its head: a wedge on a short neck, a sensor bar across it with the one red eye
-    this.dogHead.position.set(0, 0.12, 0.56);
+    this.box(T, 0.15, 0.08, 0.24, M.blacker, 0, 0.03, 0);
+    this.box(T, 0.06, 0.06, 0.1, M.black, 0.05, 0.04, -0.08);
+    this.box(T, 0.03, 0.03, 0.36, M.black, 0, 0.05, 0.28);
+    this.box(T, 0.05, 0.05, 0.06, M.blacker, 0, 0.05, 0.47);
+    // the arm, folded up off its front: a shoulder drive, two links, and the camera
+    // head at its end with the one red eye (it is what twitches)
+    this.dogHead.position.set(0, 0.11, 0.24);
     B.add(this.dogHead);
-    this.box(this.dogHead, 0.06, 0.08, 0.14, M.blacker, 0, 0, 0.02);
-    const skull = this.box(this.dogHead, 0.22, 0.17, 0.3, M.black, 0, 0.04, 0.16);
-    skull.rotation.x = 0.12;
-    this.box(this.dogHead, 0.23, 0.05, 0.08, M.visor, 0, 0.07, 0.27);
-    this.add(this.dogHead, new BoxGeometry(0.05, 0.035, 0.02), this.eyeMat, 0.04, 0.07, 0.315, false);
-    this.dogEye.position.set(0.04, 0.07, 0.34);
-    this.dogHead.add(this.dogEye);
-    this.box(this.dogHead, 0.015, 0.16, 0.015, M.blacker, -0.08, 0.18, 0.08).rotation.x = -0.4;
-    this.headRest = { x: 0.35, y: 0.3, z: -0.2 };
+    this.add(this.dogHead, new CylinderGeometry(0.06, 0.06, 0.07, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
+    const up = new Group();
+    up.rotation.x = -0.9;
+    this.dogHead.add(up);
+    this.box(up, 0.055, 0.32, 0.06, M.black, 0, 0.16, 0);
+    const el = new Group();
+    el.position.set(0, 0.32, 0);
+    el.rotation.x = 2.2;
+    up.add(el);
+    this.add(el, new CylinderGeometry(0.045, 0.045, 0.07, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
+    this.box(el, 0.045, 0.3, 0.05, M.black, 0, 0.15, 0);
+    const hd = new Group();
+    hd.position.set(0, 0.32, 0);
+    hd.rotation.x = -0.9;
+    el.add(hd);
+    this.box(hd, 0.09, 0.08, 0.13, M.black, 0, 0.0, 0.04);
+    this.box(hd, 0.07, 0.05, 0.012, M.visor, 0, 0.0, 0.107, false);
+    this.add(hd, new BoxGeometry(0.03, 0.03, 0.012), this.eyeMat, 0.0, 0.0, 0.115, false);
+    for (const sx of [-1, 1]) this.box(hd, 0.015, 0.03, 0.08, M.blacker, sx * 0.025, -0.05, 0.1);
+    this.dogEye.position.set(0, 0, 0.13);
+    hd.add(this.dogEye);
+    this.headRest = { x: 0.2, y: 0.25, z: -0.1 };
     this.dogHead.rotation.set(this.headRest.x, this.headRest.y, this.headRest.z);
-    // legs: hip, thigh, hock, shin, foot; the front right broken off at the knee
-    const leg = (hx: number, hz: number, front: boolean, broken: boolean, a: number, b: number) => {
+    // legs: a chunky hip drive at each corner, a thick thigh, a slim shin, a round foot;
+    // every knee bends back. `a` swings the thigh back, `b` the shin forward.
+    const leg = (hx: number, hz: number, a: number, b: number, broken: boolean) => {
       const hip = new Group();
-      hip.position.set(hx, -0.08, hz);
+      hip.position.set(hx, -0.07, hz);
       hip.rotation.x = a;
       B.add(hip);
-      this.add(hip, new CylinderGeometry(0.07, 0.07, 0.08, 8).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
-      this.box(hip, 0.08, 0.32, 0.1, M.black, 0, -0.16, 0);
+      this.box(hip, 0.09, 0.11, 0.12, M.blacker, 0, 0.02, 0);
+      this.add(hip, new CylinderGeometry(0.05, 0.05, 0.1, 10).rotateZ(Math.PI / 2), M.black, Math.sign(hx) * 0.02, 0, 0);
+      this.box(hip, 0.08, 0.3, 0.1, M.black, 0, -0.15, 0);
+      this.box(hip, 0.084, 0.12, 0.06, M.blacker, 0, -0.1, -0.03);
       const knee = new Group();
-      knee.position.set(0, -0.32, 0);
-      knee.rotation.x = b * (front ? -1 : 1);
+      knee.position.set(0, -0.3, 0);
+      knee.rotation.x = -b;
       hip.add(knee);
-      this.add(knee, new CylinderGeometry(0.05, 0.05, 0.09, 8).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
+      this.add(knee, new CylinderGeometry(0.04, 0.04, 0.085, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
       if (broken) {
         // snapped: torn struts and wires hanging from the knee, and it sparks
-        this.box(knee, 0.03, 0.12, 0.03, M.blacker, 0.02, -0.06, 0.01).rotation.z = 0.3;
-        this.box(knee, 0.015, 0.14, 0.015, M.wire, -0.02, -0.07, 0.0).rotation.z = -0.4;
-        this.box(knee, 0.012, 0.1, 0.012, M.wire, 0.0, -0.05, 0.02).rotation.x = 0.5;
-        this.sparkAt.position.set(0, -0.12, 0);
+        this.box(knee, 0.03, 0.1, 0.03, M.blacker, 0.012, -0.05, 0.01).rotation.z = 0.3;
+        this.box(knee, 0.012, 0.13, 0.012, M.wire, -0.015, -0.065, 0.0).rotation.z = -0.4;
+        this.box(knee, 0.01, 0.09, 0.01, M.wire, 0.0, -0.045, 0.02).rotation.x = 0.5;
+        this.sparkAt.position.set(0, -0.1, 0);
         knee.add(this.sparkAt);
         // it jerks from its hip
         this.dogStump.position.copy(hip.position);
@@ -485,25 +567,28 @@ export class Aftermath {
         B.add(this.dogStump);
         return;
       }
-      this.box(knee, 0.07, 0.34, 0.08, M.black, 0, -0.17, 0);
-      this.box(knee, 0.11, 0.05, 0.14, M.blacker, 0, -0.35, 0.03);
+      this.box(knee, 0.04, 0.3, 0.05, M.black, 0, -0.15, 0);
+      this.add(knee, new IcosahedronGeometry(0.04, 1), M.blacker, 0, -0.31, 0);
     };
-    leg(0.2, 0.32, true, false, -0.5, 0.9);
-    leg(-0.2, 0.32, true, true, 0.4, 0.4);
-    leg(0.2, -0.32, false, false, 1.0, 1.6);
-    leg(-0.2, -0.32, false, false, 0.7, 1.9);
+    // the front left planted, holding it up; the right snapped; the hind legs folded under it
+    leg(0.19, 0.3, 0.4, 0.9, false);
+    leg(-0.19, 0.3, -0.3, 0.5, true);
+    leg(0.19, -0.3, 1.25, 2.3, false);
+    leg(-0.19, -0.3, 1.35, 2.4, false);
     // the broken-off half of the leg, lying in the sand beside it
-    const lost = this.seat(x - 0.9, z + 0.4, 1.2);
-    lost.position.y += 0.05;
+    const lost = this.seat(x - 1.0, z + 0.5, 1.2);
+    lost.position.y += 0.04;
     const piece = new Group();
-    piece.rotation.z = Math.PI / 2 - 0.2;
+    piece.rotation.z = Math.PI / 2 - 0.15;
+    piece.scale.setScalar(S);
     lost.add(piece);
-    this.box(piece, 0.08, 0.38, 0.09, M.black, 0, 0, 0);
-    this.box(piece, 0.12, 0.06, 0.16, M.blacker, 0, -0.2, 0.03);
-    this.box(piece, 0.015, 0.12, 0.015, M.wire, 0.01, 0.24, 0);
+    this.box(piece, 0.04, 0.3, 0.05, M.black, 0, 0, 0);
+    this.add(piece, new IcosahedronGeometry(0.04, 1), M.blacker, 0, -0.16, 0);
+    this.add(piece, new CylinderGeometry(0.04, 0.04, 0.085, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0.16, 0);
+    this.box(piece, 0.012, 0.12, 0.012, M.wire, 0.01, 0.22, 0);
     // sand slumped round it where it sank, and its black oil leaked into the crater
-    this.drift(D, 0, 0.05, 0.3, 2.0, 0.55, 1.4);
-    this.drift(D, 0.25, 0.0, -0.4, 1.4, 0.45, 1.6);
+    this.drift(D, 0, 0.04, 0.25, 1.8, 0.45, 1.3);
+    this.drift(D, 0.2, 0.0, -0.45, 1.5, 0.4, 1.5);
     this.pool(x + 0.4, z - 0.5, 0.3, M.blacker, 0);
     this.rocks.addStatic(footprintOf(B, 0.5));
   }

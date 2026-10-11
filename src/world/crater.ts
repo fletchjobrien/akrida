@@ -189,6 +189,8 @@ export const SHELLS: [number, number, number, number][] = [
   [25, -6, 1.2, 0.4],
   [10.2, -15.5, 1.3, 0.4],
   [27, 2, 1.0, 0.35],
+  // where their dropship came down, burning
+  [24.5, -21, 3.4, 0.9],
 ];
 
 /** Out from the facility's front (a) and across it to the right (s). */
@@ -333,7 +335,7 @@ float shipHeight(vec2 p) {
 }
 uniform vec4 uSite4; // the facility: centre x, z; the way it faces x, z
 uniform float uSite4On;
-const vec4 SHELLS[10] = vec4[10](vec4(11.5000, -6.0000, 1.5000, 0.5000),vec4(14.5000, 3.6000, 1.7000, 0.5500),vec4(19.0000, -2.5000, 1.3000, 0.4500),vec4(12.5000, 10.0000, 1.2000, 0.4000),vec4(21.5000, 7.5000, 1.6000, 0.5000),vec4(17.0000, -12.0000, 1.4000, 0.4500),vec4(9.8000, 15.0000, 1.1000, 0.3500),vec4(25.0000, -6.0000, 1.2000, 0.4000),vec4(10.2000, -15.5000, 1.3000, 0.4000),vec4(27.0000, 2.0000, 1.0000, 0.3500));
+const vec4 SHELLS[${SHELLS.length}] = vec4[${SHELLS.length}](${SHELLS.map(([a, b, r, d]) => `vec4(${f(a)}, ${f(b)}, ${f(r)}, ${f(d)})`).join(', ')});
 vec2 facilityCoords(vec2 p) {
   vec2 o = p - uSite4.xy;
   return vec2(dot(o, uSite4.zw), o.x * uSite4.w - o.y * uSite4.z);
@@ -353,7 +355,7 @@ float facilityHeight(vec2 p) {
   h += 2.4 * exp(-fa * fa) * exp(-s4) * (1.0 - exp(-fs * fs));
   float rs = k.y / 3.2;
   h -= 2.3 * exp(-rs * rs) * (1.0 - smoothstep(7.5, 22.0, k.x)) * smoothstep(4.0, 7.0, k.x);
-  for (int i = 0; i < 10; i++) {
+  for (int i = 0; i < ${SHELLS.length}; i++) {
     vec4 c = SHELLS[i];
     vec2 d = k - c.xy;
     float q = dot(d, d) / (c.z * c.z);
@@ -489,7 +491,7 @@ float scorchAt(vec2 p) {
     // ground in front of the door, where the fighting was, scorched in patches
     vec2 k4 = facilityCoords(p);
     if (abs(k4.x) < 40.0 && abs(k4.y) < 44.0) {
-      for (int i = 0; i < 10; i++) {
+      for (int i = 0; i < ${SHELLS.length}; i++) {
         vec4 c = SHELLS[i];
         float r = length(k4 - c.xy) / c.z;
         sc = max(sc, 1.0 - smoothstep(0.55, 1.9, r));

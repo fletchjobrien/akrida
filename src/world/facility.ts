@@ -38,6 +38,14 @@ const SAND = [C(0xe4c987), C(0xbca872)];
 const AMBER_ON = rgb(0xffb040);
 const AMBER_OFF = rgb(0x4a2c10);
 const RED_ON = rgb(0xff3a2a);
+const MIST = C(0x9ad8a8);
+const MIST_FADE = C(0xd8e8d0);
+const SMOKE_DARK = C(0x1e1a1a);
+const SMOKE_MID = C(0x3a3432);
+const SMOKE_LIGHT = C(0x8a8078);
+const FIRE_HOT = C(0xfff0a8);
+const FIRE_COOL = C(0xc8401c);
+const FLAME = [rgb(0x7a1c10), rgb(0xc8401c), rgb(0xf08a2c), rgb(0xffd060), rgb(0xfff4c0)];
 const RED_OFF = rgb(0x4a1210);
 
 /** The hall's cross-section (z out of its front, y up): a tall front wall, chamfered roof edges, its foot sunk deep. */
@@ -164,6 +172,36 @@ export class Facility {
   private chimeTimer = 8;
   private clankTimer = 9;
   private readonly tmp = new Vector3();
+  // the radar still turning on the tower
+  private readonly dish = new Group();
+  // the light leaking from the hall through its broken roof
+  private readonly roofGlows: Glow[] = [];
+  private readonly roofAt: Object3D[] = [];
+  private mistTimer = 0.3;
+  // their dropship, down and burning
+  private readonly wreck = new Group();
+  readonly wreckAt = new Vector3();
+  private readonly fireSound: number;
+  private readonly flames: { mesh: Mesh; base: Vector3; size: number; seed: number }[] = [];
+  private readonly flameMats: ShaderMaterial[] = [];
+  private readonly fireFrom: Object3D[] = [];
+  private readonly wreckSmoke: Object3D[] = [];
+  private readonly navMat: ShaderMaterial;
+  private readonly navGlow = new Glow(rgb(0xff3020), 0.5, { core: 0.8 });
+  private readonly navAt = new Object3D();
+  private readonly fireGlow = new Glow(rgb(0xff8a30), 2.6, { core: 0.3 });
+  private smokeDebt = 0;
+  private fireDebt = 0;
+  private boomTimer = 12;
+  // a dust devil wandering over the site
+  private devil: { x: number; z: number; vx: number; vz: number; t: number; life: number } | null = null;
+  private devilWait = 4;
+  // the facility's banner, torn and flapping
+  private readonly banner: Mesh[] = [];
+  // the floodlight still burning on its mast
+  private readonly floodGlow = new Glow(rgb(0xfff2d8), 1.0, { core: 0.7 });
+  private readonly floodPool = new Glow(rgb(0xfff0c8), 4.5, { flat: true, core: 0 });
+  private readonly floodAt = new Object3D();
 
   constructor(
     private readonly rocks: Rocks,
@@ -171,6 +209,7 @@ export class Facility {
     private readonly audio: AudioEngine,
   ) {
     this.sound = audio.addSite('vast');
+    this.fireSound = audio.addSite('fire');
     const t = (dark: number, mid: number, light: number, outline = 0.6, highlight = 1) => toonMaterial({ dark, mid, light, litAt: 0.55, outline, highlight });
     this.m = {
       hull: t(0x6f6a62, 0xa8a294, 0xdcd6c8),
@@ -189,6 +228,9 @@ export class Facility {
     this.redMat = toonMaterial({ dark: 0x4a1210, mid: 0x4a1210, light: 0x4a1210, unlit: true, outline: 0 });
     this.lampMat = toonMaterial({ dark: 0x3a3630, mid: 0x3a3630, light: 0x3a3630, unlit: true, outline: 0 });
     this.podMat = toonMaterial({ dark: 0x1a3a22, mid: 0x1a3a22, light: 0x1a3a22, unlit: true, outline: 0 });
+    this.navMat = toonMaterial({ dark: 0x4a1210, mid: 0x4a1210, light: 0x4a1210, unlit: true, outline: 0 });
+    for (const c of [0xf08a2c, 0xffd060, 0xc8401c]) this.flameMats.push(toonMaterial({ dark: c, mid: c, light: c, unlit: true, outline: 0 }));
+    for (const g of [this.navGlow, this.fireGlow, this.floodGlow, this.floodPool]) g.strength = 0;
     this.beaconGlow.strength = 0;
     this.redGlow.strength = 0;
     this.deepGlow.strength = 0;
@@ -238,7 +280,7 @@ export class Facility {
   }
 
   addTo(scene: Object3D) {
-    scene.add(this.group, this.beaconGlow, this.redGlow, this.deepGlow, this.lampGlow, this.podGlow);
+    scene.add(this.group, this.beaconGlow, this.redGlow, this.deepGlow, this.lampGlow, this.podGlow, this.navGlow, this.fireGlow, this.floodGlow, this.floodPool, ...this.roofGlows);
   }
 
   /** Build it a part at a time (see core/builder.ts), then merge it into one mesh per material. */
@@ -257,10 +299,32 @@ export class Facility {
     this.buildBarricade();
     this.buildDebris();
     yield;
+    this.buildDropship();
+    yield;
+    this.buildRoofBreach();
+    this.buildBanner();
+    this.buildFloodlight();
+    yield;
     this.group.updateMatrixWorld(true);
     for (const b of this.blockers) this.rocks.addStatic(footprintOf(b, 3));
     yield;
-    bakeStatic(this.group, [this.beaconAt, this.redAt, this.deepAt, this.lampAt, this.podAt, this.sparkAt, ...this.smokeAt]);
+    bakeStatic(this.group, [
+      this.beaconAt,
+      this.redAt,
+      this.deepAt,
+      this.lampAt,
+      this.podAt,
+      this.sparkAt,
+      this.dish,
+      this.navAt,
+      this.floodAt,
+      ...this.smokeAt,
+      ...this.roofAt,
+      ...this.fireFrom,
+      ...this.wreckSmoke,
+      ...this.flames.map((f) => f.mesh),
+      ...this.banner,
+    ]);
   }
 
   // ------------------------------------------------------------------ build
@@ -487,6 +551,16 @@ export class Facility {
         this.add(T, new BoxGeometry(0.22, 0.22, 0.22), this.redMat, 0.3, h + 3.9, 0, false);
         this.redAt.position.set(x + 0.3, -3 + h + 3.9, z);
         G.add(this.redAt);
+        // a radar dish on a turntable, still sweeping round
+        this.add(T, new CylinderGeometry(0.5, 0.6, 0.4, 10), m.metal, -0.5, h + 1.0, 0.2);
+        this.dish.position.set(-0.5, h + 1.2, 0.2);
+        T.add(this.dish);
+        this.box(this.dish, 0.2, 0.9, 0.2, m.metal, 0, 0.45, 0);
+        const cup = this.add(this.dish, new SphereGeometry(1.25, 12, 4, 0, Math.PI * 2, 0, 0.75), m.hull, 0, 1.05, -0.45);
+        cup.rotation.x = Math.PI / 2 + 0.35;
+        this.add(this.dish, new CylinderGeometry(1.0, 1.0, 0.06, 12), m.accent, 0, 1.05, -0.2).rotation.x = Math.PI / 2 + 0.35;
+        this.box(this.dish, 0.06, 0.06, 1.0, m.metal, 0, 1.25, 0.3).rotation.x = -0.35;
+        this.box(this.dish, 0.14, 0.14, 0.2, m.panel, 0, 1.42, 0.78);
       } else {
         // the jagged, blackened stump where it broke
         for (let k = 0; k < 8; k++) {
@@ -679,6 +753,216 @@ export class Facility {
     }
   }
 
+  /**
+   * Their dropship, shot down in the attack: a black, angular gunship with
+   * stub wings and ducted engines, nose down in its own crater, one wing torn
+   * off and flung aside. Its back is split open and burning, a column of
+   * black smoke rising from it high enough to be seen from far across the
+   * desert. Its nav light still blinks red.
+   */
+  private buildDropship() {
+    const m = this.m;
+    const black = toonMaterial({ dark: 0x15171a, mid: 0x24272c, light: 0x3c4148, litAt: 0.55, outline: 0.8, highlight: 0.7 });
+    const blacker = toonMaterial({ dark: 0x0e0f11, mid: 0x1a1c1f, light: 0x2e3136, litAt: 0.55, outline: 0.8, highlight: 0.8 });
+    const band = toonMaterial({ dark: 0x5a4a10, mid: 0x8a7418, light: 0xb89a28, litAt: 0.55, outline: 0.6, highlight: 0.3 });
+    const glass = toonMaterial({ dark: 0x060708, mid: 0x0e1014, light: 0x343c4a, litAt: 0.5, outline: 0.6, highlight: 1 });
+    const x = -21;
+    const z = 24.5;
+    const W = this.wreck;
+    W.position.set(x, this.floor(x, z) + 0.95, z);
+    W.rotation.set(0, 0.85, 0, 'YXZ');
+    this.group.add(W);
+    // nose down into the crater, rolled onto its side a little
+    const H = new Group();
+    H.rotation.set(-0.24, 0, 0.22);
+    W.add(H);
+    // the hull: a long six-sided body along z, the cockpit a wedge at its nose
+    const hull = this.add(
+      H,
+      extrude(
+        [
+          [0.95, -0.55],
+          [1.05, 0.25],
+          [0.6, 0.85],
+          [-0.6, 0.85],
+          [-1.05, 0.25],
+          [-0.95, -0.55],
+        ],
+        -3.2,
+        3.0,
+      ).rotateY(-Math.PI / 2),
+      black,
+      0,
+      0,
+      0,
+    );
+    this.blockers.push(hull);
+    const nose = this.box(H, 1.5, 0.9, 1.6, black, 0, 0.0, -3.7);
+    nose.rotation.x = -0.35;
+    const glassFront = this.box(H, 1.3, 0.5, 0.9, glass, 0, 0.42, -3.1);
+    glassFront.rotation.x = -0.6;
+    this.box(H, 1.32, 0.06, 0.3, m.hole, 0.2, 0.52, -3.0, false).rotation.set(-0.6, 0.3, 0.2);
+    this.box(H, 2.14, 0.14, 0.5, band, 0, 0.1, 1.6);
+    this.box(H, 1.4, 0.3, 4.6, blacker, 0, 0.92, 0.2);
+    // stub wings with ducted engines: the left still on, the right torn off
+    const wing = this.box(H, 2.6, 0.14, 1.4, blacker, 1.9, 0.1, 0.4);
+    wing.rotation.z = -0.1;
+    const fanL = this.add(H, new CylinderGeometry(0.6, 0.6, 0.6, 12, 1, true), black, 3.15, 0.15, 0.4);
+    fanL.rotation.x = Math.PI / 2;
+    this.add(H, new CylinderGeometry(0.15, 0.15, 0.7, 8), blacker, 3.15, 0.15, 0.4).rotation.x = Math.PI / 2;
+    for (let k = 0; k < 4; k++) this.box(H, 1.1, 0.05, 0.12, blacker, 3.15, 0.15, 0.4).rotation.set(0, 0, (k * Math.PI) / 4);
+    this.box(H, 0.5, 0.14, 1.0, m.charred, -1.3, 0.1, 0.4).rotation.z = 0.2;
+    // the tail: two fins canted out, the nav light at the top of one
+    for (const sx of [-1, 1]) {
+      const fin = this.box(H, 0.1, 1.1, 1.0, black, sx * 0.55, 1.3, 2.4);
+      fin.rotation.z = sx * 0.35;
+      fin.rotation.x = 0.25;
+    }
+    this.add(H, new BoxGeometry(0.14, 0.14, 0.14), this.navMat, 0.75, 1.85, 2.6, false);
+    this.navAt.position.set(0.75, 1.85, 2.6);
+    H.add(this.navAt);
+    // its back split open and burning
+    this.box(H, 1.2, 0.08, 1.8, m.hole, 0, 0.98, -0.4, false);
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2;
+      const p = this.box(H, 0.5, 0.06, 0.6, k % 2 ? blacker : m.charred, Math.cos(a) * 0.7, 1.1, -0.4 + Math.sin(a) * 1.0);
+      p.rotation.set(Math.sin(a) * 0.9, a, Math.cos(a) * 0.9);
+    }
+    for (let k = 0; k < 5; k++) this.flame(H, new Vector3((k - 2) * 0.25, 1.0, -0.9 + (k % 3) * 0.45), 0.55 + 0.2 * (k % 2));
+    for (const [fx, fz] of [
+      [0, -0.4],
+      [0.3, 0.3],
+    ]) {
+      const o = new Object3D();
+      o.position.set(fx, 1.2, fz);
+      H.add(o);
+      this.fireFrom.push(o);
+    }
+    const sm = new Object3D();
+    sm.position.set(0, 1.6, -0.3);
+    H.add(sm);
+    this.wreckSmoke.push(sm);
+    // the torn-off wing, flung aside, a little fire still on it
+    const lw = new Group();
+    const lx = x + 4.5;
+    const lz = z - 3.2;
+    lw.position.set(lx, this.floor(lx, lz) + 0.1, lz);
+    lw.rotation.set(0.2, 2.2, 0.35);
+    this.group.add(lw);
+    this.box(lw, 2.4, 0.14, 1.3, blacker, 0, 0, 0);
+    const fanR = this.add(lw, new CylinderGeometry(0.6, 0.6, 0.6, 12, 1, true), black, 1.3, 0.05, 0);
+    fanR.rotation.x = Math.PI / 2;
+    this.box(lw, 0.5, 0.15, 1.0, m.charred, -1.1, 0.0, 0);
+    this.flame(lw, new Vector3(-1.1, 0.12, 0.1), 0.35);
+    this.blockers.push(lw);
+    W.updateMatrixWorld(true);
+    W.localToWorld(this.wreckAt.set(0, 0, 0));
+  }
+
+  private flame(parent: Object3D, at: Vector3, size: number) {
+    const mat = this.flameMats[this.flames.length % this.flameMats.length];
+    const mesh = new Mesh(new BoxGeometry(size * 0.7, size, size * 0.7), mat);
+    mesh.position.copy(at);
+    mesh.rotation.y = Math.random() * Math.PI;
+    parent.add(mesh);
+    this.flames.push({ mesh, base: at.clone(), size, seed: this.flames.length * 7.3 });
+  }
+
+  /**
+   * A stretch of the hall's roof caved in by a shell: a ragged hole, plates
+   * bent up round it, ribs snapped, and a sickly green light leaking up from
+   * whatever is kept in the dark below, with a thin mist rising from it.
+   */
+  private buildRoofBreach() {
+    const m = this.m;
+    const G = this.group;
+    const x = 2.8;
+    const z = 3.4;
+    this.box(G, 3.6, 0.06, 2.8, m.hole, x, 8.04, z, false);
+    this.box(G, 4.4, 0.04, 3.6, m.soot, x, 8.02, z, false);
+    for (let k = 0; k < 9; k++) {
+      const a = (k / 9) * Math.PI * 2;
+      const p = this.box(G, 0.9, 0.06, 0.7, k % 3 ? m.hull : m.charred, x + Math.cos(a) * 1.9, 8.15, z + Math.sin(a) * 1.45);
+      p.rotation.set(Math.sin(a) * 0.7, -a, Math.cos(a) * 0.7);
+    }
+    for (let k = 0; k < 3; k++) {
+      const r = this.box(G, 0.1, 0.1, 2.4, m.metal, x - 1 + k, 7.9, z);
+      r.rotation.set(0.25 * (k - 1), 0, 0.3);
+    }
+    for (const [gx, gz, size] of [
+      [x - 0.8, z, 2.2],
+      [x + 0.9, z - 0.4, 1.8],
+      [x, z + 0.7, 1.4],
+    ]) {
+      const o = new Object3D();
+      o.position.set(gx, 8.2, gz);
+      G.add(o);
+      this.roofAt.push(o);
+      const g = new Glow(rgb(0x6aff8a), size, { core: 0.4 });
+      g.strength = 0;
+      this.roofGlows.push(g);
+    }
+  }
+
+  /** The facility's banner, torn, on a pole by the barricade, flapping in the wind. */
+  private buildBanner() {
+    const m = this.m;
+    const G = this.group;
+    const x = -6.6;
+    const z = 11.6;
+    const y = this.floor(x, z);
+    const pole = this.box(G, 0.08, 3.4, 0.08, m.metal, x, y + 1.6, z);
+    pole.rotation.z = 0.08;
+    this.box(G, 0.14, 0.14, 0.14, m.panel, x + 0.12, y + 3.3, z);
+    // a cloth of six panels hanging off the pole, its end torn short
+    let ox = x + 0.04;
+    for (let k = 0; k < 6; k++) {
+      const h = k === 5 ? 0.45 : 0.9 - k * 0.04;
+      const mat = k === 2 ? m.hull : k === 3 ? m.hazard : m.accent;
+      const panel = new Mesh(faceted(new BoxGeometry(0.28, h, 0.02).translate(0.14, -h / 2, 0)), mat);
+      panel.position.set(ox, y + 3.2, z);
+      panel.layers.enable(SHADOW_LAYER);
+      G.add(panel);
+      this.banner.push(panel);
+      ox += 0.28;
+    }
+  }
+
+  /** A floodlight mast by the door, a lattice tower with a bar of lamps; one still burns. */
+  private buildFloodlight() {
+    const m = this.m;
+    const G = this.group;
+    const x = 7.4;
+    const z = 9.8;
+    const y = this.floor(x, z) - 0.2;
+    const H = 6.5;
+    for (const [dx, dz] of [
+      [-0.3, -0.3],
+      [0.3, -0.3],
+      [-0.3, 0.3],
+      [0.3, 0.3],
+    ])
+      this.box(G, 0.07, H, 0.07, m.metal, x + dx, y + H / 2, z + dz);
+    for (let yy = 0.8; yy < H; yy += 1.1) {
+      for (const sx of [-1, 1]) {
+        const b1 = this.box(G, 0.04, 0.85, 0.04, m.metal, x + sx * 0.3, y + yy + 0.4, z);
+        b1.rotation.x = 0.6 * sx;
+        const b2 = this.box(G, 0.04, 0.85, 0.04, m.metal, x, y + yy + 0.4, z + sx * 0.3);
+        b2.rotation.z = 0.6 * sx;
+      }
+    }
+    this.box(G, 1.8, 0.14, 0.2, m.panel, x, y + H, z);
+    const lamp = toonMaterial({ dark: 0xfff4dc, mid: 0xfff4dc, light: 0xfff4dc, unlit: true, outline: 0 });
+    for (let k = 0; k < 3; k++) {
+      const head = this.box(G, 0.4, 0.3, 0.25, m.metal, x - 0.6 + k * 0.6, y + H - 0.25, z + 0.15);
+      head.rotation.x = 0.5;
+      this.box(G, 0.32, 0.22, 0.04, k === 1 ? lamp : m.hole, x - 0.6 + k * 0.6, y + H - 0.32, z + 0.29, false).rotation.x = 0.5;
+    }
+    this.floodAt.position.set(x, y + H - 0.35, z + 0.45);
+    G.add(this.floodAt);
+    this.blockers.push(this.box(G, 0.7, 0.4, 0.7, m.metal, x, y + 0.2, z));
+  }
+
   // ------------------------------------------------------------------ alive
 
   update(dt: number, time: number, listener: Vector3) {
@@ -717,7 +1001,43 @@ export class Facility {
     (this.podMat.uniforms.uLight.value as Vector3).set(0.1 + 0.25 * pp, 0.3 + 0.45 * pp, 0.15 + 0.25 * pp);
     this.podAt.getWorldPosition(this.podGlow.position);
     this.podGlow.strength = 0.15 + 0.25 * pp;
+    // the radar still turns
+    this.dish.rotation.y += dt * 0.45;
+    // green light leaking up through the broken roof, breathing and stuttering
+    this.roofGlows.forEach((g, k) => {
+      this.roofAt[k].getWorldPosition(g.position);
+      const n = noise1(time * 1.3 + k * 3, 40 + k);
+      g.strength = (0.35 + 0.25 * n) * (noise1(time * 5, 50 + k) > 0.6 ? 0.4 : 1);
+    });
+    // the floodlight and the pool of light it throws in front of the door
+    this.floodAt.getWorldPosition(this.floodGlow.position);
+    const fl = noise1(time * 3, 61) > -0.7 ? 1 : 0.2;
+    this.floodGlow.strength = 0.9 * fl;
+    this.place(4.2, 0.02, 11.5, this.floodPool.position);
+    this.floodPool.strength = 0.22 * fl;
+    // the banner flaps
+    this.banner.forEach((b, k) => {
+      const w = noise1(time * 1.7 - k * 0.5, 70) * 0.7 + Math.sin(time * 6 - k * 1.3) * 0.35;
+      b.rotation.y = w * (0.3 + k * 0.12);
+      b.rotation.x = Math.sin(time * 4.3 - k) * 0.08;
+    });
+    this.updateWreck(dt, time, listener);
+    this.updateDevil(dt);
     if (d > 80) return;
+
+    // the mist rising from the broken roof
+    this.mistTimer -= dt;
+    if (this.mistTimer <= 0 && this.roofAt.length) {
+      this.mistTimer = 0.15 + Math.random() * 0.2;
+      this.roofAt[Math.floor(Math.random() * this.roofAt.length)].getWorldPosition(this.tmp);
+      this.dust.spawn(this.tmp.x + (Math.random() - 0.5) * 1.6, this.tmp.y, this.tmp.z + (Math.random() - 0.5) * 1.2, 0, 0.25 + Math.random() * 0.2, 0, 3 + Math.random() * 2, MIST, 2, {
+        g: -0.08,
+        drag: 0.8,
+        windK: 0.6,
+        c2: MIST_FADE,
+        soft: true,
+      });
+    }
 
     // torn cable sparking in the breach
     this.sparkTimer -= dt;
@@ -775,6 +1095,117 @@ export class Facility {
     if (this.chimeTimer <= 0) {
       this.chimeTimer = 16 + Math.random() * 10;
       this.audio.facilityChime(this.sound, 0.45);
+    }
+  }
+
+  /** The dropship burning: flames licking, embers and a great column of black smoke, its nav light blinking, now and then something in it going up. */
+  private updateWreck(dt: number, time: number, listener: Vector3) {
+    const d = Math.hypot(listener.x - this.wreckAt.x, listener.z - this.wreckAt.z);
+    const level = d < 120 ? 1 / (1 + (d / 9) * (d / 9)) : 0;
+    this.audio.setSite(this.fireSound, level, clamp((this.wreckAt.x - listener.x) / 14, -0.8, 0.8), 1 - clamp(d / 60, 0, 1), 0.6);
+    for (const f of this.flames) {
+      const n = noise1(time * 7 + f.seed, f.seed) * 0.5 + 0.5;
+      const s = f.size * (0.7 + 0.6 * n);
+      f.mesh.scale.set(0.8 + 0.3 * n, 0.6 + 0.8 * n, 0.8 + 0.3 * n);
+      f.mesh.position.set(f.base.x, f.base.y + s * 0.3, f.base.z);
+      f.mesh.rotation.y += dt * (1 + n);
+    }
+    this.flameMats.forEach((mat, k) => {
+      const n = noise1(time * 11 + k * 5, 70 + k) * 0.5 + 0.5;
+      (mat.uniforms.uLight.value as Vector3).copy(FLAME[Math.min(4, Math.floor(n * 3.2) + (k % 2))]);
+    });
+    this.fireFrom[0]?.getWorldPosition(this.fireGlow.position);
+    this.fireGlow.strength = 0.5 + 0.3 * noise1(time * 6, 80);
+    const on = time % 1.6 < 0.15;
+    (this.navMat.uniforms.uLight.value as Vector3).copy(on ? RED_ON : RED_OFF);
+    this.navAt.getWorldPosition(this.navGlow.position);
+    this.navGlow.strength = on ? 0.9 : 0;
+    if (d > 160) return;
+    // a column of black smoke, rising high and leaning on the wind, seen from far off
+    this.smokeDebt += dt * 28;
+    const sm = this.wreckSmoke[0];
+    if (sm) sm.getWorldPosition(this.tmp);
+    while (this.smokeDebt >= 1 && sm) {
+      this.smokeDebt -= 1;
+      const big = Math.random() < 0.7;
+      this.dust.spawn(
+        this.tmp.x + (Math.random() - 0.5) * 0.9,
+        this.tmp.y + Math.random() * 0.3,
+        this.tmp.z + (Math.random() - 0.5) * 0.9,
+        (Math.random() - 0.5) * 0.5,
+        1 + Math.random() * 0.9,
+        (Math.random() - 0.5) * 0.5,
+        9 + Math.random() * 7,
+        big ? (Math.random() < 0.6 ? SMOKE_DARK : SMOKE_MID) : SMOKE_MID,
+        big ? 3 : 2,
+        { g: -0.32, drag: 0.35, windK: 1.25, c2: SMOKE_LIGHT },
+      );
+    }
+    if (d > 70) return;
+    // embers and tongues of fire
+    this.fireDebt += dt * 22;
+    while (this.fireDebt >= 1) {
+      this.fireDebt -= 1;
+      const src = this.fireFrom[Math.floor(Math.random() * this.fireFrom.length)];
+      if (!src) break;
+      src.getWorldPosition(this.tmp);
+      this.dust.spawn(this.tmp.x + (Math.random() - 0.5) * 0.6, this.tmp.y - 0.1, this.tmp.z + (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.4, 1 + Math.random() * 1.6, (Math.random() - 0.5) * 0.4, 0.4 + Math.random() * 0.7, FIRE_HOT, Math.random() < 0.3 ? 2 : 1, {
+        g: -1.2,
+        drag: 0.9,
+        windK: 0.8,
+        c2: FIRE_COOL,
+      });
+    }
+    // ammunition cooking off inside it now and then: a pop, a flash of sparks
+    this.boomTimer -= dt;
+    if (this.boomTimer <= 0) {
+      this.boomTimer = 6 + Math.random() * 14;
+      this.fireFrom[0]?.getWorldPosition(this.tmp);
+      for (let i = 0; i < 24; i++) {
+        this.dust.spawn(this.tmp.x, this.tmp.y, this.tmp.z, (Math.random() - 0.5) * 5, Math.random() * 5, (Math.random() - 0.5) * 5, 0.5 + Math.random() * 0.6, SPARK_HOT, 1, { g: 9, drag: 0.5, windK: 0, c2: SPARK_COOL });
+      }
+      this.audio.shipBoom(this.fireSound, 0.35);
+    }
+  }
+
+  /** A dust devil: a whirling column of sand wandering across the site, then dying away. */
+  private updateDevil(dt: number) {
+    if (this.distance > 80) return;
+    if (!this.devil) {
+      this.devilWait -= dt;
+      if (this.devilWait > 0) return;
+      const a = Math.random() * Math.PI * 2;
+      const r = 14 + Math.random() * 18;
+      const p = this.place(Math.cos(a) * r, 0, 14 + Math.sin(a) * r * 0.6);
+      const va = Math.random() * Math.PI * 2;
+      this.devil = { x: p.x, z: p.z, vx: Math.cos(va) * 0.8, vz: Math.sin(va) * 0.8, t: 0, life: 12 + Math.random() * 10 };
+      return;
+    }
+    const v = this.devil;
+    v.t += dt;
+    v.x += v.vx * dt;
+    v.z += v.vz * dt;
+    // it strengthens, wanders, and dies down
+    const k = Math.min(1, v.t / 2) * Math.min(1, (v.life - v.t) / 3);
+    if (v.t > v.life) {
+      this.devil = null;
+      this.devilWait = 6 + Math.random() * 12;
+      return;
+    }
+    const g = terrainHeight(v.x, v.z);
+    const n = Math.round(10 * k);
+    for (let i = 0; i < n; i++) {
+      const h = Math.random() * 4 * k;
+      const r = 0.25 + h * 0.3;
+      const a = v.t * 7 + Math.random() * Math.PI * 2;
+      const c = Math.cos(a);
+      const s = Math.sin(a);
+      this.dust.spawn(v.x + c * r, g + h, v.z + s * r, -s * 3.2 + v.vx, 0.8 + Math.random() * 1.2, c * 3.2 + v.vz, 0.6 + Math.random() * 0.6, SAND[i % 2], 1 + (h > 2 ? 1 : 0), {
+        g: 0.2,
+        drag: 0.6,
+        windK: 0.3,
+        soft: true,
+      });
     }
   }
 }

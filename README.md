@@ -727,9 +727,19 @@ desert, to a vast installation lying half sunk in the sand.
   - Two domes rise from the roof, one cracked open with a slab of it fallen
     beside. There are radiator fins, a hatch and a snapped antenna on the
     roof, with sand blown up over all of it.
-  - Two towers stand behind it: one whole, with a mast and a slow red light;
-    one snapped off, its blackened stump jagged, its top lying half buried
-    in the drift.
+  - Two towers stand behind it: one whole, with a mast, a slow red light
+    and a radar dish still turning on its turntable; one snapped off, its
+    blackened stump jagged, its top lying half buried in the drift.
+  - A shell has caved in part of the roof. Plates are bent up round a ragged
+    hole and its ribs are snapped. A sickly green light leaks up out of the
+    dark below, breathing and stuttering, with a thin pale-green mist
+    rising from it.
+  - A lattice floodlight mast stands by the door. One of its three lamps
+    still burns and throws a pool of light in front of the door.
+  - The facility's banner, orange with its marks, hangs torn from a pole by
+    the barricade, flapping in the wind.
+  - Dust devils spin up and wander across the site now and then: whirling
+    columns of sand that strengthen, drift and die away.
   - Along the front wall: a row of narrow windows, some blown in, a great
     stencilled number, the facility's insignia, panel seams and grime.
   - **The capsules:** a row of upright capsules, each sized for a body with a
@@ -753,28 +763,46 @@ desert, to a vast installation lying half sunk in the sand.
     of the ramp, with spent power cells scattered behind it. One lamp post is
     knocked flat. The other still flickers.
   - The beacon over the door still turns, its amber light sweeping round.
+  - **Their dropship:** the attackers' gunship was shot down and lies in its
+    own crater, about 30 units out from the door. It is black and angular,
+    with stub wings and ducted engines and the faction's yellow band, nose
+    down and rolled onto its side. One wing has been torn off and flung
+    aside, still burning a little. Its back is split open and burning. A
+    column of black smoke rises from it and leans away on the wind, seen
+    from far across the desert. Embers lift from the fire, its red nav light
+    still blinks, and now and then something inside cooks off with a boom
+    and a shower of sparks. You can hear it roar as you come near.
 - **The dead:**
   - One of the creature's own kind, husky green, lies thrown back on the
     slope behind the barricade. It wears scant armour of the ship's make: an
     off-white chest plate banded in orange (with two holes burnt through
     it), a pauldron, a bracer, a thigh plate, a belt and a headset. Its rifle
-    lies by its hand. The rifle is of the same make: an off-white chamfered
-    body banded in orange, and a long hexagonal barrel ringed with coils with
-    an emitter at its muzzle. The power cell in its side still pulses a faint
-    blue.
+    lies by its hand. The rifle is of the same make: a long, slim off-white
+    body swept back into a thumbhole stock and banded in orange, a long scope
+    along its spine, and in front, instead of a barrel, two parallel rails
+    with coils between them, joined at the muzzle by an emitter ring. The
+    coils and the power cell in its flank still pulse a faint blue.
   - A human lies face down on the lip of a crater, in black armour from head
     to foot: a black helmet with one red line across its visor, plated
     limbs, and a pack with the faction's yellow band. Two holes are burnt
     through its back plate, still smoking thinly, and its red blood is in the
-    sand. Its rifle, black, heavy and angular, with a long shrouded barrel and
-    a red-lensed sight, lies flung ahead of its reaching hand.
-  - In another crater lies a four-legged machine, black like the drone with
-    the same red eye: a hunting dog of a robot with a gun on its back. It is
-    half sunk in the sand. One front leg is snapped at the knee, and the
-    lower half lies beside it. It is not quite dead: its eye flickers and
-    cuts out, its head twitches (and snaps toward your creature when it is
-    close), the stump of its leg jerks with a whine of servos, and sparks
-    spit from the break.
+    sand. Its rifle lies flung ahead of its reaching hand: an M16's lines made
+    black and new. It has a straight stock in line with the barrel, a raked
+    pistol grip, a curved magazine, the carry handle made into a sight with a
+    red lens, a long angular handguard slotted for cooling with a thin red
+    light down it, the triangle of the front sight, and a slim barrel with a
+    flash hider.
+  - In another crater lies a four-legged walking robot of the kind that
+    carries loads, black like the drone. It has a long, flat body with blunt
+    chamfered ends and dark camera panels on its front and flanks, and a pair
+    of rails along its back carrying a gun. An arm folds up off its front,
+    with a camera head on the end where the drone's red eye is. It has four
+    legs on chunky hip drives, every knee bending back. It is half sunk,
+    slumped on its folded hind legs. Its right foreleg is snapped at the knee
+    and the lower half lies beside it. It is not quite dead: the eye
+    flickers and cuts out, the arm twitches (and snaps toward your creature
+    when it is close), the stump of its leg jerks with a whine of servos,
+    and sparks spit from the break.
 - **Sound:**
   - The wind moans through it: a deep, slowly shifting moan in its halls, a
     thin whistle through its holes, and a dead-slow throb far underneath.
