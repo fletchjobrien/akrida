@@ -54,7 +54,7 @@ export const foot = (x: number, z: number, lift: number, tilt: number, pitch: nu
 // Body space: x = the creature's left, y = up, z = forward.
 
 /** Face down in the sand, rolled a little onto its side, limbs where they fell. */
-const LIMP: ScriptPose = {
+export const LIMP: ScriptPose = {
   pelvisX: 0,
   pelvisY: 0.03,
   pelvisZ: -0.4,
@@ -95,7 +95,7 @@ const STIR = mk(LIMP, {
 const SLUMP = mk(LIMP, { neckPitch: -0.12, headYaw: -0.9, eyeOpen: 1, tremble: 0.15, exertion: 0.6 });
 
 /** Hands drag in under the shoulders. */
-const HANDS_IN = mk(SLUMP, {
+export const HANDS_IN = mk(SLUMP, {
   handL: hand(0.28, 0.0, 0.2),
   handR: hand(-0.28, 0.0, 0.2),
   neckPitch: 0.05,
@@ -105,7 +105,7 @@ const HANDS_IN = mk(SLUMP, {
 });
 
 /** Chest pushed up on shaking arms. */
-const PUSH1 = mk(HANDS_IN, {
+export const PUSH1 = mk(HANDS_IN, {
   pelvisY: 0.05,
   pelvisPitch: 1.12,
   pelvisYaw: -0.12,
@@ -119,7 +119,7 @@ const PUSH1 = mk(HANDS_IN, {
 });
 
 /** The arms give out. */
-const BUCKLE = mk(PUSH1, {
+export const BUCKLE = mk(PUSH1, {
   pelvisPitch: 1.38,
   spinePitch: -0.04,
   chestPitch: -0.02,
@@ -129,10 +129,10 @@ const BUCKLE = mk(PUSH1, {
 });
 
 /** Second push, higher. */
-const PUSH2 = mk(PUSH1, { pelvisY: 0.08, pelvisPitch: 1.0, pelvisYaw: -0.05, spinePitch: -0.16, chestPitch: -0.16, tremble: 1 });
+export const PUSH2 = mk(PUSH1, { pelvisY: 0.08, pelvisPitch: 1.0, pelvisYaw: -0.05, spinePitch: -0.16, chestPitch: -0.16, tremble: 1 });
 
 /** On hands and knees, head hanging. */
-const FOURS = mk(PUSH2, {
+export const FOURS = mk(PUSH2, {
   pelvisY: 0.3,
   pelvisZ: -0.34,
   pelvisPitch: 1.3,
@@ -152,7 +152,7 @@ const FOURS = mk(PUSH2, {
 });
 
 /** The left hoof swings forward under the body. */
-const STEP_L = mk(FOURS, {
+export const STEP_L = mk(FOURS, {
   pelvisY: 0.34,
   pelvisPitch: 1.0,
   pelvisZ: -0.3,
@@ -161,7 +161,7 @@ const STEP_L = mk(FOURS, {
 });
 
 /** Down on one knee, a hand braced on the other, head low. */
-const KNEEL = mk(FOURS, {
+export const KNEEL = mk(FOURS, {
   pelvisY: 0.36,
   pelvisZ: -0.22,
   pelvisPitch: 0.42,
@@ -179,7 +179,7 @@ const KNEEL = mk(FOURS, {
 });
 
 /** The back hoof comes up under it. */
-const STEP_R = mk(KNEEL, {
+export const STEP_R = mk(KNEEL, {
   pelvisY: 0.44,
   pelvisPitch: 0.55,
   handL: hand(0.16, 0.44, 0.14),
@@ -189,7 +189,7 @@ const STEP_R = mk(KNEEL, {
 });
 
 /** Pushing up off the knee. */
-const RISE = mk(STEP_R, {
+export const RISE = mk(STEP_R, {
   pelvisY: 0.56,
   pelvisZ: -0.06,
   pelvisPitch: 0.58,
@@ -209,7 +209,7 @@ const RISE = mk(STEP_R, {
 });
 
 /** Standing, unsteady. */
-const STAND = mk(RISE, {
+export const STAND = mk(RISE, {
   pelvisY: 0.665,
   pelvisZ: 0,
   pelvisPitch: 0.22,

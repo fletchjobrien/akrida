@@ -74,6 +74,8 @@ export class DataCards {
   justCompleted = false;
   /** While true (the drone is hunting), nothing can be picked up. */
   locked = false;
+  /** Whether the creature is in the station (a dropped card lands on the same side of the wall). */
+  creatureInside = false;
   private readonly filled = [false, false, false];
   private glintTimer = 2;
   private nudged = false;
@@ -92,9 +94,17 @@ export class DataCards {
       const hex = (v: Vector3, f: number) => (Math.min(255, Math.round(v.x * f * 255)) << 16) | (Math.min(255, Math.round(v.y * f * 255)) << 8) | Math.min(255, Math.round(v.z * f * 255));
       return toonMaterial({ dark: hex(k, 0.6), mid: hex(k, 0.88), light: hex(k, 1.04), litAt: 0.5, midAt: -0.1, outline: 0.6, highlight: 0.6 });
     };
-    const shutter = toonMaterial({ dark: 0x5a5c60, mid: 0x9a9ca0, light: 0xd8dade, litAt: 0.5, outline: 0.5, highlight: 1 });
-    const label = toonMaterial({ dark: 0x9a968a, mid: 0xd0ccbe, light: 0xf0ece0, litAt: 0.5, outline: 0.3, highlight: 0.2 });
-    const ink = toonMaterial({ dark: 0x1a1a1e, mid: 0x2a2a2e, light: 0x3a3a3e, litAt: 0.5, outline: 0, highlight: 0 });
+    // its light: the card's colour, lit from within
+    const glow = (c: number) => {
+      const k = rgb(c);
+      const m = Math.max(k.x, k.y, k.z, 0.001);
+      const v = (f: number) => Math.min(255, Math.round(Math.min(1, (f / m) * 0.95) * 255));
+      const hex = (v(k.x) << 16) | (v(k.y) << 8) | v(k.z);
+      return toonMaterial({ dark: hex, mid: hex, light: hex, unlit: true, outline: 0 });
+    };
+    const frame = toonMaterial({ dark: 0x18191c, mid: 0x26282c, light: 0x3c3f45, litAt: 0.5, outline: 0.6, highlight: 0.9 });
+    const gold = toonMaterial({ dark: 0x6a4e1a, mid: 0xb08a34, light: 0xe8c86a, litAt: 0.5, outline: 0, highlight: 1 });
+    const crystal = toonMaterial({ dark: 0x0e1418, mid: 0x1c2a32, light: 0x4a6a78, litAt: 0.45, outline: 0.3, highlight: 1 });
     for (const [k, [, color]] of COLORS.entries()) {
       const g = new Group();
       const box = (w: number, h: number, d: number, mat: Material, x: number, y: number, z: number) => {
@@ -103,12 +113,21 @@ export class DataCards {
         g.add(m);
         return m;
       };
-      box(0.2, 0.014, 0.21, t(color), 0, 0, 0).layers.enable(SHADOW_LAYER);
-      box(0.09, 0.018, 0.075, shutter, 0.02, 0, 0.065);
-      box(0.02, 0.019, 0.04, ink, 0.035, 0, 0.07);
-      box(0.15, 0.017, 0.085, label, 0, 0, -0.055);
-      box(0.1, 0.018, 0.008, ink, -0.01, 0, -0.04);
-      box(0.06, 0.018, 0.008, ink, -0.03, 0, -0.065);
+      // a slim data shard: a coloured slab in a dark frame, chamfered at its back corners,
+      // a strip of its colour lit along one edge, a crystal core, and gold contacts at
+      // the end that goes into the reader
+      box(0.15, 0.012, 0.19, t(color), 0.005, 0, 0).layers.enable(SHADOW_LAYER);
+      box(0.17, 0.016, 0.035, frame, 0, 0, 0.09);
+      for (const sx of [-1, 1]) {
+        const c = box(0.03, 0.014, 0.03, frame, sx * 0.074, 0, -0.088);
+        c.rotation.y = Math.PI / 4;
+      }
+      box(0.012, 0.016, 0.17, frame, -0.08, 0, -0.005);
+      box(0.008, 0.017, 0.14, glow(color), -0.08, 0.001, -0.01);
+      box(0.05, 0.016, 0.06, crystal, 0.03, 0, -0.025);
+      box(0.012, 0.017, 0.012, glow(color), 0.03, 0.001, -0.025);
+      box(0.11, 0.015, 0.004, frame, 0.0, 0, 0.035);
+      for (let p = 0; p < 5; p++) box(0.016, 0.018, 0.022, gold, -0.05 + p * 0.025, 0, 0.1);
       this.group.add(g);
       this.cards.push({ mesh: g, kind: k, inside: true, state: 'lying', t: 0, from: new Vector3(), to: new Vector3(), vel: new Vector3(), slot: -1 });
     }
@@ -253,6 +272,28 @@ export class DataCards {
     return this.cards.some((c) => c.state === 'rising' || c.state === 'slotting' || c.state === 'rejecting' || c.state === 'returning');
   }
 
+  /**
+   * Put a card that has just landed somewhere the creature can get it: on the
+   * creature's side of the station's walls, out of the hull, the rocks and the
+   * furniture, never under the raised floor.
+   */
+  private reachable(c: Card, rocks: RockInfo[]) {
+    const p = c.mesh.position;
+    const interior = this.station.interior;
+    const inside = this.creatureInside;
+    const home = this.creature.pos;
+    for (let i = 0; i < 12 && interior.contains(p) !== inside; i++) {
+      p.x += (home.x - p.x) * 0.3;
+      p.z += (home.z - p.z) * 0.3;
+    }
+    if (interior.contains(p) !== inside) p.set(home.x, p.y, home.z);
+    const walls = inside ? interior.colliders : rocks;
+    for (let pass = 0; pass < 4; pass++) for (const r of walls) pushOutOfRock(r, p, 0.14, this.push);
+    if (!inside && interior.contains(p)) p.set(home.x, p.y, home.z);
+    c.inside = inside;
+    p.y = (inside && interior.floorY ? interior.floorY : terrainHeight(p.x, p.z)) + 0.012;
+  }
+
   update(dt: number, rocks: RockInfo[]) {
     this.justCompleted = false;
     const interior = this.station.interior;
@@ -288,13 +329,12 @@ export class DataCards {
         c.mesh.position.addScaledVector(c.vel, dt);
         c.mesh.rotation.x += dt * 9;
         c.mesh.rotation.z += dt * 5;
-        const inside = interior.contains(c.mesh.position);
+        const inside = this.creatureInside;
         const g = inside && interior.floorY ? interior.floorY : terrainHeight(c.mesh.position.x, c.mesh.position.z);
         if (c.mesh.position.y <= g + 0.012) {
-          c.mesh.position.y = g + 0.012;
           c.mesh.rotation.set(0, c.mesh.rotation.y, 0);
           c.state = 'lying';
-          c.inside = inside;
+          this.reachable(c, rocks);
           c.mesh.scale.setScalar(inside ? 1 : OUTSIDE_SCALE);
           this.audio.cardPickup(0.12);
         }

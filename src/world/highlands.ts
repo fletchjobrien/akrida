@@ -26,6 +26,16 @@ export const HIGH = {
   on: false,
 };
 
+/**
+ * The next place the tracker leads, once the station's data is in: far to the
+ * east of the station.
+ */
+export function eastSite(out: { x: number; z: number }) {
+  out.x = HIGH.x + 640;
+  out.z = HIGH.z - 40;
+  return out;
+}
+
 /** Beyond this distance from the station the highlands add nothing. */
 export const HIGH_REACH = 112;
 /** How far from the station the highland ground (and the mesh that draws it) reaches. */

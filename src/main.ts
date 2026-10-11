@@ -33,7 +33,7 @@ import { DoorScene } from './story/DoorScene';
 import { PickupScene } from './story/PickupScene';
 import { PeekScene } from './story/PeekScene';
 import { strayDebris } from './world/strayDebris';
-import { HIGH, highlandMask } from './world/highlands';
+import { HIGH, eastSite, highlandMask } from './world/highlands';
 import { Highlands } from './world/highlandLife';
 import { Station } from './world/station';
 import { Fallen } from './story/Fallen';
@@ -223,6 +223,7 @@ function respawn() {
   insertT = 0;
   cards?.reset();
   specimen?.reset();
+  tracker?.resetTarget();
   const cp = checkpoint;
   if (cp?.inside && station) {
     inside = false;
@@ -473,7 +474,7 @@ function* buildShip(): Generator<unknown, void, unknown> {
   yield* s.build();
   yield compile(s.group);
   s.addTo(scene);
-  const t = new Tracker(s, dust, audio, rocks.nearby);
+  const t = new Tracker(s, dust, audio, () => world.rocks);
   yield;
   for (const o of t.parts) yield compile(o);
   t.addTo(scene);
@@ -1194,10 +1195,16 @@ function finishFrame(dt: number, target: Vector3) {
   if (fallen) fallen.update(dt, creature.pos);
   if (locusts) locusts.update(dt, creature.pos, creature.speed, !inside);
   if (cards) {
+    cards.creatureInside = inside;
     cards.update(dt, rocks.nearby);
     cards.locked = huntT > 0;
     if (cards.justCompleted && specimen) {
       specimen.begin();
+      // the station's data gives the tracker its next fix, far to the east
+      if (tracker) {
+        const e = eastSite({ x: 0, z: 0 });
+        tracker.retarget(e.x, e.z);
+      }
       noticeTime = 2;
       noticeWhat = { lookPoint: station!.interior.tank.at.clone().setY(station!.interior.tank.at.y + 1) };
     }

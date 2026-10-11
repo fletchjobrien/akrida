@@ -1526,6 +1526,15 @@ export class AudioEngine {
     });
   }
 
+  /** A new fix: a sharp, insistent electronic chirp, over and over until it is answered. */
+  trackerBeep(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.trackerBus()) return;
+    const now = ctx.currentTime;
+    this.trackerVoice(2093, 2093, now, 0.004, 0.035, 0.05, level, 'square');
+    this.trackerVoice(2637, 2637, now + 0.075, 0.004, 0.035, 0.05, level * 0.9, 'square');
+  }
+
   /** It loses the way: a soft falling pair. */
   trackerLose(level: number) {
     const ctx = this.ctx;

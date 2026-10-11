@@ -482,7 +482,9 @@ doorway (or click it) to leave.
   glass; a bench with a microscope and racks of vials; a cold cabinet; a
   console; and cables over the floor.
 - **Walking:** the walls and the furniture stop the creature. The deck takes
-  no footprints and throws up no sand. The tracker cannot be dropped inside.
+  no footprints and throws up no sand. The tracker can be set down inside:
+  it falls to the deck and stays in the room (it knocks against the walls
+  and the furniture, not the building's outside).
 - **Sound:**
   - The wind and the mountain's sounds fall to a dull murmur through the
     walls.
@@ -503,9 +505,11 @@ doorway (or click it) to leave.
   blue, a light under each and a little status screen. A thick black cord
   comes out of its side, runs down the desk and sprawls across the deck,
   back through the tube to the specimen tank.
-- **The cards:** twelve little floppy-sized data cards of coloured plastic,
-  each with a sliding metal shutter and a label, were spilled when the
-  station was raided.
+- **The cards:** twelve slim data shards were spilled when the station was
+  raided. Each is a slab of coloured composite in a dark frame, chamfered at
+  its back corners, with a strip of its colour lit along one edge, a crystal
+  core with a point of light in it, and a row of gold contacts at the end
+  that goes into the reader.
   - Seven are inside: on the top bunk, on the table by the cups, under the
     suit rack, among the papers, by the smashed tank, on the lab bench and by
     the lockers.
@@ -515,8 +519,11 @@ doorway (or click it) to leave.
   - Only one is red, one green and one blue.
 - **Taking them:** click a card. Your creature walks to it, stoops, and
   takes it up into its right hand, holding it out as it does the tracker.
-  It holds one thing at a time: taking a card sets down what it held. Click
-  the card (or your creature) to let it fall.
+  It holds one thing at a time: taking a card sets down what it held (the
+  tracker falls at its feet, inside or out). Click the card (or your
+  creature) to let it fall. A dropped card always lands on your creature's
+  side of the station's walls, clear of the hull, the rocks and the
+  furniture, so it can be taken up again (never under the floor).
 - **The reader:** click the reader with a card in hand. Your creature leans
   in and slides it home. Red, green and blue each go into their own slot,
   standing on edge, with a heavy ka-chunk; the ring lights and its screen
@@ -525,43 +532,59 @@ doorway (or click it) to leave.
 - **The release:** when all three are in, the reader chimes and a relay
   clunks.
   - Pumps start and the tank drains in gulps and glugs, the fluid swirling
-    away. The thing in it sinks to lie curled on the tank's floor, and it
-    gurgles as it breathes air.
+    away. The thing hanging in it sinks to lie in a heap on the tank's floor,
+    and it gurgles as it breathes air.
   - The tank's door unseals with a pop and a long hiss, and slides round in a
     gust of steam. The cold air makes it jerk and shriek.
-  - **What it is:** a homunculus, not much like your creature's kind any
-    more. It has a swollen, lopsided, hairless skull with one bulging
-    milk-white eye and one sunken black slit, and a hanging jaw of needle
-    teeth. Its skin is raw and veined, its hunched spine is a ridge of knobs,
-    and its belly is a distended, bruised sac. It has one long clawed arm and
-    one withered stub with two nubs of fingers, and wasted legs (one shorter
-    and twisted out). Its feeding tube still hangs from its belly and drags
-    behind it.
-  - **How it moves:** it uncurls in fits and drags itself out on its one long
-    arm. The arm swings out ahead and the claws smack down. Then it hauls,
-    its back bowing and its jaw gaping, its dead legs dragging. Then it
-    slumps, its head lolling over. It shakes all the time. Between hauls it
-    has fits:
-    - it seizes, bowed and thrashing, the stub clawing at the air;
-    - its arm gives and it flops onto its side, twitching, then levers itself
-      back over;
-    - it retches: its back heaves twice and bile gushes out of it onto the
-      floor.
-    The longer it is out on the sand, the slower and weaker it gets and the
-    more often it has fits.
+  - **What it is:** one of your creature's own kind at its very beginning,
+    before it was finished. Your creature's kind are half machine, half
+    alien flesh, and this one is a primordial stage of that. It is stunted
+    (about two thirds your creature's height), hairless, raw and veined, its
+    head swollen and lopsided with a bruised growth on it and horns no more
+    than nubs (one a steel stub). Its body is half made:
+    - a steel plate bolted over the left of its face with a flickering red
+      optic in it, and wires running from it into the neck; a milk-white eye;
+      stitches across the raw side of its face;
+    - a steel brace across its chest round a core that glows the tank's
+      colour, the ribs showing on the other side, a bruised belly;
+    - a row of steel studs down its spine, and cables from its back that
+      drag behind it;
+    - a bare steel left arm with rusted joints and a clamp of a hand; the
+      right arm withered to a stick;
+    - the left leg steel below the knee, the right raw.
+  - **How it moves:** it gets up the way a newborn thing would, in fits. It
+    pushes up off the floor and its arms give; it pushes again, gets onto
+    its hands and knees, onto one knee, and up. Then it stumbles out on two
+    legs, weaving and lurching, shaking all over, its head and eye darting.
+    Its fits:
+    - it trips and pitches onto its face, lies there twitching, and drags
+      itself back up the same way;
+    - it seizes where it stands, the head snapping round, the arms flung,
+      the knees half going;
+    - it doubles over and retches bile onto the floor.
+    It falls out over the tank's lip and down the airlock's steps. When your
+    creature comes close, the red optic turns to look at it.
   - **How it sounds:** gurgling, bubbling breaths; broken whimpers that climb
     and crack; ragged, rasping shrieks of pain; choking hurks and a wet
-    spatter when it retches; and a wet slap each time its hand or its body
-    hits the floor, sometimes with a joint cracking.
-  - It leaves a wet trail as it hauls itself along the cord, through the
-    tube and the habitat, and drips as it goes. It goes out of the airlock,
-    falls down the steps in a wet heap, and drags itself on across the sand
-    away from the station, ploughing a furrow. After about 18 seconds out on
-    the sand (a good few body lengths from the steps), the drone locks on and
-    dives. The thing bursts: its head, limbs and pieces of its body are flung
-    across the sand, bleeding where they land, among splashes of blood and
-    bile.
+    spatter when it retches; wet slaps of its bare foot and the clank of the
+    steel one, and a wet smack (with a joint cracking) when it falls.
+  - It leaves wet footprints across the deck, drips as it goes, and sparks
+    now and then where metal meets flesh. It follows the cord through the
+    tube and the habitat (about 24 seconds from the release to the sand),
+    falls down the airlock's steps, and staggers out a few body lengths onto
+    the sand. Two seconds after it reaches the sand the drone locks on and
+    dives straight into it. It bursts: flesh and steel are flung across the
+    sand, the flesh bleeding where it lands and the steel sparking, among
+    splashes of blood and bile.
   - After that, the drone never comes for your creature again.
+- **The next fix:** the moment the third card goes in, the station's data
+  gives the tracker a new place to lead to, far to the east of the station.
+  Wherever the tracker is, it starts blinking a fast green and chirping (a
+  sharp double chirp with each blink), so you can find it. It keeps on until
+  your creature picks it up (if your creature is already holding it, it
+  keeps on for three seconds). From then on it leads east. Dying before the
+  thing in the tank is dead undoes this too: the tracker goes back to
+  leading to the station.
 
 ### The drone
 
@@ -661,14 +684,17 @@ something comes for it.
   inside the station's walls.
 - The locusts are in `src/story/Locusts.ts`.
 - The data cards are in `src/story/DataCards.ts`; the thing in the tank, its
-  release, its body, its crawl and its fits in `src/story/Specimen.ts`. Its
-  body is its own model (not the creature's rig): faceted lumps and blocks on
-  a chain of joints, posed each frame from a set of named postures, with a
-  fine noise shake over every joint. Its long arm reaches its planted hand
-  with two-bone inverse kinematics, and its feeding tube is a rope of
-  segments (Verlet integration) that drags on the floor. Glass and fluid are
-  drawn see-through with a dither (`src/render/dither.ts`). Both reset on
-  death (`reset()`).
+  release, its body and its stumbling walk in `src/story/Specimen.ts`. Its
+  body is the creature's own rig with its materials swapped and steel parts
+  added. It lives in a frame of its own, scaled down (0.65) about the tank,
+  so its walk, its steps and the ground all keep their proportions. It walks
+  with the creature's own gait (driven like an NPC toward points along the
+  cord), and its getting up, falls, fits and retching are scripted poses
+  built from the wake-up's (`src/story/WakeUp.ts`), with sudden jerks laid
+  over them. Its cables are a rope of segments (Verlet integration). Glass
+  and fluid are drawn see-through with a dither (`src/render/dither.ts`).
+  Both reset on death (`reset()`). The tracker's next fix is `eastSite()` in
+  `src/world/highlands.ts`.
 - The drone is in `src/story/Drone.ts`; the strike (explosion, the body,
   the death) in `src/story/Strike.ts`. The checkpoints and the respawn are in
   `src/main.ts` (`saveCheckpoint`, `respawn`).

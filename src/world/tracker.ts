@@ -119,6 +119,10 @@ export class Tracker {
   readonly doorAlong = new Vector3();
   /** 0..1: set by a scene to have it held up in both hands to look at. */
   inspect = 0;
+  /** It has a new fix it has not been picked up since: it blinks green fast and chirps. */
+  alerting = false;
+  private alertPhase = 0;
+  private alertHeld = 0;
 
   private readonly restQ = new Quaternion();
   private readonly ledMat: ShaderMaterial;
@@ -152,7 +156,8 @@ export class Tracker {
     private readonly ship: Ship,
     private readonly dust: Dust,
     private readonly audio: AudioEngine,
-    private readonly rocks: RockInfo[],
+    /** What it can knock against where it is (outside: rocks and hulls; inside: the walls). */
+    private readonly rocks: () => RockInfo[],
   ) {
     // it leads to the heart of the highlands, far to the north-east
     this.target.set(HIGH.x, 0, HIGH.z);
@@ -282,6 +287,8 @@ export class Tracker {
    */
   take(creature: Creature) {
     this.state = 'carried';
+    // answered: it settles to pointing the way
+    this.alerting = false;
     this.inShip = false;
     this.settle = -1;
     const hand = creature.rig.arms[1].hand;
@@ -319,6 +326,26 @@ export class Tracker {
     this.flash = 1;
     this.phase = 0.6;
     this.audio.trackerWake(0.5);
+  }
+
+  /**
+   * A new place to lead to: it locks onto it at once and, until it is next
+   * picked up, blinks a fast green and chirps to be noticed.
+   */
+  retarget(x: number, z: number) {
+    this.target.set(x, 0, z);
+    this.target.y = terrainHeight(x, z);
+    this.alerting = true;
+    this.alertPhase = 0;
+    this.alertHeld = 0;
+    this.flash = 1;
+  }
+
+  /** Back to leading to the station (after a death undoes the station's data). */
+  resetTarget() {
+    this.target.set(HIGH.x, 0, HIGH.z);
+    this.target.y = terrainHeight(this.target.x, this.target.z);
+    this.alerting = false;
   }
 
   /** Let go of it: it falls from where it is with the creature's motion. */
@@ -422,11 +449,26 @@ export class Tracker {
     const sleepy = this.awake ? 1 : 0.6;
     const searching = (0.06 + 0.94 * throb) * sleepy;
     this.light = searching + (1 - searching) * this.heat;
-    const palette = this.heat > 0.5 ? GREEN : RED;
+    let palette = this.heat > 0.5 ? GREEN : RED;
+    // a new fix: a fast green blink and a chirp with each, until it is taken up again
+    // (in the hand already, it keeps on a few seconds, then settles)
+    if (this.alerting) {
+      if (held) {
+        this.alertHeld += dt;
+        if (this.alertHeld > 3) this.alerting = false;
+      }
+      const was = this.alertPhase;
+      this.alertPhase = (this.alertPhase + dt * 3.2) % 1;
+      const on = this.alertPhase < 0.45;
+      if (this.alertPhase < was && this.shown) this.audio.trackerBeep(held ? 0.12 : 0.3);
+      this.light = on ? 1 : 0.05;
+      palette = GREEN;
+      for (const g of [this.tipGlow, this.ledGlow, this.pool]) g.color.copy(GLOW_GREEN);
+    }
     const step = (v: number) => palette[Math.max(0, Math.min(4, Math.round(v * 3.6 + this.flash * 1.4)))];
     (this.ledMat.uniforms.uLight.value as Vector3).copy(step(this.light));
     (this.tipMat.uniforms.uLight.value as Vector3).copy(step(Math.min(1, this.light * 1.05)));
-    for (const g of [this.tipGlow, this.ledGlow, this.pool]) g.color.lerpVectors(GLOW_RED, GLOW_GREEN, this.heat);
+    if (!this.alerting) for (const g of [this.tipGlow, this.ledGlow, this.pool]) g.color.lerpVectors(GLOW_RED, GLOW_GREEN, this.heat);
 
     // ---- glows: halos on the light and the tip, and a pool of green on whatever is under it
     G.updateMatrixWorld(true);
@@ -492,7 +534,7 @@ export class Tracker {
       G.quaternion.premultiply(_dq);
     }
     // it glances off the hull and the rocks
-    for (const r of this.rocks) {
+    for (const r of this.rocks()) {
       if (r.height > 0.2 && pushOutOfRock(r, G.position, 0.07, _n)) {
         const into = this.vel.x * _n.x + this.vel.z * _n.y;
         if (into < 0) {

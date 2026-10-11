@@ -323,18 +323,23 @@ export class Drone {
     const ang = cur.angleTo(this.tmp);
     const turn = (7 + 10 / Math.max(d, 1)) * dt;
     if (ang > 1e-4) cur.lerp(this.tmp, Math.min(1, turn / ang)).normalize();
+    // something slow and small on the ground: on the last stretch it flies straight into it
+    if (this.prey) cur.copy(chest).sub(P).normalize();
     const prev = this.vel.clone();
     this.vel.copy(cur).multiplyScalar(this.diveSpeed);
     this.acc.subVectors(this.vel, prev).divideScalar(Math.max(dt, 1e-3)).addScaledVector(cur, 30);
     P.addScaledVector(this.vel, dt);
     const nd = P.distanceTo(chest);
-    const passing = nd > this.lastDist && nd < 2.2;
+    const passing = !this.prey && nd > this.lastDist && nd < 2.2;
     const grounded = P.y < ground + 0.12;
     this.lastDist = nd;
-    if (nd < 0.7 || passing || grounded || this.t > 2.5) {
+    // (into its prey it flies right on: it only goes off in contact)
+    const close = this.prey ? nd < 0.35 || d < this.diveSpeed * dt : nd < 0.7;
+    if (close || passing || grounded || this.t > 2.5) {
       this.hit = true;
       // it goes off at its closest to the creature
-      if (nd < 0.7) this.hitAt.copy(P);
+      if (this.prey) this.hitAt.copy(chest);
+      else if (nd < 0.7) this.hitAt.copy(P);
       else this.hitAt.copy(P).sub(chest).setLength(Math.min(nd, 0.45)).add(chest);
       this.hitAt.y = Math.max(this.hitAt.y, ground + 0.15);
       this.hitDir.copy(this.vel).normalize();
