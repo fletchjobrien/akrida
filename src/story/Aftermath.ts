@@ -105,6 +105,8 @@ export class Aftermath {
   private readonly dogHead = new Group();
   private readonly dogEye = new Object3D();
   private readonly dogStump = new Group();
+  /** Its antennas, which shudder when it twitches. */
+  private readonly antennas: Group[] = [];
   private readonly sparkAt = new Object3D();
   private headRest = { x: 0, y: 0, z: 0 };
   private headKick = { x: 0, y: 0, z: 0 };
@@ -200,7 +202,7 @@ export class Aftermath {
     yield;
     this.buildDog();
     yield;
-    bakeStatic(this.group, [this.cellAt, this.dogHead, this.dogStump, this.sparkAt, ...this.smokeFrom]);
+    bakeStatic(this.group, [this.cellAt, this.dogHead, this.dogStump, this.sparkAt, ...this.antennas, ...this.smokeFrom]);
   }
 
   // ------------------------------------------------------------- the fallen
@@ -461,104 +463,116 @@ export class Aftermath {
   // ---------------------------------------------------------------- the dog
 
   /**
-   * The machine dog: a four-legged walking robot of the kind that carries a
-   * load, black like the drone. A long, flat body with blunt chamfered ends,
-   * a dark camera panel on its front and on each side, a pair of rails along
-   * its back carrying a gun, an arm folded up off its front with a camera
-   * head on the end of it where the red eye is, and four legs on chunky hip
-   * drives, every knee bending back. It is half sunk in a shell crater,
-   * slumped on its folded hind legs, its right foreleg snapped at the knee,
-   * the lower half lying in the sand beside it.
+   * The machine dog: a big four-legged pack robot, black like the drone. A
+   * deep, boxy body with a rounded hood sloping down at its front, louvred
+   * vents along its flanks, tube grab bars at both ends, a frame slung under
+   * it and two whip antennas standing up off its back; four thick hydraulic
+   * legs, the front knees bending forward and the hind knees back, on round
+   * treaded feet. Where its hood comes down at the front is a dark sensor
+   * window with the drone's red eye in it, and a sensor head on top that
+   * still twitches. It is half sunk in a shell crater, slumped on its folded
+   * hind legs, its right foreleg snapped at the knee, the lower half lying in
+   * the sand beside it.
    */
   private buildDog() {
     const M = this.M;
     const x = 9.3;
     const z = 12.0;
-    const D = this.seat(x, z, -0.9, 0.06);
-    D.rotation.x = -0.12;
-    D.rotation.z = -0.2;
+    const D = this.seat(x, z, -0.9, 0.0);
+    D.rotation.x = -0.14;
+    D.rotation.z = -0.16;
     D.updateMatrixWorld(true);
     this.dogAt.copy(D.position);
-    const S = 1.35;
     const B = new Group();
-    B.scale.setScalar(S);
-    B.position.y = 0.36;
+    B.position.y = 0.62;
     D.add(B);
-    // the body: a long flat block, its ends chamfered, a seam round its middle
-    this.box(B, 0.34, 0.17, 0.66, M.black, 0, 0, 0);
-    for (const sz of [-1, 1]) {
-      const end = this.box(B, 0.3, 0.13, 0.12, M.black, 0, 0.0, sz * 0.36);
-      end.rotation.x = sz * 0.0;
-      this.box(B, 0.32, 0.1, 0.04, M.blacker, 0, -0.01, sz * 0.425);
-    }
-    this.box(B, 0.345, 0.012, 0.67, M.blacker, 0, 0.0, 0, false);
-    // its cameras: a dark panel on its front, and one on each flank
-    this.box(B, 0.22, 0.07, 0.012, M.visor, 0, 0.0, 0.447, false);
-    for (const sx of [-0.06, 0.06]) this.box(B, 0.035, 0.035, 0.012, M.blacker, sx, 0.0, 0.455, false);
-    for (const sx of [-1, 1]) this.box(B, 0.012, 0.06, 0.14, M.visor, sx * 0.172, 0.0, 0.05, false);
-    this.box(B, 0.346, 0.03, 0.08, M.band, 0, 0.05, -0.22, false);
-    // the rails along its back, and the gun they carry
+    const L = 1.3;
+    const W = 0.6;
+    const H = 0.44;
+    // the body: a deep box, its top edges rounded off, its hood sloping down at the front
+    this.box(B, W, H, L, M.black, 0, 0, 0);
     for (const sx of [-1, 1]) {
-      this.box(B, 0.025, 0.03, 0.56, M.blacker, sx * 0.11, 0.1, 0);
-      for (const sz of [-0.24, 0.24]) this.box(B, 0.025, 0.05, 0.025, M.blacker, sx * 0.11, 0.08, sz);
+      const edge = this.box(B, 0.12, 0.12, L * 0.98, M.black, sx * (W / 2 - 0.03), H / 2 - 0.03, 0);
+      edge.rotation.z = Math.PI / 4;
     }
-    const T = new Group();
-    T.position.set(0, 0.14, -0.1);
-    T.rotation.y = 0.5;
-    B.add(T);
-    this.box(T, 0.15, 0.08, 0.24, M.blacker, 0, 0.03, 0);
-    this.box(T, 0.06, 0.06, 0.1, M.black, 0.05, 0.04, -0.08);
-    this.box(T, 0.03, 0.03, 0.36, M.black, 0, 0.05, 0.28);
-    this.box(T, 0.05, 0.05, 0.06, M.blacker, 0, 0.05, 0.47);
-    // the arm, folded up off its front: a shoulder drive, two links, and the camera
-    // head at its end with the one red eye (it is what twitches)
-    this.dogHead.position.set(0, 0.11, 0.24);
+    const hood = this.box(B, W * 0.96, 0.34, 0.36, M.black, 0, 0.04, L / 2 + 0.1);
+    hood.rotation.x = 0.55;
+    this.box(B, W * 0.9, 0.2, 0.12, M.black, 0, -0.1, L / 2 + 0.06);
+    // the seam where the hood meets the body, and the rear panel
+    this.box(B, W + 0.012, 0.012, 0.012, M.blacker, 0, H / 2 + 0.002, L * 0.18, false);
+    this.box(B, W * 0.92, H * 0.85, 0.02, M.blacker, 0, -0.02, -L / 2 - 0.005);
+    // louvred vents along each flank, behind the middle
+    for (const sx of [-1, 1]) {
+      this.box(B, 0.01, H * 0.7, 0.42, M.blacker, sx * (W / 2 + 0.004), 0.0, -0.08, false);
+      for (let k = 0; k < 6; k++) {
+        const slat = this.box(B, 0.03, 0.022, 0.4, M.black, sx * (W / 2 + 0.012), -0.12 + k * 0.05, -0.08, false);
+        slat.rotation.z = sx * 0.5;
+      }
+    }
+    // the drone's red eye, in a dark sensor window under the hood's front edge
+    this.box(B, W * 0.7, 0.1, 0.02, M.visor, 0, -0.04, L / 2 + 0.125, false);
+    this.add(B, new BoxGeometry(0.07, 0.04, 0.012), this.eyeMat, 0.08, -0.04, L / 2 + 0.137, false);
+    this.dogEye.position.set(0.08, -0.04, L / 2 + 0.16);
+    B.add(this.dogEye);
+    // a little band of the faction's yellow on its flank
+    this.box(B, 0.006, 0.05, 0.16, M.band, W / 2 + 0.004, 0.14, 0.3, false);
+    // grab bars of tube at each end
+    const bar = (zEnd: number, y: number, out: number) => {
+      for (const sx of [-1, 1]) {
+        const post = this.add(B, new CylinderGeometry(0.022, 0.022, out, 6).rotateX(Math.PI / 2), M.blacker, sx * 0.24, y, zEnd + Math.sign(zEnd) * out * 0.5);
+        void post;
+      }
+      this.add(B, new CylinderGeometry(0.022, 0.022, 0.5, 6).rotateZ(Math.PI / 2), M.blacker, 0, y, zEnd + Math.sign(zEnd) * out);
+    };
+    bar(-L / 2, 0.04, 0.16);
+    bar(-L / 2, -0.12, 0.1);
+    bar(L / 2 + 0.12, -0.17, 0.12);
+    // the frame slung under it
+    for (const sx of [-1, 1]) this.box(B, 0.04, 0.04, L * 0.9, M.blacker, sx * 0.2, -H / 2 - 0.08, 0);
+    for (const sz of [-0.35, 0.35]) this.box(B, 0.44, 0.04, 0.04, M.blacker, 0, -H / 2 - 0.08, sz);
+    this.box(B, 0.3, 0.12, 0.5, M.blacker, 0, -H / 2 - 0.04, -0.05);
+    // two whip antennas off its back, and the sensor head on top at the front (it twitches)
+    this.antennas.length = 0;
+    for (const [ax, az, h, lean] of [
+      [0.12, 0.1, 0.62, 0.12],
+      [-0.16, -0.38, 0.5, -0.1],
+    ]) {
+      const a = new Group();
+      a.position.set(ax, H / 2, az);
+      a.rotation.z = lean;
+      B.add(a);
+      this.box(a, 0.05, 0.06, 0.05, M.blacker, 0, 0.03, 0);
+      this.add(a, new CylinderGeometry(0.008, 0.014, h, 5), M.blacker, 0, h / 2 + 0.05, 0);
+      this.antennas.push(a);
+    }
+    this.dogHead.position.set(0, H / 2 + 0.03, L / 2 - 0.1);
     B.add(this.dogHead);
-    this.add(this.dogHead, new CylinderGeometry(0.06, 0.06, 0.07, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
-    const up = new Group();
-    up.rotation.x = -0.9;
-    this.dogHead.add(up);
-    this.box(up, 0.055, 0.32, 0.06, M.black, 0, 0.16, 0);
-    const el = new Group();
-    el.position.set(0, 0.32, 0);
-    el.rotation.x = 2.2;
-    up.add(el);
-    this.add(el, new CylinderGeometry(0.045, 0.045, 0.07, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
-    this.box(el, 0.045, 0.3, 0.05, M.black, 0, 0.15, 0);
-    const hd = new Group();
-    hd.position.set(0, 0.32, 0);
-    hd.rotation.x = -0.9;
-    el.add(hd);
-    this.box(hd, 0.09, 0.08, 0.13, M.black, 0, 0.0, 0.04);
-    this.box(hd, 0.07, 0.05, 0.012, M.visor, 0, 0.0, 0.107, false);
-    this.add(hd, new BoxGeometry(0.03, 0.03, 0.012), this.eyeMat, 0.0, 0.0, 0.115, false);
-    for (const sx of [-1, 1]) this.box(hd, 0.015, 0.03, 0.08, M.blacker, sx * 0.025, -0.05, 0.1);
-    this.dogEye.position.set(0, 0, 0.13);
-    hd.add(this.dogEye);
-    this.headRest = { x: 0.2, y: 0.25, z: -0.1 };
+    this.add(this.dogHead, new CylinderGeometry(0.07, 0.08, 0.07, 10), M.blacker, 0, 0.035, 0);
+    this.box(this.dogHead, 0.1, 0.04, 0.02, M.visor, 0, 0.04, 0.07, false);
+    this.headRest = { x: 0, y: 0.3, z: 0 };
     this.dogHead.rotation.set(this.headRest.x, this.headRest.y, this.headRest.z);
-    // legs: a chunky hip drive at each corner, a thick thigh, a slim shin, a round foot;
-    // every knee bends back. `a` swings the thigh back, `b` the shin forward.
+    // legs: a big hip drive, a thick thigh, a knee drive, a shin, a round treaded foot.
+    // `a` swings the thigh back, `b` the shin back from it; the front knees point forward
     const leg = (hx: number, hz: number, a: number, b: number, broken: boolean) => {
       const hip = new Group();
-      hip.position.set(hx, -0.07, hz);
+      hip.position.set(hx, -H / 2 + 0.02, hz);
       hip.rotation.x = a;
       B.add(hip);
-      this.box(hip, 0.09, 0.11, 0.12, M.blacker, 0, 0.02, 0);
-      this.add(hip, new CylinderGeometry(0.05, 0.05, 0.1, 10).rotateZ(Math.PI / 2), M.black, Math.sign(hx) * 0.02, 0, 0);
-      this.box(hip, 0.08, 0.3, 0.1, M.black, 0, -0.15, 0);
-      this.box(hip, 0.084, 0.12, 0.06, M.blacker, 0, -0.1, -0.03);
+      this.add(hip, new CylinderGeometry(0.1, 0.1, 0.16, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
+      this.box(hip, 0.15, 0.46, 0.17, M.black, 0, -0.23, 0);
+      this.box(hip, 0.155, 0.18, 0.08, M.blacker, 0, -0.18, -0.06);
+      this.box(hip, 0.03, 0.03, 0.006, M.hull, 0.079, -0.3, 0.03, false);
       const knee = new Group();
-      knee.position.set(0, -0.3, 0);
-      knee.rotation.x = -b;
+      knee.position.set(0, -0.46, 0);
+      knee.rotation.x = b;
       hip.add(knee);
-      this.add(knee, new CylinderGeometry(0.04, 0.04, 0.085, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
+      this.add(knee, new CylinderGeometry(0.075, 0.075, 0.14, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0, 0);
       if (broken) {
-        // snapped: torn struts and wires hanging from the knee, and it sparks
-        this.box(knee, 0.03, 0.1, 0.03, M.blacker, 0.012, -0.05, 0.01).rotation.z = 0.3;
-        this.box(knee, 0.012, 0.13, 0.012, M.wire, -0.015, -0.065, 0.0).rotation.z = -0.4;
-        this.box(knee, 0.01, 0.09, 0.01, M.wire, 0.0, -0.045, 0.02).rotation.x = 0.5;
-        this.sparkAt.position.set(0, -0.1, 0);
+        // snapped: torn struts and hydraulic lines hanging from the knee, and it sparks
+        this.box(knee, 0.05, 0.14, 0.05, M.blacker, 0.02, -0.07, 0.02).rotation.z = 0.3;
+        this.box(knee, 0.014, 0.18, 0.014, M.wire, -0.03, -0.09, 0.0).rotation.z = -0.4;
+        this.box(knee, 0.012, 0.14, 0.012, M.wire, 0.0, -0.07, 0.03).rotation.x = 0.5;
+        this.sparkAt.position.set(0, -0.14, 0);
         knee.add(this.sparkAt);
         // it jerks from its hip
         this.dogStump.position.copy(hip.position);
@@ -567,30 +581,32 @@ export class Aftermath {
         B.add(this.dogStump);
         return;
       }
-      this.box(knee, 0.04, 0.3, 0.05, M.black, 0, -0.15, 0);
-      this.add(knee, new IcosahedronGeometry(0.04, 1), M.blacker, 0, -0.31, 0);
+      this.box(knee, 0.11, 0.44, 0.13, M.black, 0, -0.22, 0);
+      this.box(knee, 0.03, 0.03, 0.006, M.hull, 0.057, -0.3, 0.05, false);
+      const foot = this.add(knee, new CylinderGeometry(0.085, 0.085, 0.09, 10).rotateZ(Math.PI / 2), M.blacker, 0, -0.46, 0);
+      void foot;
+      for (let k = 0; k < 4; k++) this.box(knee, 0.1, 0.02, 0.17, M.black, 0, -0.46, 0).rotation.x = (k * Math.PI) / 4;
     };
     // the front left planted, holding it up; the right snapped; the hind legs folded under it
-    leg(0.19, 0.3, 0.4, 0.9, false);
-    leg(-0.19, 0.3, -0.3, 0.5, true);
-    leg(0.19, -0.3, 1.25, 2.3, false);
-    leg(-0.19, -0.3, 1.35, 2.4, false);
+    leg(0.3, 0.46, -0.35, 0.95, false);
+    leg(-0.3, 0.46, -0.15, 0.6, true);
+    leg(0.3, -0.48, 1.3, -2.45, false);
+    leg(-0.3, -0.48, 1.4, -2.5, false);
     // the broken-off half of the leg, lying in the sand beside it
-    const lost = this.seat(x - 1.0, z + 0.5, 1.2);
-    lost.position.y += 0.04;
+    const lost = this.seat(x - 1.3, z + 0.6, 1.2);
+    lost.position.y += 0.08;
     const piece = new Group();
-    piece.rotation.z = Math.PI / 2 - 0.15;
-    piece.scale.setScalar(S);
+    piece.rotation.z = Math.PI / 2 - 0.12;
     lost.add(piece);
-    this.box(piece, 0.04, 0.3, 0.05, M.black, 0, 0, 0);
-    this.add(piece, new IcosahedronGeometry(0.04, 1), M.blacker, 0, -0.16, 0);
-    this.add(piece, new CylinderGeometry(0.04, 0.04, 0.085, 10).rotateZ(Math.PI / 2), M.blacker, 0, 0.16, 0);
-    this.box(piece, 0.012, 0.12, 0.012, M.wire, 0.01, 0.22, 0);
-    // sand slumped round it where it sank, and its black oil leaked into the crater
-    this.drift(D, 0, 0.04, 0.25, 1.8, 0.45, 1.3);
-    this.drift(D, 0.2, 0.0, -0.45, 1.5, 0.4, 1.5);
-    this.pool(x + 0.4, z - 0.5, 0.3, M.blacker, 0);
-    this.rocks.addStatic(footprintOf(B, 0.5));
+    this.box(piece, 0.11, 0.44, 0.13, M.black, 0, 0, 0);
+    this.add(piece, new CylinderGeometry(0.085, 0.085, 0.09, 10).rotateZ(Math.PI / 2), M.blacker, 0, -0.24, 0);
+    this.box(piece, 0.014, 0.16, 0.014, M.wire, 0.01, 0.28, 0);
+    this.box(piece, 0.03, 0.03, 0.006, M.hull, 0.057, 0.0, 0.05, false);
+    // sand slumped round it where it sank, and its black hydraulic fluid leaked into the crater
+    this.drift(D, 0.1, -0.06, 0.5, 1.5, 0.28, 1.1);
+    this.drift(D, 0.3, -0.08, -0.7, 1.3, 0.25, 1.2);
+    this.pool(x + 0.5, z - 0.6, 0.38, M.blacker, 0);
+    this.rocks.addStatic(footprintOf(B, 0.6));
   }
 
   // ---------------------------------------------------------------- alive
@@ -641,6 +657,10 @@ export class Aftermath {
       this.headRest.y + this.headKick.y,
       this.headRest.z + this.headKick.z,
     );
+    // the antennas shudder with each twitch, and sway on the wind
+    this.antennas.forEach((a, n) => {
+      a.rotation.x = Math.sin(time * 9 + n * 2) * (Math.abs(this.headKick.y) * 0.35) + Math.sin(time * 1.3 + n) * 0.03;
+    });
     // the stump of its leg jerks, servos whining, and the break sparks
     this.stumpTimer -= dt;
     if (this.stumpTimer <= 0) {

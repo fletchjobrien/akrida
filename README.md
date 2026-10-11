@@ -792,16 +792,19 @@ desert, to a vast installation lying half sunk in the sand.
     red lens, a long angular handguard slotted for cooling with a thin red
     light down it, the triangle of the front sight, and a slim barrel with a
     flash hider.
-  - In another crater lies a four-legged walking robot of the kind that
-    carries loads, black like the drone. It has a long, flat body with blunt
-    chamfered ends and dark camera panels on its front and flanks, and a pair
-    of rails along its back carrying a gun. An arm folds up off its front,
-    with a camera head on the end where the drone's red eye is. It has four
-    legs on chunky hip drives, every knee bending back. It is half sunk,
-    slumped on its folded hind legs. Its right foreleg is snapped at the knee
-    and the lower half lies beside it. It is not quite dead: the eye
-    flickers and cuts out, the arm twitches (and snaps toward your creature
-    when it is close), the stump of its leg jerks with a whine of servos,
+  - In another crater lies a big four-legged pack robot, black like the
+    drone, built along the lines of the military pack-mule robots that carry
+    soldiers' loads. It has a deep, boxy body with a rounded hood sloping down
+    at its front, louvred vents along its flanks, tube grab bars at both ends,
+    a frame slung underneath, and two whip antennas standing up off its back.
+    It has four thick hydraulic legs (the front knees bend forward, the hind
+    knees back) on round, treaded feet. The drone's red eye is in a dark
+    sensor window under the hood, and a sensor head sits on top. It is half
+    sunk, slumped on its folded hind legs. Its right foreleg is snapped at
+    the knee, with hydraulic lines hanging out of it, and the lower half lies
+    beside it. It is not quite dead: the eye flickers and cuts out, the
+    sensor head twitches (and snaps toward your creature when it is close),
+    its antennas shudder, the stump of its leg jerks with a whine of servos,
     and sparks spit from the break.
 - **Sound:**
   - The wind moans through it: a deep, slowly shifting moan in its halls, a
