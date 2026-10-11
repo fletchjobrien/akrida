@@ -23,12 +23,15 @@ import {
   SITE,
   SITE2,
   SITE3,
+  SITE4,
   siteMask,
   SKID,
   SKIP_REACH,
   TRENCH_LENGTH,
 } from './world/crater';
 import { Ship } from './world/ship';
+import { Facility } from './world/facility';
+import { Aftermath } from './story/Aftermath';
 import { DoorScene } from './story/DoorScene';
 import { PickupScene } from './story/PickupScene';
 import { PeekScene } from './story/PeekScene';
@@ -130,6 +133,11 @@ let highlands: Highlands | null = null;
 let station: Station | null = null;
 let fallen: Fallen | null = null;
 let fallenSeen = false;
+/** The facility far to the east, and what was left after the fighting at its door. */
+let facility: Facility | null = null;
+let aftermath: Aftermath | null = null;
+let facilitySeen = false;
+let aftermathSeen = false;
 // the carrion locusts eating them
 let locusts: Locusts | null = null;
 // the tracker left in the ship's doorway, and taking it up
@@ -407,6 +415,17 @@ function layoutWorld() {
       terrain.addHighlands(scene);
       // the station on the summit, and the three shot outside it, made as the creature nears
       later(HIGH.x, HIGH.z, 90, buildStation);
+      // the facility far to the east, its entrance turned south and a little west, toward
+      // the way the creature comes round to it
+      const e = eastSite({ x: 0, z: 0 });
+      SITE4.x = e.x;
+      SITE4.z = e.z;
+      SITE4.dx = -0.34 / Math.hypot(0.34, 0.94);
+      SITE4.dz = 0.94 / Math.hypot(0.34, 0.94);
+      SITE4.on = true;
+      shared.uSite4.value.set(SITE4.x, SITE4.z, SITE4.dx, SITE4.dz);
+      shared.uSite4On.value = 1;
+      later(SITE4.x, SITE4.z, 140, buildFacility);
     }
   }
   rocks.refresh();
@@ -510,6 +529,20 @@ function* buildStation(): Generator<unknown, void, unknown> {
   station = st;
   fallen = f;
   locusts = l;
+}
+
+function* buildFacility(): Generator<unknown, void, unknown> {
+  const f = new Facility(rocks, dust, audio);
+  yield* f.build();
+  yield compile(f.group);
+  const a = new Aftermath(f, rocks, dust, audio, (p, o) => pr.snapDelta(p, o));
+  yield* a.build();
+  yield compile(a.group);
+  f.addTo(scene);
+  a.addTo(scene);
+  rocks.refresh();
+  facility = f;
+  aftermath = a;
 }
 
 /** Seconds left of the creature staring at something it has just noticed. */
@@ -1235,6 +1268,22 @@ function finishFrame(dt: number, target: Vector3) {
   // reaching the mountain's peak is a checkpoint
   if (!checkpoint && station && !inside && !wake.active && Math.hypot(creature.pos.x - HIGH.x, creature.pos.z - HIGH.z) < 16) saveCheckpoint('peak');
   npcStrike.update(dt);
+  if (facility) facility.update(dt, elapsed, creature.pos);
+  if (aftermath) aftermath.update(dt, elapsed, creature.pos);
+  if (facility && !facilitySeen && !wake.active && facility.distance < 36) {
+    // it comes over the last rise and there it is
+    facilitySeen = true;
+    audio.facilityReveal();
+    noticeTime = 3.5;
+    noticeWhat = facility;
+  }
+  if (aftermath && !aftermathSeen && !wake.active && Math.hypot(creature.pos.x - aftermath.fallenAt.x, creature.pos.z - aftermath.fallenAt.z) < 6) {
+    // one of its own kind, dead behind the barricade
+    aftermathSeen = true;
+    audio.sorrow();
+    noticeTime = 3.5;
+    noticeWhat = { lookPoint: aftermath.fallenAt };
+  }
   if (fallen && !fallenSeen && !wake.active && Math.hypot(creature.pos.x - fallen.lookPoint.x, creature.pos.z - fallen.lookPoint.z) < 10) {
     // the three of them, lined up against the wall
     fallenSeen = true;
@@ -1417,6 +1466,13 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     SITE3,
     SITE2,
+    SITE4,
+    get facility() {
+      return facility;
+    },
+    get aftermath() {
+      return aftermath;
+    },
     crater: { craterHeight, siteMask },
     shared,
     dustCount: () => dust.count,

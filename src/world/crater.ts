@@ -165,6 +165,62 @@ function shipHeight(x: number, z: number): number {
   return h;
 }
 
+/**
+ * The facility far to the east of the station: its centre (x, z) and the way
+ * its entrance faces (dx, dz), toward the way the creature comes. Mirrored
+ * into uSite4 and uSite4On.
+ */
+export const SITE4 = { x: 0, z: 0, dx: 1, dz: 0, on: false };
+/** Beyond this distance from the facility its ground is the desert's own. */
+export const FACILITY_REACH = 44;
+/**
+ * Where the mortar shells fell, in the facility's frame: along the way it
+ * faces (out from its front), across it (to its right, seen from outside),
+ * radius, depth.
+ */
+export const SHELLS: [number, number, number, number][] = [
+  [11.5, -6, 1.5, 0.5],
+  [14.5, 3.6, 1.7, 0.55],
+  [19, -2.5, 1.3, 0.45],
+  [12.5, 10, 1.2, 0.4],
+  [21.5, 7.5, 1.6, 0.5],
+  [17, -12, 1.4, 0.45],
+  [9.8, 15, 1.1, 0.35],
+  [25, -6, 1.2, 0.4],
+  [10.2, -15.5, 1.3, 0.4],
+  [27, 2, 1.0, 0.35],
+];
+
+/** Out from the facility's front (a) and across it to the right (s). */
+export function facilityCoords(x: number, z: number) {
+  const ox = x - SITE4.x;
+  const oz = z - SITE4.z;
+  return { a: ox * SITE4.dx + oz * SITE4.dz, s: ox * SITE4.dz - oz * SITE4.dx };
+}
+
+/**
+ * Height added by the facility: a great drift of sand heaped over its back
+ * and its ends, so it lies half sunk; sand banked along its front, dug away
+ * down to the door in a ramp; and the craters of the mortar shells that fell
+ * in front of it, each a bowl with a low rim.
+ */
+function facilityHeight(x: number, z: number): number {
+  const { a, s } = facilityCoords(x, z);
+  if (Math.abs(a) > 40 || Math.abs(s) > 44) return 0;
+  let h = 0;
+  const s4 = sq(s / 19);
+  h += 6.8 * Math.exp(-sq((a + 4) / 7)) * Math.exp(-s4 * s4);
+  h += 4.5 * Math.exp(-sq((Math.abs(s) - 17) / 5)) * Math.exp(-sq(a / 8));
+  h += 2.4 * Math.exp(-sq((a - 8.5) / 2.6)) * Math.exp(-s4 * s4) * (1 - Math.exp(-sq(s / 4.5)));
+  h -= 2.3 * Math.exp(-sq(s / 3.2)) * (1 - smooth(7.5, 22, a)) * smooth(4, 7, a);
+  for (const [ca, cs, r, dep] of SHELLS) {
+    const q = (sq(a - ca) + sq(s - cs)) / (r * r);
+    if (q > 6) continue;
+    h += -dep * sq(1 - Math.min(1, q)) + dep * 0.45 * Math.exp(-sq((Math.sqrt(q) - 1) / 0.35));
+  }
+  return h;
+}
+
 /** 1 near the crash, 0 away from it: keeps dunes and rocks out of the way. */
 export function siteMask(x: number, z: number): number {
   if (!SITE.on) return 0;
@@ -185,13 +241,14 @@ export function siteMask(x: number, z: number): number {
     const along = smooth(-SHIP_LENGTH / 2 - SHIP_TRENCH - 5, -SHIP_LENGTH / 2 - SHIP_TRENCH, k.a) * (1 - smooth(SHIP_REACH.bow - 4, SHIP_REACH.bow, k.a));
     m = Math.max(m, along * (1 - smooth(SHIP_REACH.side - 4, SHIP_REACH.side, Math.abs(k.s))));
   }
+  if (SITE4.on) m = Math.max(m, 1 - smooth(FACILITY_REACH - 10, FACILITY_REACH, Math.hypot(x - SITE4.x, z - SITE4.z)));
   return m;
 }
 
 /** Height added to the terrain by the impact. */
 export function craterHeight(x: number, z: number): number {
   if (!SITE.on) return 0;
-  return firstHeight(x, z) + (SITE2.on ? skidHeight(x, z) : 0) + (SITE3.on ? shipHeight(x, z) : 0);
+  return firstHeight(x, z) + (SITE2.on ? skidHeight(x, z) : 0) + (SITE3.on ? shipHeight(x, z) : 0) + (SITE4.on ? facilityHeight(x, z) : 0);
 }
 
 /** Height added by the first pod's crater and trench. */
@@ -274,6 +331,39 @@ float shipHeight(vec2 p) {
   h += 0.3 * exp(-wa * wa) * exp(-ws * ws);
   return h;
 }
+uniform vec4 uSite4; // the facility: centre x, z; the way it faces x, z
+uniform float uSite4On;
+const vec4 SHELLS[10] = vec4[10](vec4(11.5000, -6.0000, 1.5000, 0.5000),vec4(14.5000, 3.6000, 1.7000, 0.5500),vec4(19.0000, -2.5000, 1.3000, 0.4500),vec4(12.5000, 10.0000, 1.2000, 0.4000),vec4(21.5000, 7.5000, 1.6000, 0.5000),vec4(17.0000, -12.0000, 1.4000, 0.4500),vec4(9.8000, 15.0000, 1.1000, 0.3500),vec4(25.0000, -6.0000, 1.2000, 0.4000),vec4(10.2000, -15.5000, 1.3000, 0.4000),vec4(27.0000, 2.0000, 1.0000, 0.3500));
+vec2 facilityCoords(vec2 p) {
+  vec2 o = p - uSite4.xy;
+  return vec2(dot(o, uSite4.zw), o.x * uSite4.w - o.y * uSite4.z);
+}
+float facilityHeight(vec2 p) {
+  vec2 k = facilityCoords(p);
+  if (abs(k.x) > 40.0 || abs(k.y) > 44.0) return 0.0;
+  float s2 = (k.y / 19.0) * (k.y / 19.0);
+  float s4 = s2 * s2;
+  float ba = (k.x + 4.0) / 7.0;
+  float h = 6.8 * exp(-ba * ba) * exp(-s4);
+  float es = (abs(k.y) - 17.0) / 5.0;
+  float ea = k.x / 8.0;
+  h += 4.5 * exp(-es * es) * exp(-ea * ea);
+  float fa = (k.x - 8.5) / 2.6;
+  float fs = k.y / 4.5;
+  h += 2.4 * exp(-fa * fa) * exp(-s4) * (1.0 - exp(-fs * fs));
+  float rs = k.y / 3.2;
+  h -= 2.3 * exp(-rs * rs) * (1.0 - smoothstep(7.5, 22.0, k.x)) * smoothstep(4.0, 7.0, k.x);
+  for (int i = 0; i < 10; i++) {
+    vec4 c = SHELLS[i];
+    vec2 d = k - c.xy;
+    float q = dot(d, d) / (c.z * c.z);
+    if (q > 6.0) continue;
+    float u = 1.0 - min(1.0, q);
+    float rq = (sqrt(q) - 1.0) / 0.35;
+    h += -c.w * u * u + c.w * 0.45 * exp(-rq * rq);
+  }
+  return h;
+}
 float siteMask(vec2 p) {
   if (uSiteOn < 0.5) return 0.0;
   float r = length(p - SITE);
@@ -292,6 +382,7 @@ float siteMask(vec2 p) {
     float al = smoothstep(${f(-SHIP_LENGTH / 2 - SHIP_TRENCH - 5)}, ${f(-SHIP_LENGTH / 2 - SHIP_TRENCH)}, k3.x) * (1.0 - smoothstep(${f(SHIP_REACH.bow - 4)}, ${f(SHIP_REACH.bow)}, k3.x));
     m = max(m, al * (1.0 - smoothstep(${f(SHIP_REACH.side - 4)}, ${f(SHIP_REACH.side)}, abs(k3.y))));
   }
+  if (uSite4On > 0.5) m = max(m, 1.0 - smoothstep(${f(FACILITY_REACH - 10)}, ${f(FACILITY_REACH)}, length(p - uSite4.xy)));
   return m;
 }
 float bowl2(vec2 k) {
@@ -357,7 +448,7 @@ float firstHeight(vec2 p) {
 }
 float craterHeight(vec2 p) {
   if (uSiteOn < 0.5) return 0.0;
-  return firstHeight(p) + (uSite2On > 0.5 ? skidHeight(p) : 0.0) + (uSite3On > 0.5 ? shipHeight(p) : 0.0);
+  return firstHeight(p) + (uSite2On > 0.5 ? skidHeight(p) : 0.0) + (uSite3On > 0.5 ? shipHeight(p) : 0.0) + (uSite4On > 0.5 ? facilityHeight(p) : 0.0);
 }
 // 0..1: how burnt the sand is (crater floor and the trench nearest it)
 float scorchAt(vec2 p) {
@@ -392,6 +483,20 @@ float scorchAt(vec2 p) {
     vec2 b2 = (k3 - vec2(-4.0, -5.2)) / vec2(2.0, 1.4);
     float blasts = max(1.0 - smoothstep(0.3, 1.0, length(b1)), 1.0 - smoothstep(0.3, 1.0, length(b2)));
     sc = max(sc, max(tr3, max(hull, blasts)));
+  }
+  if (uSite4On > 0.5) {
+    // the facility: each shell crater burnt black, the blast fanned out round it, and the
+    // ground in front of the door, where the fighting was, scorched in patches
+    vec2 k4 = facilityCoords(p);
+    if (abs(k4.x) < 40.0 && abs(k4.y) < 44.0) {
+      for (int i = 0; i < 10; i++) {
+        vec4 c = SHELLS[i];
+        float r = length(k4 - c.xy) / c.z;
+        sc = max(sc, 1.0 - smoothstep(0.55, 1.9, r));
+      }
+      vec2 dq = (k4 - vec2(9.5, 0.0)) / vec2(3.0, 5.5);
+      sc = max(sc, 0.75 * (1.0 - smoothstep(0.4, 1.0, length(dq))) * smoothstep(-0.2, 0.4, gnoise(p * 0.35)));
+    }
   }
   return clamp(sc * (0.75 + 0.6 * gnoise(p * 0.9)), 0.0, 1.0);
 }

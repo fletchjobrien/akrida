@@ -578,7 +578,8 @@ doorway (or click it) to leave.
     splashes of blood and bile.
   - After that, the drone never comes for your creature again.
 - **The next fix:** the moment the third card goes in, the station's data
-  gives the tracker a new place to lead to, far to the east of the station.
+  gives the tracker a new place to lead to, far to the east of the station
+  (the facility, see below).
   Wherever the tracker is, it starts blinking a fast green and chirping (a
   sharp double chirp with each blink), so you can find it. It keeps on until
   your creature picks it up (if your creature is already holding it, it
@@ -700,6 +701,98 @@ something comes for it.
   `src/main.ts` (`saveCheckpoint`, `respawn`).
 - The station is in `src/world/station.ts`; the three dead in
   `src/story/Fallen.ts` (scripted poses on the creature's own rig).
+- The facility is in `src/world/facility.ts`; what was left at its door (the
+  green one, the human, the dog and the two rifles) in
+  `src/story/Aftermath.ts`. Its ground (the drift over it, the ramp, the
+  shell craters and their scorch) is `facilityHeight` in
+  `src/world/crater.ts`, worked out on the CPU and the GPU alike like the
+  crash sites. Its hall is one prism carried along its length from a
+  six-sided cross-section. Like the station, it is built a part at a time
+  when the creature comes within 140 units, then merged into one mesh per
+  material.
+
+## The facility
+
+The tracker's next fix leads about 300 units east of the station, across open
+desert, to a vast installation lying half sunk in the sand.
+
+- **What it is:** it was built by the same hands as the ship, its pods and
+  the station: off-white plated walls banded in orange, dark metal and glass.
+  What it was for is not clear, but it may have been for testing on living
+  subjects.
+  - A long, high hall (34 units long, 8 high) lies under a great drift of
+    sand that has heaped over its back, its ends and the back of its roof,
+    and banked up along its front. A ramp has been dug down through the sand
+    to its door.
+  - Two domes rise from the roof, one cracked open with a slab of it fallen
+    beside. There are radiator fins, a hatch and a snapped antenna on the
+    roof, with sand blown up over all of it.
+  - Two towers stand behind it: one whole, with a mast and a slow red light;
+    one snapped off, its blackened stump jagged, its top lying half buried
+    in the drift.
+  - Along the front wall: a row of narrow windows, some blown in, a great
+    stencilled number, the facility's insignia, panel seams and grime.
+  - **The capsules:** a row of upright capsules, each sized for a body with a
+    numbered window, has been torn out through a breach and spilled across
+    the sand. One is shattered and empty, with glass glittering round it. One
+    still glows a faint, pulsing green, with something dark curled behind its
+    frosted window.
+- **The attack:**
+  - Mortar shells have cratered the sand in front of it. Each crater is a
+    bowl with a low rim, burnt black and fanned with scorch, and the ground
+    where the fighting was is scorched in patches.
+  - Shells have blown two holes through the front wall, its plating peeled
+    back round them like petals and soot smudged up the wall. Shrapnel has
+    scarred the wall. Smoke threads from one breach. Torn cable hangs from
+    the other and spits sparks.
+  - The great door is forced: one leaf has slid most of the way into its
+    pocket, and the other has been wrenched off its track and buckled in,
+    with a blast mark and a hole punched through it. Beyond is dark, with a
+    cold blue light far inside that breathes and stutters.
+  - A barricade of crates and plates torn off the wall stands at the foot
+    of the ramp, with spent power cells scattered behind it. One lamp post is
+    knocked flat. The other still flickers.
+  - The beacon over the door still turns, its amber light sweeping round.
+- **The dead:**
+  - One of the creature's own kind, husky green, lies thrown back on the
+    slope behind the barricade. It wears scant armour of the ship's make: an
+    off-white chest plate banded in orange (with two holes burnt through
+    it), a pauldron, a bracer, a thigh plate, a belt and a headset. Its rifle
+    lies by its hand. The rifle is of the same make: an off-white chamfered
+    body banded in orange, and a long hexagonal barrel ringed with coils with
+    an emitter at its muzzle. The power cell in its side still pulses a faint
+    blue.
+  - A human lies face down on the lip of a crater, in black armour from head
+    to foot: a black helmet with one red line across its visor, plated
+    limbs, and a pack with the faction's yellow band. Two holes are burnt
+    through its back plate, still smoking thinly, and its red blood is in the
+    sand. Its rifle, black, heavy and angular, with a long shrouded barrel and
+    a red-lensed sight, lies flung ahead of its reaching hand.
+  - In another crater lies a four-legged machine, black like the drone with
+    the same red eye: a hunting dog of a robot with a gun on its back. It is
+    half sunk in the sand. One front leg is snapped at the knee, and the
+    lower half lies beside it. It is not quite dead: its eye flickers and
+    cuts out, its head twitches (and snaps toward your creature when it is
+    close), the stump of its leg jerks with a whine of servos, and sparks
+    spit from the break.
+- **Sound:**
+  - The wind moans through it: a deep, slowly shifting moan in its halls, a
+    thin whistle through its holes, and a dead-slow throb far underneath.
+  - Its plating groans and creaks in the heat, and something clanks deep
+    inside.
+  - Every so often, a chime sounds over a public-address system somewhere
+    inside: three soft falling notes through a tinny speaker, the last
+    sagging out of tune, then a crackle. Nobody is there to hear it.
+  - The breach's cable snaps and fizzes. The dog's servos whine and stutter,
+    with broken digital chirps as its electronics fail. The human's radio
+    crackles to nobody: a squelch, a burst of hiss with a garbled voice in
+    it, and the squelch again.
+- **Coming upon it:** the first time your creature comes within 36 units, a
+  low, dissonant chord swells out of the wind, with a cold metallic shimmer
+  over it, and your creature stops to look at the door. When it reaches the
+  green one behind the barricade, a sad chord plays and it looks down at it.
+- The interior is not built yet. For now, the door's dark is as far as it
+  goes.
 
 ## Stamina
 
@@ -854,12 +947,14 @@ src/
   render/                 pixel renderer, palette, shared lighting
   world/                  terrain, noise, rocks, wind, particles, footprints,
                           crater, pods and ship, stain map (blood, drag marks),
-                          the tracker, the highlands and their station
+                          the tracker, the highlands and their station,
+                          the facility in the east
   character/              creature rig and procedural animation
   audio/                  synthesised sound, the stranger's voice
   story/                  the opening, the stranger, the tune,
                           pulling the ship's door open, picking up the tracker,
-                          looking into the pods, the three dead
+                          looking into the pods, the three dead,
+                          the dead at the facility's door
 ```
 
 ## Sources

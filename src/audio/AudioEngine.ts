@@ -463,7 +463,7 @@ function impulseResponse(ctx: BaseAudioContext, seconds: number): Buf {
 }
 
 /** What a wreck hums with: a damaged power unit, or a failing light's buzz. */
-export type SiteHum = 'power' | 'buzz' | 'fire';
+export type SiteHum = 'power' | 'buzz' | 'fire' | 'vast';
 
 interface SiteNodes {
   bus: GainNode;
@@ -899,6 +899,65 @@ export class AudioEngine {
         o.connect(og).connect(filt);
         o.start();
       }
+    } else if (kind === 'vast') {
+      // the wind through a great hollow structure: a deep moan in its halls that rises and
+      // sinks, a thin whistle through its holes, and a dead-slow throb far underneath
+      filt.type = 'lowpass';
+      filt.frequency.value = 2400;
+      const air = this.loop(ctx, noiseBuffer(ctx, 7.3, 'brown', 33));
+      for (const [f, q, g, rate] of [
+        [92, 9, 2.4, 0.07],
+        [143, 11, 1.6, 0.05],
+        [211, 12, 1.0, 0.09],
+      ]) {
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = f;
+        bp.Q.value = q;
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = rate;
+        const lg = ctx.createGain();
+        lg.gain.value = f * 0.12;
+        lfo.connect(lg).connect(bp.frequency);
+        lfo.start();
+        const sw = ctx.createGain();
+        sw.gain.value = g;
+        air.connect(bp).connect(sw).connect(filt);
+      }
+      if (this.white) {
+        const hiss = this.loop(ctx, this.white);
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 1750;
+        bp.Q.value = 28;
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = 0.13;
+        const lg = ctx.createGain();
+        lg.gain.value = 260;
+        lfo.connect(lg).connect(bp.frequency);
+        lfo.start();
+        const wg = ctx.createGain();
+        wg.gain.value = 0.35;
+        const swell = ctx.createOscillator();
+        swell.frequency.value = 0.07;
+        const swg = ctx.createGain();
+        swg.gain.value = 0.3;
+        swell.connect(swg).connect(wg.gain);
+        swell.start();
+        hiss.connect(bp).connect(wg).connect(filt);
+      }
+      const throb = ctx.createOscillator();
+      throb.frequency.value = 31;
+      const tg = ctx.createGain();
+      tg.gain.value = 0.25;
+      const tl = ctx.createOscillator();
+      tl.frequency.value = 0.4;
+      const tlg = ctx.createGain();
+      tlg.gain.value = 0.2;
+      tl.connect(tlg).connect(tg.gain);
+      tl.start();
+      throb.connect(tg).connect(filt);
+      throb.start();
     } else {
       // a failing light ballast: a thin, nasal mains buzz
       filt.type = 'bandpass';
@@ -1163,6 +1222,228 @@ export class AudioEngine {
     src.connect(lp).connect(ng).connect(out);
     src.start(now, Math.random());
     src.stop(now + 2.7);
+  }
+
+  /**
+   * A chime over a public-address system deep inside: three soft falling
+   * notes through a tinny speaker, the last sagging out of tune, a crackle of
+   * the speaker breaking up, and nothing after.
+   */
+  facilityChime(i: number, level: number) {
+    const ctx = this.ctx;
+    const n = this.sites[i];
+    if (!ctx || !n) return;
+    const now = ctx.currentTime;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1200;
+    bp.Q.value = 0.9;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    bp.connect(out).connect(n.bus);
+    const send = ctx.createGain();
+    send.gain.value = 1.2;
+    out.connect(send).connect(this.reverbSend);
+    [880, 698.46, 523.25].forEach((f, k) => {
+      const t = now + k * 0.42;
+      const sag = k === 2 ? 0.96 : 1;
+      for (const [mul, type, g] of [
+        [1, 'sine', 0.5],
+        [2.01, 'triangle', 0.12],
+      ] as const) {
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.frequency.setValueAtTime(f * mul, t);
+        o.frequency.linearRampToValueAtTime(f * mul * sag, t + 0.9);
+        const gg = ctx.createGain();
+        gg.gain.setValueAtTime(0.0001, t);
+        gg.gain.exponentialRampToValueAtTime(g, t + 0.01);
+        gg.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+        o.connect(gg).connect(bp);
+        o.start(t);
+        o.stop(t + 1.2);
+      }
+    });
+    if (this.crackles.length) {
+      const c = ctx.createBufferSource();
+      c.buffer = this.any(this.crackles);
+      c.playbackRate.value = 0.7;
+      const cg = ctx.createGain();
+      cg.gain.value = 0.25;
+      c.connect(cg).connect(bp);
+      c.start(now + 1.1);
+    }
+  }
+
+  /** A damaged servo jerking: a ragged whine that climbs and stutters, and a clunk as it stops. */
+  dogServo(i: number, level: number, seconds: number) {
+    const ctx = this.ctx;
+    const n = this.sites[i];
+    if (!ctx || !n) return;
+    const now = ctx.currentTime;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(180 + Math.random() * 60, now);
+    o.frequency.exponentialRampToValueAtTime(620 + Math.random() * 300, now + seconds * 0.6);
+    o.frequency.exponentialRampToValueAtTime(240, now + seconds);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1300;
+    bp.Q.value = 2.5;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level * 0.4, now + 0.03);
+    // it stutters: the drive cutting in and out
+    for (let t = 0.05; t < seconds; t += 0.04 + Math.random() * 0.07) g.gain.setValueAtTime(level * (Math.random() < 0.3 ? 0.03 : 0.4), now + t);
+    g.gain.setTargetAtTime(0.0001, now + seconds, 0.03);
+    o.connect(bp).connect(g).connect(n.bus);
+    o.start(now);
+    o.stop(now + seconds + 0.2);
+    if (this.clanks.length) {
+      const c = ctx.createBufferSource();
+      c.buffer = this.any(this.clanks);
+      c.playbackRate.value = 1.6;
+      const cg = ctx.createGain();
+      cg.gain.value = level * 0.5;
+      c.connect(cg).connect(n.bus);
+      c.start(now + seconds);
+    }
+  }
+
+  /** Its electronics failing: a few bright, broken digital chirps. */
+  dogGlitch(i: number, level: number) {
+    const ctx = this.ctx;
+    const n = this.sites[i];
+    if (!ctx || !n) return;
+    const now = ctx.currentTime;
+    let t = now;
+    const count = 3 + Math.floor(Math.random() * 5);
+    for (let k = 0; k < count; k++) {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = 900 + Math.random() * 2600;
+      const g = ctx.createGain();
+      const d = 0.015 + Math.random() * 0.05;
+      g.gain.setValueAtTime(level * 0.12, t);
+      g.gain.setValueAtTime(0, t + d);
+      o.connect(g).connect(n.bus);
+      o.start(t);
+      o.stop(t + d + 0.01);
+      t += d + Math.random() * 0.04;
+    }
+  }
+
+  /**
+   * A dead soldier's radio: a squelch, a burst of hiss through a narrow band
+   * with a garbled voice in it that cannot be made out, and the squelch again.
+   */
+  radioStatic(i: number, level: number) {
+    const ctx = this.ctx;
+    const n = this.sites[i];
+    if (!ctx || !n || !this.white) return;
+    const now = ctx.currentTime;
+    const dur = 0.6 + Math.random() * 1.1;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1900;
+    bp.Q.value = 1.6;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    bp.connect(out).connect(n.bus);
+    const click = (t: number) => {
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = 1400;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.25, t);
+      g.gain.setValueAtTime(0, t + 0.012);
+      o.connect(g).connect(bp);
+      o.start(t);
+      o.stop(t + 0.02);
+    };
+    click(now);
+    const src = ctx.createBufferSource();
+    src.buffer = this.white;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.22, now + 0.05);
+    g.gain.setValueAtTime(0.22, now + dur);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur + 0.04);
+    src.connect(g).connect(bp);
+    src.start(now, Math.random(), dur + 0.1);
+    // a voice in it, too broken to understand
+    const v = ctx.createOscillator();
+    v.type = 'sawtooth';
+    const vg = ctx.createGain();
+    vg.gain.value = 0;
+    let t = now + 0.08;
+    while (t < now + dur - 0.1) {
+      const seg = 0.06 + Math.random() * 0.14;
+      v.frequency.setValueAtTime(110 + Math.random() * 90, t);
+      vg.gain.setValueAtTime(Math.random() < 0.7 ? 0.12 : 0, t);
+      t += seg;
+    }
+    vg.gain.setValueAtTime(0, t);
+    const f1 = ctx.createBiquadFilter();
+    f1.type = 'bandpass';
+    f1.frequency.value = 900;
+    f1.Q.value = 4;
+    v.connect(f1).connect(vg).connect(bp);
+    v.start(now);
+    v.stop(now + dur + 0.1);
+    click(now + dur + 0.05);
+  }
+
+  /** Coming upon the facility: a low, dissonant cluster swelling out of the wind, a cold metallic shimmer over it. */
+  facilityReveal() {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.linearRampToValueAtTime(0.16, now + 3.5);
+    out.gain.setValueAtTime(0.16, now + 5.5);
+    out.gain.linearRampToValueAtTime(0.0001, now + 12);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(200, now);
+    lp.frequency.linearRampToValueAtTime(1100, now + 4);
+    lp.frequency.linearRampToValueAtTime(300, now + 12);
+    lp.connect(out).connect(this.master);
+    out.connect(this.reverbSend);
+    for (const [f, type, g] of [
+      [55, 'triangle', 0.55],
+      [58.27, 'sine', 0.4],
+      [82.41, 'triangle', 0.3],
+      [116.54, 'sine', 0.22],
+      [164.81, 'sine', 0.12],
+      [174.61, 'sine', 0.1],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      o.connect(og).connect(lp);
+      o.start(now);
+      o.stop(now + 12.5);
+    }
+    // the shimmer: two high, beating tones like a struck girder ringing far off
+    for (const [f, d] of [
+      [1567.98, 0],
+      [1574.5, 0.4],
+    ]) {
+      const o = ctx.createOscillator();
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(0.0001, now + 1.5 + d);
+      og.gain.exponentialRampToValueAtTime(0.025, now + 3 + d);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + 10);
+      o.connect(og).connect(this.master);
+      og.connect(this.reverbSend);
+      o.start(now + 1.5 + d);
+      o.stop(now + 10.5);
+    }
   }
 
   /** The ship's alarm, still going somewhere inside: a muffled, failing two-tone klaxon. */

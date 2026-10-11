@@ -34,6 +34,9 @@ export const shared = {
   /** The ship (see world/crater.ts): centre x, z and bow direction x, z. */
   uSite3: { value: new Vector4(0, 0, 1, 0) },
   uSite3On: { value: 0 },
+  /** The facility (see world/crater.ts): centre x, z and the way it faces x, z. */
+  uSite4: { value: new Vector4(0, 0, 1, 0) },
+  uSite4On: { value: 0 },
   /** The highlands (see world/highlands.ts): centre x, z and the way they open x, z. */
   uHigh: { value: new Vector4(0, 0, -Math.SQRT1_2, Math.SQRT1_2) },
   uHighOn: { value: 0 },

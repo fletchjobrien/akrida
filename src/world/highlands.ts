@@ -31,8 +31,8 @@ export const HIGH = {
  * east of the station.
  */
 export function eastSite(out: { x: number; z: number }) {
-  out.x = HIGH.x + 640;
-  out.z = HIGH.z - 40;
+  out.x = HIGH.x + 300;
+  out.z = HIGH.z - 20;
   return out;
 }
 
