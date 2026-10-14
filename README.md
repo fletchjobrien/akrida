@@ -503,8 +503,9 @@ doorway (or click it) to leave.
   kind, a chair spun away from the desk, papers across the deck, a rack of
   blinking lights in the corner, and a torn cable that sparks.
 - **The lab**, through the short tube: a specimen tank glowing in the middle
-  with a malformed thing curled up in it, turning slowly on its tube, and
-  bubbles rising past it;
+  (about 1.6 units across and 2 tall, big enough for one of your creature's
+  kind full grown) with a half-built thing curled up in it, turning slowly
+  on a tether from the lid, and bubbles rising past it;
   a second tank smashed open, its fluid spilled across the deck among the
   glass; a bench with a microscope and racks of vials; a cold cabinet; a
   console; and cables over the floor.
@@ -559,8 +560,8 @@ doorway (or click it) to leave.
 - **The release:** when all three are in, the reader chimes and a relay
   clunks.
   - Pumps start and the tank drains in gulps and glugs, the fluid swirling
-    away. The thing hanging in it sinks to lie in a heap on the tank's floor,
-    and it gurgles as it breathes air.
+    away. The thing hanging in it sinks with the fluid until it lies curled
+    over its knees on the tank's floor, and it gurgles as it breathes air.
   - The tank's door unseals with a pop and a long hiss, and slides round in a
     gust of steam. The cold air makes it jerk and shriek.
   - **What it is:** an Akridian, one of your creature's own kind, half
@@ -727,7 +728,10 @@ something comes for it.
   release, its body and its stumbling walk in `src/story/Specimen.ts`. Its
   body is the creature's own rig with its materials swapped and frame,
   wiring and actuators added. It lives in a frame of its own about the tank
-  (full size), which carries it while it is in the tank. It walks
+  (full size), which carries it while it is in the tank. When it is set up
+  and when it lands, its bounds are measured from its vertices, and it is
+  moved so that its middle is on the tank's axis and its lowest point is on
+  the floor, so it stays inside the glass (`bounds()`). It walks
   with the creature's own gait (driven like an NPC toward points along the
   cord), and its getting up, falls and stops are scripted poses
   built from the wake-up's (`src/story/WakeUp.ts`), with sudden jerks laid

@@ -1,4 +1,4 @@
-import { BoxGeometry, CylinderGeometry, Group, Mesh, Object3D, Vector2, Vector3, type BufferGeometry, type Material } from 'three';
+import { Box3, BoxGeometry, CylinderGeometry, Group, Matrix4, Mesh, Object3D, Vector2, Vector3, type BufferGeometry, type Material } from 'three';
 import { Creature, type CreatureInput, type World } from '../character/Creature';
 import type { Skin } from '../character/rig';
 import { blendPose, clonePose, type ScriptPose } from '../character/scriptPose';
@@ -10,7 +10,7 @@ import { noise1 } from '../core/math';
 import type { Station } from '../world/station';
 import type { Dust } from '../world/particles';
 import type { AudioEngine } from '../audio/AudioEngine';
-import { BUCKLE, FOURS, HANDS_IN, KNEEL, LIMP, PUSH1, PUSH2, RISE, STAND, STEP_L, STEP_R, ease, hand, mk, type Ease } from './WakeUp';
+import { FOURS, HANDS_IN, KNEEL, LIMP, PUSH2, RISE, STAND, STEP_L, STEP_R, ease, hand, mk, type Ease } from './WakeUp';
 
 const smooth = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
@@ -76,8 +76,39 @@ const FLOAT = mk(STAND, {
   exertion: 0.1,
 });
 
-/** Curled where the fluid left it, on the tank's floor. */
-const HEAP = mk(LIMP, { eyeOpen: 0.4, tremble: 0.5, exertion: 0.8, headYaw: -0.6 });
+/**
+ * Curled where the fluid left it, on the tank's floor: folded over its knees, its head down
+ * and turned, its arms tucked under it (small enough to lie in the tank).
+ */
+const HEAP = mk(FOURS, {
+  pelvisY: 0.22,
+  pelvisZ: -0.4,
+  pelvisPitch: 1.2,
+  pelvisYaw: -0.12,
+  spinePitch: 0.2,
+  chestPitch: 0.15,
+  chestRoll: -0.1,
+  neckPitch: 0.45,
+  headPitch: 0.2,
+  headYaw: -0.6,
+  handL: hand(0.2, 0.0, -0.04),
+  handR: hand(-0.18, 0.0, -0.1),
+  eyeOpen: 0.4,
+  tremble: 0.5,
+  exertion: 0.8,
+});
+
+/** Its hands come out from under it and find the floor under its shoulders. */
+const STIR = mk(HEAP, { handL: hand(0.24, 0.0, 0.12), handR: hand(-0.24, 0.0, 0.1), neckPitch: 0.5, headYaw: -0.3, eyeOpen: 1, tremble: 0.4 });
+
+/** Its chest pushed up on shaking arms. */
+const LIFT = mk(STIR, { pelvisY: 0.24, pelvisPitch: 1.25, spinePitch: -0.05, chestPitch: -0.05, neckPitch: 0.3, headPitch: 0.2, headYaw: -0.1, tremble: 0.9, exertion: 1 });
+
+/** The arms give, and it drops back over its knees. */
+const GIVE = mk(LIFT, { pelvisY: 0.21, pelvisPitch: 1.3, spinePitch: 0.2, chestPitch: 0.15, neckPitch: 0.5, headPitch: 0.25, tremble: 1 });
+
+/** Up on its arms again, higher. */
+const LIFT2 = mk(LIFT, { pelvisY: 0.27, pelvisPitch: 1.2, tremble: 1 });
 
 /** Pitching forward, the hands thrown out too late. */
 const FALLING = mk(STAND, {
@@ -125,10 +156,10 @@ type Key = { t: number; pose: ScriptPose; ease: Ease };
 /** Getting up off the tank's floor: it pushes up, the arms give, it pushes again, knees, and stands. */
 const GET_UP: Key[] = [
   { t: 0, pose: HEAP, ease: 'linear' },
-  { t: 0.45, pose: mk(HANDS_IN, { eyeOpen: 1 }), ease: 'inOut' },
-  { t: 0.95, pose: PUSH1, ease: 'inOut' },
-  { t: 1.2, pose: BUCKLE, ease: 'in' },
-  { t: 1.75, pose: PUSH2, ease: 'inOut' },
+  { t: 0.45, pose: STIR, ease: 'inOut' },
+  { t: 0.95, pose: LIFT, ease: 'inOut' },
+  { t: 1.2, pose: GIVE, ease: 'in' },
+  { t: 1.75, pose: LIFT2, ease: 'inOut' },
   { t: 2.2, pose: FOURS, ease: 'inOut' },
   { t: 2.55, pose: STEP_L, ease: 'inOut' },
   { t: 2.9, pose: KNEEL, ease: 'out' },
@@ -360,7 +391,7 @@ export class Specimen {
     const tank = this.station.interior.tank;
     tank.level = 1;
     tank.liquid.visible = true;
-    tank.liquid.scale.y = 1.47;
+    tank.liquid.scale.y = tank.depth;
     tank.doorPanel.rotation.y = 0;
     tank.floating = true;
     tank.figure.visible = true;
@@ -377,20 +408,41 @@ export class Specimen {
     this.creature = c;
     this.build(c);
     this.holder.add(c.rig.root);
-    // hanging in the fluid on its tether
-    this.holder.position.set(0, -0.72, 0);
+    // hanging in the fluid on its tether: its middle on the tank's axis (so it turns in place,
+    // clear of the glass), and the frame's origin at its lowest point (so it comes to rest on
+    // the floor as the fluid goes)
+    this.holder.position.set(0, 0, 0);
     this.holder.rotation.set(0, 0, 0);
     tank.figure.add(this.holder);
     blendPose(this.pose, FLOAT, FLOAT, 0);
     for (let i = 0; i < 10; i++) c.updateScripted(1 / 30, this.pose, this.floatWorld);
+    const b = this.bounds(tank.figure);
+    this.holder.position.set(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+    tank.rest = 0.03;
     this.makeTube();
+  }
+
+  /** The body's bounds in `frame`'s own space (from its vertices; only while it is set up). */
+  private bounds(frame: Object3D) {
+    frame.updateMatrixWorld(true);
+    const inv = new Matrix4().copy(frame.matrixWorld).invert();
+    const all = new Box3();
+    const m = new Matrix4();
+    const v = new Vector3();
+    this.creature.rig.root.traverse((o) => {
+      if (!(o instanceof Mesh) || !o.visible) return;
+      m.multiplyMatrices(inv, o.matrixWorld);
+      const p = o.geometry.attributes.position;
+      for (let i = 0; i < p.count; i++) all.expandByPoint(v.fromBufferAttribute(p, i).applyMatrix4(m));
+    });
+    return all;
   }
 
   /** The ground under it: the tank's floor, the deck, the airlock's threshold and steps, or the sand. */
   private ground(x: number, z: number) {
     const interior = this.station.interior;
     const tank = interior.tank.at;
-    if (Math.hypot(x - tank.x, z - tank.z) < 0.44) return tank.y;
+    if (Math.hypot(x - tank.x, z - tank.z) < interior.tank.radius) return tank.y;
     const l = interior.root.worldToLocal(this.tmp2.set(x, 0, z));
     const base = interior.root.localToWorld(new Vector3(0, 0, 0)).y;
     if (Math.abs(l.x - 0.9) < 0.6 && l.z > 1.4) {
@@ -490,7 +542,7 @@ export class Specimen {
       // the fluid sinks away, swirling, the figure sinking with it
       tank.level = 1 - smooth(0.2, 2.7, this.t);
       tank.liquid.visible = tank.level > 0.01;
-      tank.liquid.scale.y = Math.max(0.001, 1.47 * tank.level);
+      tank.liquid.scale.y = Math.max(0.001, tank.depth * tank.level);
       if (Math.random() < 0.7) {
         const a = time * 6 + Math.random();
         const r = 0.1 + Math.random() * 0.25;
@@ -788,6 +840,10 @@ export class Specimen {
     c.setYaw(Math.atan2(tank.out.x, tank.out.z));
     c.teleport(0, 0, this.world);
     blendPose(this.pose, HEAP, HEAP, 0);
+    for (let i = 0; i < 6; i++) c.updateScripted(1 / 30, this.pose, this.world);
+    // lying in the middle of the tank's floor, clear of the glass all round
+    const b = this.bounds(this.holder);
+    c.teleport(-(b.min.x + b.max.x) / 2, -(b.min.z + b.max.z) / 2, this.world);
     for (let i = 0; i < 6; i++) c.updateScripted(1 / 30, this.pose, this.world);
     this.splat(tank.at.x, tank.at.z, 0.3, this.wetMat);
   }

@@ -123,6 +123,11 @@ export class StationInterior {
     level: 1,
     /** The figure floats on its tether (false once it has been let go). */
     floating: true,
+    /** The glass's radius, and how deep the fluid is when it is full. */
+    radius: 0.78,
+    depth: 1.87,
+    /** How high the figure's frame must be over the floor for the body to lie on it (set by the specimen). */
+    rest: 0.6,
   };
   /** The card reader on the desk: three slots (red, green, blue), where a card goes in each, its lights. */
   readonly reader = {
@@ -149,6 +154,9 @@ export class StationInterior {
     ghost: new Group(),
   };
   private dockChirp = 0;
+  /** The specimen's tether, from its back up to the tank's lid, and the lid's underside (habitat frame). */
+  private tether!: Mesh;
+  private lidY = 0;
   /** Where the tracker stands in the dock, and how it is turned (world space). */
   dockPose(at: Vector3, q: Quaternion) {
     this.root.updateWorldMatrix(true, false);
@@ -689,7 +697,7 @@ export class StationInterior {
         [7.2, 0.05],
         [7.55, -0.3],
         [7.95, -0.12],
-        [LAB_X + 0.35 - 0.56, LAB_Z - 0.3],
+        [LAB_X + 0.35 - 0.86, LAB_Z - 0.3],
       ]);
     }
     // the wall display over it: a scan of one of the creature's own kind
@@ -788,50 +796,55 @@ export class StationInterior {
     }
     // the specimen tank in the middle: a base, a lid, struts, a glowing column, and one of
     // the creature's own kind curled up in it
+    // (big enough to hold one of the creature's kind full grown, lying curled on its floor)
     const tx = LAB_X + 0.35;
     const tz = LAB_Z - 0.3;
-    this.add(R, new CylinderGeometry(0.55, 0.62, 0.3, 8), m.metal, tx, DECK + 0.15, tz);
-    this.add(R, new CylinderGeometry(0.5, 0.5, 0.06, 8), M.cold, tx, DECK + 0.32, tz);
-    this.add(R, new CylinderGeometry(0.55, 0.5, 0.22, 8), m.metal, tx, DECK + 2.0, tz);
+    const TR = this.tank.radius;
+    const H = this.tank.depth + 0.08;
+    const y0 = DECK + 0.33;
+    this.add(R, new CylinderGeometry(TR + 0.09, TR + 0.16, 0.3, 10), m.metal, tx, DECK + 0.15, tz);
+    this.add(R, new CylinderGeometry(TR + 0.04, TR + 0.04, 0.06, 10), M.cold, tx, DECK + 0.32, tz);
+    this.add(R, new CylinderGeometry(TR + 0.09, TR + 0.04, 0.22, 10), m.metal, tx, y0 + H + 0.12, tz);
     for (let k = 0; k < 4; k++) {
       const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
-      this.box(tx + Math.cos(a) * 0.47 - 0.025, DECK + 0.3, tz + Math.sin(a) * 0.47 - 0.025, tx + Math.cos(a) * 0.47 + 0.025, DECK + 1.9, tz + Math.sin(a) * 0.47 + 0.025, m.metal);
+      const r = TR + 0.02;
+      this.box(tx + Math.cos(a) * r - 0.03, DECK + 0.3, tz + Math.sin(a) * r - 0.03, tx + Math.cos(a) * r + 0.03, y0 + H + 0.02, tz + Math.sin(a) * r + 0.03, m.metal);
     }
     // the glass, and its door (the quarter of it facing the way out, toward the tube)
     const glass = ditherMaterial(0x6a9aa8, 0xc8eef4, 0.22);
-    const H = 1.55;
-    const y0 = DECK + 0.33;
-    this.add(R, new CylinderGeometry(0.46, 0.46, H, 12, 1, true, -Math.PI / 4, (Math.PI * 3) / 2), glass, tx, y0 + H / 2, tz, false);
+    this.add(R, new CylinderGeometry(TR, TR, H, 16, 1, true, -Math.PI / 4, (Math.PI * 3) / 2), glass, tx, y0 + H / 2, tz, false);
     const door = new Group();
     door.position.set(tx, y0, tz);
     R.add(door);
-    const panel = this.add(door, new CylinderGeometry(0.465, 0.465, H, 4, 1, true, (-Math.PI * 3) / 4, Math.PI / 2), glass, 0, H / 2, 0, false);
+    const panel = this.add(door, new CylinderGeometry(TR + 0.005, TR + 0.005, H, 5, 1, true, (-Math.PI * 3) / 4, Math.PI / 2), glass, 0, H / 2, 0, false);
     // its frame and handle
-    for (const a of [(-Math.PI * 3) / 4, -Math.PI / 4]) this.box(Math.sin(a) * 0.47 - 0.02, 0, Math.cos(a) * 0.47 - 0.02, Math.sin(a) * 0.47 + 0.02, H, Math.cos(a) * 0.47 + 0.02, m.accent, door);
-    this.box(-0.5, H * 0.5 - 0.1, -0.03, -0.47, H * 0.5 + 0.1, 0.03, m.metal, door);
+    for (const a of [(-Math.PI * 3) / 4, -Math.PI / 4]) this.box(Math.sin(a) * (TR + 0.01) - 0.02, 0, Math.cos(a) * (TR + 0.01) - 0.02, Math.sin(a) * (TR + 0.01) + 0.02, H, Math.cos(a) * (TR + 0.01) + 0.02, m.accent, door);
+    this.box(-TR - 0.04, H * 0.5 - 0.1, -0.03, -TR - 0.01, H * 0.5 + 0.1, 0.03, m.metal, door);
     void panel;
     this.keep.push(door);
     // the fluid it floats in, see-through, lit from below
     const fluid = ditherMaterial(0x2a8a84, 0x6ae8d8, 0.4);
-    const liquid = this.add(R, new CylinderGeometry(0.44, 0.44, 1, 12).translate(0, 0.5, 0), fluid, tx, y0, tz, false);
-    liquid.scale.y = H - 0.08;
+    const liquid = this.add(R, new CylinderGeometry(TR - 0.02, TR - 0.02, 1, 16).translate(0, 0.5, 0), fluid, tx, y0, tz, false);
+    liquid.scale.y = this.tank.depth;
     this.keep.push(liquid);
     this.tank.liquid = liquid;
     this.tank.doorPanel = door;
     const sp = new Group();
-    sp.position.set(tx, DECK + 1.1, tz);
+    sp.position.set(tx, y0 + this.tank.rest + 0.4, tz);
     R.add(sp);
-    // (the body itself is the specimen's: story/Specimen.ts hangs it here)
-    this.add(sp, new BoxGeometry(0.02, 0.4, 0.02), m.metal, 0, 0.35, 0);
+    // (the body itself is the specimen's: story/Specimen.ts hangs it here) on a tether from
+    // the lid, which pays out as it sinks
+    this.tether = this.add(sp, new BoxGeometry(0.02, 1, 0.02).translate(0, 0.5, 0), m.metal, 0, 0.75, 0);
+    this.lidY = y0 + H;
     this.specimen = sp;
     this.keep.push(sp);
     this.root.localToWorld(this.tankAt.set(tx, DECK + 0.4, tz));
     this.tank.glow = this.glow(0x5ae8d8, 0.75, tx, DECK + 1.1, tz + 0.1, 0.5);
     this.tank.figure = sp;
     this.root.localToWorld(this.tank.at.set(tx, DECK + 0.33, tz));
-    this.root.localToWorld(this.tank.door.set(tx - 0.48, DECK + 0.33, tz));
+    this.root.localToWorld(this.tank.door.set(tx - TR - 0.04, DECK + 0.33, tz));
     this.tank.out.set(-1, 0, 0).transformDirection(this.root.matrixWorld);
-    this.round(tx, tz, 0.68);
+    this.round(tx, tz, TR + 0.24);
     // the second tank, smashed: its frame bent, its fluid spilled across the deck
     const bx = LAB_X - 0.9;
     const bz = LAB_Z + 1.2;
@@ -1022,7 +1035,9 @@ export class StationInterior {
     // the specimen turns slowly in the fluid
     if (this.tank.floating) {
       this.specimen.rotation.y = time * 0.12;
-      this.specimen.position.y = DECK + 0.33 + 0.77 * Math.max(this.tank.level, 0) + Math.sin(time * 0.7) * 0.05 * this.tank.level;
+      // it sinks with the fluid until it lies on the floor
+      this.specimen.position.y = DECK + 0.33 + this.tank.rest + 0.4 * Math.max(this.tank.level, 0) + Math.sin(time * 0.7) * 0.05 * this.tank.level;
+      this.tether.scale.y = Math.max(0.01, this.lidY + 0.05 - this.specimen.position.y - this.tether.position.y);
     }
 
     if (inside < 0.5) return;
@@ -1031,7 +1046,7 @@ export class StationInterior {
     if (this.bubbleTimer <= 0 && this.tank.level > 0.05) {
       this.bubbleTimer = 0.08 + Math.random() * 0.2;
       const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * 0.32;
+      const r = Math.random() * (this.tank.radius - 0.15);
       this.dust.spawn(this.tankAt.x + Math.cos(a) * r, this.tankAt.y, this.tankAt.z + Math.sin(a) * r, 0, 0.5 + Math.random() * 0.4, 0, 2.6 * this.tank.level, BUBBLE, 1, { g: -0.1, drag: 0.2, windK: 0, c2: BUBBLE_FADE });
       if (Math.random() < 0.12) this.audio.roomBubble(0.05 + Math.random() * 0.04);
     }
