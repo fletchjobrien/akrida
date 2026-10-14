@@ -158,6 +158,13 @@ export class Aftermath {
     scene.add(this.group, this.cellGlow, this.eyeGlow);
   }
 
+  /** Out of sight (the creature is inside the buried facility, and the outside is not drawn). */
+  setHidden(on: boolean) {
+    this.group.visible = !on;
+    this.cellGlow.hidden = on;
+    this.eyeGlow.hidden = on;
+  }
+
   private add(parent: Object3D, geo: BufferGeometry, mat: Material, x: number, y: number, z: number, shadow = true) {
     const m = new Mesh(faceted(geo), mat);
     m.position.set(x, y, z);

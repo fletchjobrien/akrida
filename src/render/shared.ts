@@ -50,9 +50,16 @@ export const shared = {
    * x, y, z and strength. They light only what is inside its walls (the box
    * `uRoomInv` maps into), and only while the creature is inside (`uRoomOn`).
    */
-  uRoomLight: { value: [0, 1, 2, 3, 4].map(() => new Vector4(0, 0, 0, 0)) },
+  uRoomLight: { value: [0, 1, 2, 3, 4, 5, 6, 7].map(() => new Vector4(0, 0, 0, 0)) },
   uRoomInv: { value: new Matrix4() },
   uRoomOn: { value: 0 },
+  /** Which building the creature is in: 0 the research station, 1 the facility in the east. */
+  uRoomKind: { value: 0 },
+  /**
+   * 1 while the creature is inside the buried facility: the ground (and the
+   * drift heaped over the hall) is not drawn, so the rooms are seen in the dark.
+   */
+  uVoid: { value: 0 },
 };
 
 /**
@@ -65,9 +72,21 @@ export const shared = {
 export const ROOM_GLSL = /* glsl */ `
 uniform mat4 uRoomInv;
 uniform float uRoomOn;
+uniform float uRoomKind;
+uniform float uVoid;
+bool outsideRoom(vec3 wp);
+// inside the buried facility only its rooms are drawn: everything else is the dark round them
+bool inVoid(vec3 wp) { return uVoid > 0.5 && outsideRoom(wp); }
 bool outsideRoom(vec3 wp) {
   if (uRoomOn < 0.5) return false;
   vec3 l = (uRoomInv * vec4(wp, 1.0)).xyz;
+  if (uRoomKind > 0.5) {
+    // the facility's hall (in its own frame), and the doorway through its front
+    if (l.y > 9.5 || l.y < -1.0) return true;
+    bool hall = abs(l.x) < 17.7 && l.z > -7.7 && l.z < 7.7;
+    bool door = abs(l.x) < 2.6 && l.z > 6.0 && l.z < 8.4;
+    return !(hall || door);
+  }
   if (l.y > 3.0) return true;
   bool hab = abs(l.x) < 5.68 && l.z > -2.42 && l.z < 2.35;
   bool tube = l.x > 5.2 && l.x < 6.4 && l.z > -0.62 && l.z < 1.02;
@@ -88,7 +107,7 @@ uniform vec2 uWindDir;
 uniform float uWindStrength;
 uniform float uWindTravel;
 uniform vec2 uPixelWorld;
-uniform vec4 uRoomLight[5];
+uniform vec4 uRoomLight[8];
 ${ROOM_GLSL}
 
 ${NOISE_GLSL}
@@ -98,7 +117,7 @@ ${NOISE_GLSL}
 float roomLight(vec3 wp, vec3 n) {
   if (uRoomOn < 0.5 || outsideRoom(wp)) return 0.0;
   float l = 0.0;
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 8; i++) {
     vec3 d = uRoomLight[i].xyz - wp;
     float r2 = dot(d, d) + 0.01;
     l += uRoomLight[i].w / (1.0 + r2 * 0.55) * (0.3 + 0.7 * max(0.0, dot(n, d * inversesqrt(r2))));
@@ -176,6 +195,7 @@ in vec3 vWorldPos;
 in vec3 vWorldNormal;
 in vec3 vViewNormal;
 void main() {
+  if (inVoid(vWorldPos)) discard;
   vec3 n = normalize(vWorldNormal);
   if (!gl_FrontFacing) n = -n;
   float ndl = dot(n, uSunDir);

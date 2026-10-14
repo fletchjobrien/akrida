@@ -42,6 +42,7 @@ in float vBirth;
 in float vKind;
 in vec2 vUv;
 void main() {
+  if (inVoid(vWorldPos)) discard;
   float age = uTime - vBirth;
   float d = worldDither();
   float alive = 1.0 - smoothstep(uLife * 0.45, uLife, age);

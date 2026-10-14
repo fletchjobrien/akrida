@@ -2,7 +2,7 @@ import { clamp, lerp, noise1, rng } from '../core/math';
 import type { StaminaCue, StepEvent } from '../character/Creature';
 import type { Wind } from '../world/wind';
 import { buildVoicesSliced, type Voices } from './voice';
-import { TONES } from '../story/tune';
+import { SONG_TONES, TONES } from '../story/tune';
 
 /**
  * All sound is synthesised at start-up with the Web Audio API: no samples.
@@ -539,6 +539,19 @@ export class AudioEngine {
   /** How far indoors the creature is (0..1), and the room's own sound once built. */
   private indoor = 0;
   private room: { bus: GainNode; buzz: GainNode; echo: GainNode } | null = null;
+  /** The facility's great hall: its own ambience, and a long, dark reverb for what sounds in it. */
+  private hall: {
+    bus: GainNode;
+    verb: GainNode;
+    sand: GainNode;
+    sandPan: StereoPannerNode;
+    core: GainNode;
+    corePan: StereoPannerNode;
+    whine: GainNode;
+    feed: GainNode;
+  } | null = null;
+  /** Which building the creature is in, for where the sounds in it echo: 0 the station, 1 the facility. */
+  private indoorKind = 0;
   /** The drone's rotors: their level, pan, pitch, and the scream of the dive. */
   private drone: { bus: GainNode; pan: StereoPannerNode; oscs: OscillatorNode[]; base: number[]; wash: BiquadFilterNode; tone: BiquadFilterNode } | null = null;
   private ring: GainNode | null = null;
@@ -1801,26 +1814,75 @@ export class AudioEngine {
   /**
    * One note of the song the tracker picks up when it points true: tone
    * `tone` (SONG_TONES), held `seconds`, through its song channel (which is
-   * only open as far as it points true).
+   * only open as far as it points true). `clarity` (0..1) is how clean the
+   * signal is: far from where it leads the note comes through broken, cutting
+   * out, wavering in pitch, crushed and thin; near, it is clear.
    */
-  trackerSong(tone: number, seconds: number, level: number) {
+  trackerSong(tone: number, seconds: number, level: number, clarity = 1) {
     const ctx = this.ctx;
     const t = this.trackerBus();
     const buf = this.songVoices[tone];
     if (!ctx || !t || !buf) return;
     const now = ctx.currentTime;
+    const bad = 1 - Math.max(0, Math.min(1, clarity));
     const src = ctx.createBufferSource();
     src.buffer = buf;
     // held notes are stretched a little slower, so they hang
     const hold = Math.max(seconds, 0.3);
-    src.playbackRate.value = hold > 1.2 ? 0.995 : 1;
+    const rate = hold > 1.2 ? 0.995 : 1;
+    src.playbackRate.setValueAtTime(rate, now);
+    // the signal drifts: the pitch wavers as it fades in and out
+    if (bad > 0.05) {
+      let at = now + 0.05;
+      while (at < now + hold + 0.6) {
+        src.playbackRate.linearRampToValueAtTime(rate * (1 + (Math.random() - 0.5) * 0.05 * bad), at);
+        at += 0.06 + Math.random() * 0.12;
+      }
+    }
     const g = ctx.createGain();
     g.gain.setValueAtTime(level, now);
+    // it cuts out: short gaps, more and longer the worse the signal
+    if (bad > 0.05) {
+      let at = now + 0.08 + Math.random() * 0.15;
+      while (at < now + hold) {
+        const gap = 0.02 + Math.random() * 0.1 * bad;
+        if (Math.random() < bad * 0.85) {
+          g.gain.setValueAtTime(level * 0.04, at);
+          g.gain.setValueAtTime(level, at + gap);
+        }
+        at += gap + 0.05 + Math.random() * 0.25 * (1.2 - bad);
+      }
+    }
     g.gain.setValueAtTime(level, now + Math.min(hold, 1.0));
     g.gain.setTargetAtTime(0.0001, now + Math.min(hold, 1.0), hold > 1.2 ? 0.5 : 0.18);
-    src.connect(g).connect(t.hot);
+    // and it is thin and crushed, as from a cheap radio a long way off
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = 900 + 500 * bad;
+    band.Q.value = 0.35 + 2.6 * bad;
+    const dry = ctx.createGain();
+    dry.gain.value = 1 - 0.7 * bad;
+    const wet = ctx.createGain();
+    wet.gain.value = 0.9 * bad;
+    src.connect(g).connect(band);
+    band.connect(dry).connect(t.hot);
+    band.connect(this.crusher(ctx)).connect(wet).connect(t.hot);
     src.start(now);
     src.stop(now + 3);
+  }
+
+  private crushCurve: Float32Array<ArrayBuffer> | null = null;
+  /** A waveshaper that rounds the signal to a few steps (bit crushing, the grit of a bad signal). */
+  private crusher(ctx: AudioContext) {
+    if (!this.crushCurve) {
+      const n = 1024;
+      const steps = 5;
+      this.crushCurve = new Float32Array(n);
+      for (let i = 0; i < n; i++) this.crushCurve[i] = Math.round(((i / (n - 1)) * 2 - 1) * steps) / steps;
+    }
+    const w = ctx.createWaveShaper();
+    w.curve = this.crushCurve;
+    return w;
   }
 
   /**
@@ -1897,6 +1959,438 @@ export class AudioEngine {
     const now = ctx.currentTime;
     this.trackerVoice(2093, 2093, now, 0.004, 0.035, 0.05, level, 'square');
     this.trackerVoice(2637, 2637, now + 0.075, 0.004, 0.035, 0.05, level * 0.9, 'square');
+  }
+
+  /**
+   * The dock singing a note of the song the tracker sang on its way here, out of
+   * its own small speaker: clear, a little thin and boxy, in the room.
+   */
+  dockSong(tone: number, seconds: number, level: number) {
+    const ctx = this.ctx;
+    const buf = this.songVoices[tone];
+    if (!ctx || !buf || level < 0.003) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const hold = Math.max(seconds, 0.3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(level, now);
+    g.gain.setValueAtTime(level, now + Math.min(hold, 1.0));
+    g.gain.setTargetAtTime(0.0001, now + Math.min(hold, 1.0), hold > 1.2 ? 0.45 : 0.16);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 260;
+    const box = ctx.createBiquadFilter();
+    box.type = 'peaking';
+    box.frequency.value = 1400;
+    box.gain.value = 5;
+    box.Q.value = 1.2;
+    src.connect(g).connect(hp).connect(box).connect(this.master);
+    const r = this.roomBus();
+    if (r) box.connect(r.echo);
+    src.start(now);
+    src.stop(now + 3);
+  }
+
+
+  // ------------------------------------------------------------------ the facility's hall
+
+  /** Where something sounding indoors sends its echo: the station's little room, or the hall's long dark. */
+  private roomSend(): AudioNode | null {
+    if (this.indoor < 0.5) return null;
+    if (this.indoorKind === 1) return this.hallBus()?.verb ?? null;
+    return this.roomBus()?.echo ?? null;
+  }
+
+  private hallBus() {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return null;
+    if (this.hall) return this.hall;
+    const bus = ctx.createGain();
+    bus.gain.value = 0;
+    bus.connect(this.master);
+    // a long, dark reverb: the hall is huge, its walls hard, its far end lost in the dark
+    const verb = ctx.createGain();
+    verb.gain.value = 0.55;
+    const conv = ctx.createConvolver();
+    conv.buffer = impulseResponse(ctx, 4.2);
+    const dark = ctx.createBiquadFilter();
+    dark.type = 'lowpass';
+    dark.frequency.value = 2600;
+    verb.connect(conv).connect(dark).connect(this.master);
+    // the room tone: the deep moan of a great hollow space with the wind in it, rising and sinking
+    {
+      const air = this.loop(ctx, noiseBuffer(ctx, 8.3, 'brown', 61));
+      for (const [f, q, g, rate] of [
+        [48, 6, 2.2, 0.05],
+        [76, 9, 1.4, 0.07],
+        [118, 12, 0.7, 0.04],
+      ]) {
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = f;
+        bp.Q.value = q;
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = rate;
+        const lg = ctx.createGain();
+        lg.gain.value = f * 0.1;
+        lfo.connect(lg).connect(bp.frequency);
+        lfo.start();
+        const g2 = ctx.createGain();
+        g2.gain.value = g * 0.06;
+        air.connect(bp).connect(g2).connect(bus);
+      }
+      // the wind's thin keening through the hole in the roof, far up
+      const hiss = this.loop(ctx, this.white);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1300;
+      bp.Q.value = 22;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 0.09;
+      const lg = ctx.createGain();
+      lg.gain.value = 240;
+      lfo.connect(lg).connect(bp.frequency);
+      lfo.start();
+      const wg = ctx.createGain();
+      wg.gain.value = 0.02;
+      const sw = ctx.createOscillator();
+      sw.frequency.value = 0.06;
+      const swg = ctx.createGain();
+      swg.gain.value = 0.016;
+      sw.connect(swg).connect(wg.gain);
+      sw.start();
+      hiss.connect(bp).connect(wg).connect(bus);
+      wg.connect(verb);
+    }
+    // sand pouring in through the hole: a soft, steady hiss with a grainy patter in it
+    const sand = ctx.createGain();
+    sand.gain.value = 0;
+    const sandPan = ctx.createStereoPanner();
+    {
+      const pink = this.loop(ctx, noiseBuffer(ctx, 6.1, 'pink', 71));
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 900;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 5200;
+      const grain = ctx.createGain();
+      grain.gain.value = 0.6;
+      const lfo = ctx.createOscillator();
+      lfo.type = 'square';
+      lfo.frequency.value = 23;
+      const lg = ctx.createGain();
+      lg.gain.value = 0.25;
+      lfo.connect(lg).connect(grain.gain);
+      lfo.start();
+      pink.connect(hp).connect(lp).connect(grain).connect(sand);
+      sand.connect(sandPan).connect(bus);
+      sandPan.connect(verb);
+    }
+    // the gantry's heart, still lit: a deep, slow-beating chord in the Akridians' own low
+    // tones, a shimmer over it that swells and fades like breath
+    const core = ctx.createGain();
+    core.gain.value = 0;
+    const corePan = ctx.createStereoPanner();
+    {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 900;
+      for (const [f, g] of [
+        [61.74, 0.5],
+        [61.95, 0.4],
+        [92.5, 0.28],
+        [123.47, 0.2],
+        [185.0, 0.08],
+      ]) {
+        const o = ctx.createOscillator();
+        o.type = 'triangle';
+        o.frequency.value = f;
+        const og = ctx.createGain();
+        og.gain.value = g;
+        o.connect(og).connect(lp);
+        o.start();
+      }
+      const shim = ctx.createGain();
+      shim.gain.value = 0;
+      const breath = ctx.createOscillator();
+      breath.frequency.value = 0.08;
+      const bg = ctx.createGain();
+      bg.gain.value = 0.035;
+      breath.connect(bg).connect(shim.gain);
+      breath.start();
+      for (const f of [987.77, 989.6, 1479.98]) {
+        const o = ctx.createOscillator();
+        o.frequency.value = f;
+        o.connect(shim);
+        o.start();
+      }
+      lp.connect(core);
+      shim.connect(core);
+      core.connect(corePan).connect(bus);
+      corePan.connect(verb);
+    }
+    // the monitors in the security office: a thin high whine and the hum of their supply
+    const whine = ctx.createGain();
+    whine.gain.value = 0;
+    for (const [f, g, type] of [
+      [7812, 0.012, 'sine'],
+      [60, 0.12, 'sawtooth'],
+      [120, 0.05, 'square'],
+    ] as const) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f;
+      const og = ctx.createGain();
+      og.gain.value = g;
+      const lp = ctx.createBiquadFilter();
+      lp.type = f > 1000 ? 'highpass' : 'lowpass';
+      lp.frequency.value = f > 1000 ? 6000 : 400;
+      o.connect(og).connect(lp).connect(whine);
+      o.start();
+    }
+    whine.connect(bus);
+    // watching a camera's feed: its own hiss and hum in the ear
+    const feed = ctx.createGain();
+    feed.gain.value = 0;
+    {
+      const src = this.loop(ctx, this.white);
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 3200;
+      bp.Q.value = 0.6;
+      const g2 = ctx.createGain();
+      g2.gain.value = 0.05;
+      src.connect(bp).connect(g2).connect(feed);
+      const o = ctx.createOscillator();
+      o.type = 'square';
+      o.frequency.value = 15.6;
+      const og = ctx.createGain();
+      og.gain.value = 0.02;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 300;
+      o.connect(og).connect(lp).connect(feed);
+      o.start();
+      feed.connect(this.master);
+    }
+    this.hall = { bus, verb, sand, sandPan, core, corePan, whine, feed };
+    return this.hall;
+  }
+
+  /**
+   * Place the listener in the hall: how near (0..1) and which side (-1..1) the
+   * falling sand and the gantry's heart are, and how near the monitors.
+   */
+  setHall(sand: number, sandPan: number, core: number, corePan: number, monitors: number) {
+    const ctx = this.ctx;
+    const h = this.hallBus();
+    if (!ctx || !h) return;
+    const now = ctx.currentTime;
+    h.sand.gain.setTargetAtTime(sand * 0.12, now, 0.2);
+    h.sandPan.pan.setTargetAtTime(sandPan, now, 0.2);
+    h.core.gain.setTargetAtTime(core * 0.05, now, 0.3);
+    h.corePan.pan.setTargetAtTime(corePan, now, 0.3);
+    h.whine.gain.setTargetAtTime(monitors * 0.12, now, 0.2);
+  }
+
+  /** The hiss and hum of watching a camera's feed (0..1). */
+  setFeed(level: number) {
+    const ctx = this.ctx;
+    const h = this.hallBus();
+    if (!ctx || !h) return;
+    h.feed.gain.setTargetAtTime(level, ctx.currentTime, 0.05);
+  }
+
+  /** Switching to another camera: a relay's click and a burst of snow. */
+  feedSwitch(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    out.connect(this.master);
+    this.burst(now, 0.008, 3800, 2600, 4, 0.8, out);
+    this.tone(now, 160, 0.05, 0.25, out, 'square');
+    this.burst(now + 0.02, 0.32, 4200, 2600, 0.5, 0.45, out);
+    this.tone(now + 0.03, 15625 / 2, 0.3, 0.02, out);
+  }
+
+  /**
+   * A knock on a pipe: the knuckle's knock, and the pipe ringing on tone `f`
+   * (Hz) with a metallic clang over it, ringing long down the hall. Heard from
+   * the other side of a wall (`muffled`), it comes dull and faint.
+   */
+  pipeKnock(f: number, level: number, pan: number, muffled = false, big = 0.5) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white || level < 0.003) return;
+    const now = ctx.currentTime + 0.005;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    let out: AudioNode = p;
+    if (muffled) {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 650;
+      lp.Q.value = 0.8;
+      p.connect(lp).connect(this.master);
+      out = lp;
+    } else p.connect(this.master);
+    const send = this.roomSend();
+    if (send) out.connect(send);
+    const g = ctx.createGain();
+    g.gain.value = level;
+    g.connect(p);
+    // the knuckle: a short dull knock
+    this.burst(now, 0.035, 1400, 500, 1.2, 0.45, g);
+    this.tone(now, 110 + Math.random() * 20, 0.06, 0.4, g);
+    // the pipe: its tone and its overtones (harmonic, as its column rings), and the metal's
+    // own inharmonic clang, dying fast; bigger pipes ring longer
+    const ring = 0.7 + 0.9 * big;
+    for (const [m, a, d] of [
+      [1, 0.55, ring],
+      [2.003, 0.22, ring * 0.6],
+      [3.01, 0.08, ring * 0.35],
+      [2.76, 0.1, 0.18],
+      [5.4, 0.06, 0.09],
+      [8.93, 0.03, 0.05],
+    ]) {
+      const o = ctx.createOscillator();
+      o.frequency.value = f * m * (1 + (Math.random() - 0.5) * 0.002);
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(0.0001, now);
+      og.gain.exponentialRampToValueAtTime(a, now + 0.004);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + d);
+      o.connect(og).connect(g);
+      o.start(now);
+      o.stop(now + d + 0.05);
+    }
+  }
+
+  /** Trying a door that will not open: the handle wrenched, the lock's bolts knocking in their keeps. */
+  vaultRattle(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    out.connect(this.master);
+    const send = this.roomSend();
+    if (send) out.connect(send);
+    for (let i = 0; i < 4; i++) {
+      const t = now + i * 0.13 + Math.random() * 0.03;
+      this.burst(t, 0.05, 900 + Math.random() * 400, 300, 3, 0.5, out);
+      this.tone(t, 70 + Math.random() * 15, 0.12, 0.45, out);
+      this.tone(t + 0.005, 1830 + Math.random() * 300, 0.07, 0.05, out, 'square');
+    }
+    // and its lock's light chirps: no
+    this.tone(now + 0.6, 440, 0.12, 0.08, out, 'square');
+    this.tone(now + 0.75, 330, 0.18, 0.08, out, 'square');
+  }
+
+  /** The door unlocking from inside: three heavy bolts drawn one by one, a seal breaking with a long hiss. */
+  vaultUnlock(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    out.connect(this.master);
+    const send = this.roomSend();
+    if (send) out.connect(send);
+    for (let i = 0; i < 3; i++) {
+      const t = now + i * 0.55;
+      this.burst(t, 0.14, 2600, 400, 2, 0.35, out);
+      this.tone(t + 0.12, 55, 0.35, 0.7, out);
+      this.burst(t + 0.12, 0.08, 1200, 300, 2, 0.6, out);
+    }
+    this.tone(now + 1.75, 523.25, 0.25, 0.08, out, 'triangle');
+    this.tone(now + 1.9, 783.99, 0.5, 0.08, out, 'triangle');
+    this.burst(now + 1.8, 1.6, 6000, 1800, 0.6, 0.25, out);
+  }
+
+  /** The door grinding open along its track. */
+  vaultSlide(seconds: number, level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, now);
+    out.gain.exponentialRampToValueAtTime(level, now + 0.2);
+    out.gain.setValueAtTime(level, now + seconds - 0.25);
+    out.gain.exponentialRampToValueAtTime(0.0001, now + seconds);
+    out.connect(this.master);
+    const send = this.roomSend();
+    if (send) out.connect(send);
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(48, now);
+    o.frequency.linearRampToValueAtTime(62, now + seconds);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 380;
+    const og = ctx.createGain();
+    og.gain.value = 0.5;
+    o.connect(lp).connect(og).connect(out);
+    o.start(now);
+    o.stop(now + seconds + 0.1);
+    const grit = ctx.createBufferSource();
+    grit.buffer = this.white;
+    grit.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1500;
+    bp.Q.value = 1.5;
+    const gg = ctx.createGain();
+    gg.gain.value = 0.25;
+    grit.connect(bp).connect(gg).connect(out);
+    grit.start(now);
+    grit.stop(now + seconds + 0.1);
+    // and it thumps home into its pocket
+    this.tone(now + seconds - 0.05, 60, 0.4, 0.8 * level, this.master);
+  }
+
+  /** A groan of the hall's frame settling, deep and long, far off in the dark. */
+  hallGroan(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.creaks.length) return;
+    const now = ctx.currentTime;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(this.master);
+    const send = this.roomSend();
+    if (send) p.connect(send);
+    const src = ctx.createBufferSource();
+    src.buffer = this.any(this.creaks);
+    src.playbackRate.value = 0.35 + Math.random() * 0.2;
+    const g = ctx.createGain();
+    g.gain.value = level;
+    src.connect(g).connect(p);
+    src.start(now);
+  }
+
+  /** A drip, somewhere in the dark: a small bright plink, and its echo. */
+  hallDrip(level: number, pan: number) {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(this.master);
+    const send = this.roomSend();
+    if (send) p.connect(send);
+    const o = ctx.createOscillator();
+    const f = 1400 + Math.random() * 900;
+    o.frequency.setValueAtTime(f, now);
+    o.frequency.exponentialRampToValueAtTime(f * 1.6, now + 0.05);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(level, now + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    o.connect(g).connect(p);
+    o.start(now);
+    o.stop(now + 0.12);
   }
 
   /** The dock calling for the tracker: a soft, bright two-note chirp, in the room. */
@@ -2205,10 +2699,22 @@ export class AudioEngine {
    * through the walls, and the room's own sound comes up: a lamp ballast's
    * buzz, an air handler's fan, a low vent drone, and the whine of the rack.
    */
-  setIndoors(amount: number, flicker = 1) {
+  setIndoors(amount: number, flicker = 1, kind = 0) {
     const ctx = this.ctx;
     if (!ctx || !this.outside) return;
     this.indoor = amount;
+    this.indoorKind = kind;
+    if (kind === 1) {
+      // the facility: deep underground, the outside barely there; the station's room is silent
+      const now = ctx.currentTime;
+      this.outside.frequency.setTargetAtTime(20000 * Math.pow(260 / 20000, amount), now, 0.2);
+      this.outsideGain.gain.setTargetAtTime(1 - 0.75 * amount, now, 0.2);
+      if (this.room) this.room.bus.gain.setTargetAtTime(0, now, 0.2);
+      const h = this.hallBus();
+      if (h) h.bus.gain.setTargetAtTime(amount * this.envLevel, now, 0.3);
+      return;
+    }
+    if (this.hall) this.hall.bus.gain.setTargetAtTime(0, ctx.currentTime, 0.3);
     const now = ctx.currentTime;
     this.outside.frequency.setTargetAtTime(20000 * Math.pow(500 / 20000, amount), now, 0.15);
     this.outsideGain.gain.setTargetAtTime(1 - 0.6 * amount, now, 0.15);
@@ -3162,15 +3668,23 @@ export class AudioEngine {
    * The thing from the tank: small, wet, in pain. A ragged gasp, a thin mewling
    * cry that cracks and wavers, or a wet rattle in its chest.
    */
-  specimenVoice(kind: 'gasp' | 'mewl' | 'rattle' | 'gurgle' | 'whimper' | 'retch' | 'shriek', level: number, pan: number) {
+  specimenVoice(kind: 'gasp' | 'mewl' | 'rattle' | 'gurgle' | 'whimper' | 'retch' | 'shriek', level: number, pan: number, muffled = false) {
     const ctx = this.ctx;
     if (!ctx || level < 0.005) return;
     const now = ctx.currentTime;
     const p = ctx.createStereoPanner();
     p.pan.value = pan;
-    p.connect(this.master);
-    const r = this.roomBus();
-    if (r && this.indoor > 0.5) p.connect(r.echo);
+    let out: AudioNode = p;
+    if (muffled) {
+      // through a wall: dull and close-mouthed
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 750;
+      p.connect(lp).connect(this.master);
+      out = lp;
+    } else p.connect(this.master);
+    const send = this.roomSend();
+    if (send) out.connect(send);
     const play = (bank: Buf[], rate: number, gain: number, at = now) => {
       if (!bank.length) return;
       const src = ctx.createBufferSource();
@@ -3604,6 +4118,43 @@ export class AudioEngine {
   /** A gargled, static-laced cry of pain. */
   strangerGargle(level: number) {
     this.playStranger(this.any(this.gargles), level);
+  }
+
+  /**
+   * The survivor singing a note at `f` Hz: the same clear, humming voice as the
+   * tracker's songs, soft and unsteady, muffled when there is a wall between.
+   */
+  survivorNote(f: number, seconds: number, level: number, pan: number, muffled = false) {
+    const ctx = this.ctx;
+    if (!ctx || !this.songVoices.length || level < 0.003) return;
+    let k = 0;
+    for (let i = 1; i < SONG_TONES.length; i++) if (Math.abs(Math.log(f / SONG_TONES[i])) < Math.abs(Math.log(f / SONG_TONES[k]))) k = i;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.songVoices[k];
+    src.playbackRate.setValueAtTime(f / SONG_TONES[k], now);
+    // a voice that shakes
+    for (let t = 0.1; t < seconds + 0.6; t += 0.09) src.playbackRate.linearRampToValueAtTime((f / SONG_TONES[k]) * (1 + (Math.random() - 0.5) * 0.012), now + t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(level, now);
+    g.gain.setValueAtTime(level, now + seconds);
+    g.gain.setTargetAtTime(0.0001, now + seconds, 0.3);
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    src.connect(g).connect(p);
+    let out: AudioNode = p;
+    if (muffled) {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 700;
+      p.connect(lp);
+      out = lp;
+    }
+    out.connect(this.master);
+    const send = this.roomSend();
+    if (send) out.connect(send);
+    src.start(now);
+    src.stop(now + seconds + 2);
   }
 
   /** One raspy note: `tone` indexes TONES (see story/tune.ts). */

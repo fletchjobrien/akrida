@@ -1,4 +1,4 @@
-import { Quaternion, Raycaster, Scene, Vector2, Vector3, type Mesh, type Object3D } from 'three';
+import { PerspectiveCamera, Quaternion, Raycaster, Scene, Vector2, Vector3, type Mesh, type Object3D } from 'three';
 import { PixelRenderer } from './render/PixelRenderer';
 import { shared } from './render/shared';
 import { Terrain, terrainHeight } from './world/terrain';
@@ -31,6 +31,7 @@ import {
 } from './world/crater';
 import { Ship } from './world/ship';
 import { Facility } from './world/facility';
+import { Survivor } from './story/Survivor';
 import { Aftermath } from './story/Aftermath';
 import { DoorScene } from './story/DoorScene';
 import { PickupScene } from './story/PickupScene';
@@ -111,6 +112,7 @@ let heartT = 0;
 interface Checkpoint {
   name: string;
   inside: boolean;
+  room: 'station' | 'facility';
   x: number;
   z: number;
   yaw: number;
@@ -143,6 +145,18 @@ let facility: Facility | null = null;
 let aftermath: Aftermath | null = null;
 let facilitySeen = false;
 let aftermathSeen = false;
+/** The one still alive inside the facility, hiding in its vault. */
+let survivor: Survivor | null = null;
+/**
+ * Watching the security cameras: which one's feed (the view is drawn from it,
+ * as on a monitor); a click goes to the next, any step away ends it.
+ */
+let feedMode: { i: number } | null = null;
+const feedCam = new PerspectiveCamera(62, 16 / 9, 0.08, 60);
+/** A knock on a pipe on its way: which pipe, and how far the hand has come. */
+let knocking: { pipe: number; t: number; sounded: boolean } | null = null;
+let survivorSeen = false;
+let hallSeen = false;
 // the carrion locusts eating them
 let locusts: Locusts | null = null;
 // the tracker left in the ship's doorway, and taking it up
@@ -160,7 +174,11 @@ type Usable =
   | { kind: 'hatch' }
   | { kind: 'card'; card: DataCards['cards'][number] }
   | { kind: 'reader' }
-  | { kind: 'dock' };
+  | { kind: 'dock' }
+  | { kind: 'fdoor' }
+  | { kind: 'monitors' }
+  | { kind: 'pipe'; i: number }
+  | { kind: 'vault' };
 /**
  * Walking over to use something the player clicked: where to, the nearest it
  * has come, and for how long it has come no nearer (blocked by a hull or rock).
@@ -177,31 +195,45 @@ const WALK_RANGE = 30;
  */
 let inside = false;
 let insideW = 0;
+/** Which building it is (or was last) inside. */
+let room: 'station' | 'facility' = 'station';
+/** The rooms it is in now. */
+const indoors = () => (inside ? (room === 'facility' ? facility?.interior ?? null : station?.interior ?? null) : null);
 let hatchMove: { t: number; out: boolean; swapped: boolean } | null = null;
 const outdoorCliffs = world.cliffs;
-const groundHeight = (x: number, z: number) => (inside && station ? station.interior.floorY : terrainHeight(x, z));
+const groundHeight = (x: number, z: number) => indoors()?.floorY ?? terrainHeight(x, z);
 
 /** Go in (or out): swap the ground and the walls under the creature, and the view. */
-function setInside(on: boolean) {
-  if (!station) return;
+function setInside(on: boolean, where: 'station' | 'facility' = room) {
+  if (on) room = where;
+  const fac = room === 'facility';
+  if (fac ? !facility : !station) return;
   const wasInside = inside;
   inside = on;
-  station.setCutaway(on);
+  const I = fac ? facility!.interior : station!.interior;
+  if (fac) {
+    // the buried facility: the outside is not drawn while the creature is in it
+    facility!.setCutaway(on);
+    aftermath?.setHidden(on);
+    shared.uVoid.value = on ? 1 : 0;
+    if (survivor) survivor.creature.rig.root.visible = on;
+  } else station!.setCutaway(on);
+  if (!on) feedMode = null;
   if (on) {
-    world.height = station.interior.height;
-    world.rocks = station.interior.colliders;
+    world.height = I.height;
+    world.rocks = I.colliders;
     world.cliffs = undefined;
-    const sp = station.interior.spawn;
+    const sp = I.spawn;
     creature.teleport(sp.x, sp.z, world);
-    const d = station.interior.inward;
+    const d = I.inward;
     creature.setYaw(Math.atan2(d.x, d.z));
   } else {
     world.height = terrainHeight;
     world.rocks = rocks.nearby;
     world.cliffs = outdoorCliffs;
-    const o = station.doorOutside;
+    const o = fac ? facility!.doorOutside : station!.doorOutside;
     creature.teleport(o.x, o.z, world);
-    const d = station.interior.inward;
+    const d = I.inward;
     creature.setYaw(Math.atan2(-d.x, -d.z));
   }
   camDyn.reset(new Vector3(creature.pos.x, creature.pos.y + 0.6, creature.pos.z));
@@ -215,7 +247,7 @@ function setInside(on: boolean) {
 }
 
 function saveCheckpoint(name: string) {
-  checkpoint = { name, inside, x: creature.pos.x, z: creature.pos.z, yaw: creature.yaw };
+  checkpoint = { name, inside, room, x: creature.pos.x, z: creature.pos.z, yaw: creature.yaw };
 }
 
 /** Dead: back to the last checkpoint, as if none of it had happened. */
@@ -241,10 +273,14 @@ function respawn() {
   station?.interior.setDock('off');
   dockSeq = null;
   dockSeen = false;
+  feedMode = null;
+  knocking = null;
+  survivor?.reset();
+  facility?.interior.resetVault();
   const cp = checkpoint;
-  if (cp?.inside && station) {
-    inside = false;
-    setInside(true);
+  if (cp?.inside && (cp.room === 'facility' ? facility : station)) {
+    if (inside) setInside(false);
+    setInside(true, cp.room);
     insideW = 1;
   } else if (cp) {
     if (inside) setInside(false);
@@ -512,7 +548,11 @@ function* buildShip(): Generator<unknown, void, unknown> {
   tracker = t;
   // it lies on the station's deck if it is dropped inside
   const at = new Vector3();
-  t.groundAt = (x, z) => (station?.interior.floorY && station.interior.contains(at.set(x, 0, z)) ? station.interior.floorY : terrainHeight(x, z));
+  t.groundAt = (x, z) => {
+    if (station?.interior.floorY && station.interior.contains(at.set(x, 0, z))) return station.interior.floorY;
+    if (facility?.interior.floorY && facility.interior.contains(at.set(x, 0, z))) return facility.interior.floorY;
+    return terrainHeight(x, z);
+  };
   pickup = new PickupScene(creature, world, t, audio);
 }
 
@@ -547,11 +587,16 @@ function* buildFacility(): Generator<unknown, void, unknown> {
   const a = new Aftermath(f, rocks, dust, audio, (p, o) => pr.snapDelta(p, o));
   yield* a.build();
   yield compile(a.group);
+  yield compile(f.interior.root);
+  const sv = new Survivor(f.interior, audio);
+  sv.creature.rig.root.visible = false;
+  scene.add(sv.creature.rig.root);
   f.addTo(scene);
   a.addTo(scene);
   rocks.refresh();
   facility = f;
   aftermath = a;
+  survivor = sv;
 }
 
 /** Seconds left of the creature staring at something it has just noticed. */
@@ -570,6 +615,12 @@ window.addEventListener('pointerdown', (e) => {
   wake.begin();
   if (e.button !== 0 || wake.active || doorScene?.active || pickup?.active || peek?.active || hatchMove || strike.active) return;
   clickAt.set(e.clientX, e.clientY);
+  // watching the cameras: a click goes to the next one
+  if (feedMode && facility) {
+    feedMode.i = (feedMode.i + 1) % facility.interior.feeds.length;
+    showFeed();
+    return;
+  }
   // a card in hand: a click on it (or on the creature) lets it fall
   if (cards?.held && (cards.heldDistance(clickAt, pr.camera) < DEVICE_PX || bodyDistance(clickAt) < BODY_PX)) {
     cards.drop();
@@ -650,10 +701,23 @@ function usableAt(mouse: Vector2, ground: Vector3): Usable | null {
     const c = cards.cardAt(mouse, pr.camera, inside);
     if (c && near(c.mesh.position.x, c.mesh.position.z, WALK_RANGE)) return { kind: 'card', card: c };
   }
-  if (cards && station && inside && cards.held?.state === 'held' && !cards.complete && readerAt(mouse)) return { kind: 'reader' };
-  if (station && inside && station.interior.dock.state === 'ready' && tracker?.carried && !dockSeq && proxyAt(mouse, station.interior.dock.proxy)) return { kind: 'dock' };
-  if (station && station.interior.floorY && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
+  const inStation = inside && room === 'station';
+  const inFacility = inside && room === 'facility';
+  if (cards && station && inStation && cards.held?.state === 'held' && !cards.complete && readerAt(mouse)) return { kind: 'reader' };
+  if (station && inStation && station.interior.dock.state === 'ready' && tracker?.carried && !dockSeq && proxyAt(mouse, station.interior.dock.proxy)) return { kind: 'dock' };
+  if (station && station.interior.floorY && !inFacility && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
     return { kind: 'hatch' };
+  }
+  // the facility: its door; inside, the monitors, the pipes, the vault's door
+  if (facility && facility.interior.floorY) {
+    const I = facility.interior;
+    if (!inside && near(facility.doorOutside.x, facility.doorOutside.z, WALK_RANGE) && facility.doorAt(mouse, pr.camera)) return { kind: 'fdoor' };
+    if (inFacility) {
+      for (let i = 0; i < I.pipes.length; i++) if (proxyAt(mouse, I.pipes[i].proxy)) return { kind: 'pipe', i };
+      if (proxyAt(mouse, I.monitors.proxy)) return { kind: 'monitors' };
+      if (I.vault.state === 'locked' && proxyAt(mouse, I.vault.proxy)) return { kind: 'vault' };
+      if (proxyAt(mouse, I.doorProxy)) return { kind: 'fdoor' };
+    }
   }
   return null;
 }
@@ -687,6 +751,10 @@ function stillUsable(u: Usable) {
       return !!cards?.held && !cards.complete;
     case 'dock':
       return !!station && station.interior.dock.state === 'ready' && !!tracker?.carried;
+    case 'fdoor':
+      return !!facility && !hatchMove;
+    case 'vault':
+      return facility?.interior.vault.state === 'locked';
     default:
       return true;
   }
@@ -719,6 +787,18 @@ function useSpot(u: Usable, out: Vector3) {
       return out.copy(station!.interior.reader.stand);
     case 'dock':
       return out.copy(station!.interior.dock.stand);
+    case 'fdoor':
+      return out.copy(inside ? facility!.interior.spawn : facility!.doorOutside);
+    case 'monitors':
+      return out.copy(facility!.interior.monitors.stand);
+    case 'pipe': {
+      // in front of that pipe, an arm's length off
+      const I = facility!.interior;
+      const p = I.pipes[u.i].at;
+      return out.copy(I.pipeStand).setX(I.pipeStand.x + (p.x - I.pipeLook.x) * 0.6).setZ(I.pipeStand.z + (p.z - I.pipeLook.z) * 0.6);
+    }
+    case 'vault':
+      return out.copy(facility!.interior.vault.stand);
   }
 }
 
@@ -743,6 +823,14 @@ function usePoint(u: Usable, out: Vector3) {
       return out.copy(station!.interior.reader.look);
     case 'dock':
       return out.copy(station!.interior.dock.look);
+    case 'fdoor':
+      return out.copy(facility!.lookPoint);
+    case 'monitors':
+      return out.copy(facility!.interior.monitors.look);
+    case 'pipe':
+      return out.copy(facility!.interior.pipes[u.i].at);
+    case 'vault':
+      return out.copy(facility!.interior.vault.look);
   }
 }
 
@@ -765,6 +853,14 @@ function canUse(u: Usable, d: number, stuck: boolean) {
     case 'reader':
     case 'dock':
       return d < 0.3 || (stuck && d < 1.0);
+    case 'fdoor':
+      return d < 0.5 || (stuck && d < 1.6);
+    case 'monitors':
+    case 'vault':
+      return d < 0.35 || (stuck && d < 1.1);
+    case 'pipe':
+      // within reach of the pipes, knock at once (so a rhythm can be played)
+      return near(facility!.interior.pipeStand.x, facility!.interior.pipeStand.z, 1.5) || (stuck && d < 1.2);
   }
 }
 
@@ -788,6 +884,7 @@ function use(u: Usable) {
       peek!.begin(u.site);
       break;
     case 'hatch':
+      room = 'station';
       beginHatch(inside);
       break;
     case 'card':
@@ -808,7 +905,56 @@ function use(u: Usable) {
     case 'dock':
       // lean in and stand it in the dock
       dockSeq = { t: 0, placed: false, written: false, taken: false };
+      break;
+    case 'fdoor':
+      room = 'facility';
+      beginHatch(inside);
+      break;
+    case 'monitors':
+      startFeeds();
+      break;
+    case 'pipe': {
+      // a rap with the knuckles: the knock sounds as the hand lands
+      const p = facility!.interior.pipes[u.i];
+      creature.knock(p.at);
+      knocking = { pipe: u.i, t: 0, sounded: false };
+      break;
+    }
+    case 'vault': {
+      // it tries the door: it will not move, and the one inside goes still
+      creature.knock(facility!.interior.vault.look);
+      facility!.interior.vault.refused = 2;
+      audio.vaultRattle(0.45);
+      survivor?.doorTried();
+      break;
+    }
   }
+}
+
+/** Sit at the monitors and watch the cameras: the first one's feed. */
+function startFeeds() {
+  feedMode = { i: 0 };
+  showFeed();
+}
+function showFeed() {
+  const I = facility!.interior;
+  const f = I.feeds[feedMode!.i];
+  feedCam.position.copy(f.at);
+  feedCam.fov = f.fov;
+  feedCam.aspect = pr.lowW / Math.max(1, pr.lowH);
+  feedCam.updateProjectionMatrix();
+  feedCam.lookAt(f.look);
+  feedCam.updateMatrixWorld();
+  pr.feedFlash = 1;
+  pr.feedId = feedMode!.i;
+  I.feedOn = feedMode!.i;
+  audio.feedSwitch(0.35);
+}
+function endFeeds() {
+  feedMode = null;
+  pr.feedCam = null;
+  if (facility) facility.interior.feedOn = -1;
+  audio.setFeed(0);
 }
 
 /** Walk over to it and use it (straight away, if already there). */
@@ -951,6 +1097,25 @@ function update(dt: number, now: number) {
       audio.trackerRaise(0.06);
     }
   }
+  // watching the cameras: any step of the player's own ends it
+  if (feedMode && (input.move.lengthSq() > 0 || !inside || room !== 'facility')) endFeeds();
+  pr.feedCam = feedMode ? feedCam : null;
+  if (feedMode) {
+    pr.feedTime += dt;
+    pr.feedFlash = Math.max(0, pr.feedFlash - dt * 2.5);
+    audio.setFeed(0.6);
+  }
+  // a knock on a pipe: it sounds as the hand lands, and through the wall the one inside hears it
+  if (knocking && facility) {
+    knocking.t += dt;
+    if (!knocking.sounded && knocking.t >= 0.11) {
+      knocking.sounded = true;
+      const p = facility.interior.pipes[knocking.pipe];
+      audio.pipeKnock(p.f, 0.5, 0, false, p.size);
+      survivor?.heard(knocking.pipe);
+    }
+    if (knocking.t > 0.45) knocking = null;
+  }
   // walking over to use something: any move of the player's own calls it off
   if (going && (input.move.lengthSq() > 0 || !stillUsable(going.use) || stranger?.busy || padMode)) going = null;
 
@@ -987,6 +1152,13 @@ function update(dt: number, now: number) {
     look = lookPoint.copy(station.interior.reader.look);
   } else if (dockSeq && station) {
     look = lookPoint.copy(station.interior.dock.look);
+  } else if (feedMode && facility) {
+    look = lookPoint.copy(facility.interior.monitors.look);
+  } else if (knocking && facility) {
+    look = lookPoint.copy(facility.interior.pipes[knocking.pipe].at);
+  } else if (survivor?.freed && inside && room === 'facility' && survivor.creature.pos.distanceTo(creature.pos) < 9) {
+    // the one it let out: it cannot take its eyes off it
+    look = survivor.creature.headPosition(lookPoint);
   } else if (droneNear && (!droneBehind || glanceT > 0)) {
     // it cannot look away from it
     look = lookPoint.copy(drone.position);
@@ -1111,6 +1283,13 @@ function update(dt: number, now: number) {
     else if (d > 0.02) control.move.set((dx / d) * Math.min(1, d * 2.2), (-dz / d) * Math.min(1, d * 2.2));
   }
   creature.faceYaw = null;
+  if (feedMode || knocking) {
+    // squared up to the monitors, or to the pipes it knocks on
+    control.move.set(0, 0);
+    control.sprint = false;
+    const to = feedMode ? facility!.interior.monitors.look : facility!.interior.pipeLook;
+    creature.faceYaw = Math.atan2(to.x - creature.pos.x, to.z - creature.pos.z);
+  }
   if (creature.holdOut > 0) {
     // looking down at it: an unhurried walk, or standing and turning on the spot toward the cursor
     control.move.multiplyScalar(0.55);
@@ -1139,7 +1318,7 @@ function update(dt: number, now: number) {
     if (amount > 0) dust.kick(ev.x, ev.y, ev.z, creature.vel.x / sp, creature.vel.z / sp, amount, 0.4 + ev.run);
   }
   // walking out through the doorway goes outside
-  if (inside && station && !hatchMove && station.interior.atDoor(creature.pos)) beginHatch(true);
+  if (inside && !hatchMove && indoors()?.atDoor(creature.pos)) beginHatch(true);
   for (const cue of creature.cues) audio.cue(cue);
 
   // digging in hard to stop throws sand forward
@@ -1278,12 +1457,29 @@ function finishFrame(dt: number, target: Vector3) {
     }
   }
   insideW = Math.min(1, Math.max(0, insideW + (inside ? dt * 2.5 : -dt * 2.5)));
-  if (station) station.update(dt, elapsed, creature.pos, inside ? Math.max(insideW, 0.6) : 0);
-  audio.setIndoors(insideW);
+  shared.uRoomOn.value = 0;
+  if (station) station.update(dt, elapsed, creature.pos, inside && room === 'station' ? Math.max(insideW, 0.6) : 0);
+  if (facility) facility.interior.update(dt, elapsed, inside && room === 'facility' ? Math.max(insideW, 0.6) : 0, creature.pos);
+  // the first steps into the hall: its eyes go up to the cradle, and the frame hanging in it
+  if (facility && inside && room === 'facility' && !hallSeen && !hatchMove) {
+    hallSeen = true;
+    noticeTime = 2.8;
+    noticeWhat = { lookPoint: facility.interior.heart };
+  }
+  if (survivor && inside && room === 'facility') {
+    survivor.update(dt, creature.pos);
+    // the first sight of it coming out of the dark of its doorway
+    if (survivor.freed && !survivorSeen && survivor.state !== 'rising') {
+      survivorSeen = true;
+      noticeTime = 2.5;
+      noticeWhat = { lookPoint: survivor.creature.pos.clone().setY(survivor.creature.pos.y + 1.2) };
+    }
+  }
+  audio.setIndoors(insideW, 1, room === 'facility' ? 1 : 0);
   if (fallen) fallen.update(dt, creature.pos);
   if (locusts) locusts.update(dt, creature.pos, creature.speed, !inside);
   if (cards) {
-    cards.creatureInside = inside;
+    cards.creatureInside = inside && room === 'station';
     cards.update(dt, rocks.nearby);
     cards.locked = huntT > 0;
     if (cards.justCompleted && specimen) {
@@ -1503,8 +1699,32 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     },
     /** Step into (or out of) the station at once. */
     goInside(on = true) {
-      setInside(on);
+      setInside(on, 'station');
       insideW = on ? 1 : 0;
+    },
+    /** Step into (or out of) the facility at once. */
+    goInsideFacility(on = true) {
+      if (inside && on) setInside(false);
+      setInside(on, 'facility');
+      insideW = on ? 1 : 0;
+    },
+    get survivor() {
+      return survivor;
+    },
+    /** Use something as if it had been clicked and walked to. */
+    use(u: Usable) {
+      use(u);
+    },
+    get feedMode() {
+      return feedMode;
+    },
+    endFeeds() {
+      endFeeds();
+    },
+    /** Watch camera `i`'s feed. */
+    feedTo(i: number) {
+      feedMode = { i };
+      showFeed();
     },
     get fallen() {
       return fallen;

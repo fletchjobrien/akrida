@@ -45,7 +45,7 @@ float bayer4(vec2 p) {
 }
 void main() {
   float r = length(vUv);
-  if (r >= 1.0) discard;
+  if (r >= 1.0 || inVoid(vWorld)) discard;
   float fall = 1.0 - r;
   float v = uStrength * (fall * fall * 0.75 + uCore * smoothstep(0.32, 0.0, r));
   // a few hard steps, dithered between, so the light reads as pixel art
@@ -74,6 +74,8 @@ export class Glow extends Mesh<PlaneGeometry, ShaderMaterial> {
         uCamTexel: shared.uCamTexel,
         uRoomInv: shared.uRoomInv,
         uRoomOn: shared.uRoomOn,
+        uRoomKind: shared.uRoomKind,
+        uVoid: shared.uVoid,
       },
       vertexShader: GLOW_VERT,
       fragmentShader: GLOW_FRAG,
@@ -89,9 +91,19 @@ export class Glow extends Mesh<PlaneGeometry, ShaderMaterial> {
     this.renderOrder = 5;
   }
 
+  /** Kept out of sight whatever its strength (its place is not being drawn). */
+  get hidden() {
+    return this._hidden;
+  }
+  set hidden(on: boolean) {
+    this._hidden = on;
+    this.visible = !on && this.material.uniforms.uStrength.value > 0.01;
+  }
+  private _hidden = false;
+
   set strength(v: number) {
     this.material.uniforms.uStrength.value = v;
-    this.visible = v > 0.01;
+    this.visible = v > 0.01 && !this._hidden;
   }
 
   get color(): Vector3 {

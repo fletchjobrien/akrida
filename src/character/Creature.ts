@@ -175,6 +175,9 @@ export class Creature {
 
   /** 0..1 target: hold something out in both hands in front of the chest and look down at it. */
   holdOut = 0;
+  /** A knock with the knuckles of the free (left) hand: where, and how long since it began. */
+  readonly knockAt = new Vector3();
+  knockT = 9;
   /** When set and not walking, turn on the spot to face this way (radians). */
   faceYaw: number | null = null;
   /** Carrying something in the right hand: that arm swings less and its elbow bends. */
@@ -203,6 +206,12 @@ export class Creature {
   }
 
   /** Face a direction at once. */
+  /** Rap on something at `at` (world) with the free hand: out, a knock, back (about half a second). */
+  knock(at: Vector3) {
+    this.knockAt.copy(at);
+    this.knockT = 0;
+  }
+
   setYaw(yaw: number) {
     this.yaw = yaw;
     this.yawTarget = yaw;
@@ -262,6 +271,7 @@ export class Creature {
 
   update(dt: number, input: CreatureInput, world: World) {
     this.time += dt;
+    this.knockT += dt;
     this.events.length = 0;
     this.cues.length = 0;
     this.locomotion(dt, input, world);
@@ -797,6 +807,20 @@ export class Creature {
       // shoulders slump when tired and rise with each panting breath
       arm.shoulder.position.y = 0.235 + breath * 0.006 * breathAmp - tired * 0.015 + tiredIdle * breath * 0.01;
       arm.elbow.rotation.set(re, 0, -side * 0.05, 'YXZ');
+      if (i === 0 && this.knockT < 0.5) {
+        // a knock: the hand flies out to it, raps, and comes back
+        const k = this.knockT;
+        const w = k < 0.11 ? k / 0.11 : k < 0.16 ? 1 : Math.max(0, 1 - (k - 0.16) / 0.3);
+        const e = w * w * (3 - 2 * w);
+        _v2.copy(this.knockAt);
+        rig.chest.worldToLocal(_v2);
+        _v2.sub(arm.shoulder.position);
+        const reach = Math.min(_v2.length(), 0.43);
+        _v2.setLength(reach).add(arm.shoulder.position);
+        solveArm(arm.shoulder.position, _v2, side, _arm);
+        arm.shoulder.rotation.set(lerp(ra, _arm.a, e), lerp(ry, _arm.y, e), lerp(rb, _arm.b, e), 'YXZ');
+        arm.elbow.rotation.set(lerp(re, _arm.e, e), 0, -side * 0.05, 'YXZ');
+      }
       if (hold > 0.001) {
         // both hands brought together in front of the chest, cradling what they hold
         _v.set(side * 0.11, 0.13, 0.3);

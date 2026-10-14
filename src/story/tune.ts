@@ -62,3 +62,17 @@ export const EAST_SONG: Song = [
   [6, 3],
   [-1, 3],
 ];
+
+/**
+ * The colour of each of the stranger's tones (TONES), low tones warm and high
+ * tones cool, as light runs from red to violet: how the Akridians see them.
+ */
+export const TONE_COLORS = [0xff4a3a, 0xff7a34, 0xffa53a, 0xffd04a, 0xc8f05a, 0x6aff8a, 0x56e0ff, 0x6a8aff, 0xb47aff] as const;
+
+/**
+ * The pipes outside the vault in the facility, left to right as seen from the
+ * hall: the tone each rings with when it is knocked (indices into TONES). Their
+ * size goes with their tone, the lowest the thickest. The stranger's three are
+ * among them, but not in order.
+ */
+export const PIPE_TONES = [3, 0, 6, 1, 4, 7] as const;

@@ -1,5 +1,7 @@
 import {
   BoxGeometry,
+  Raycaster,
+  Vector2,
   BufferGeometry,
   CylinderGeometry,
   Float32BufferAttribute,
@@ -22,6 +24,7 @@ import { terrainHeight } from './terrain';
 import { footprintOf, type Rocks } from './rocks';
 import type { Dust } from './particles';
 import type { AudioEngine } from '../audio/AudioEngine';
+import { FacilityInterior } from './facilityInterior';
 
 function faceted(g: BufferGeometry) {
   const f = g.index ? g.toNonIndexed() : g;
@@ -141,6 +144,12 @@ export class Facility {
   readonly lookPoint = new Vector3();
   /** The door's threshold (world space). */
   readonly door = new Vector3();
+  /** Where to stand outside the door to go in (world space). */
+  readonly doorOutside = new Vector3();
+  /** The hall inside (see world/facilityInterior.ts). */
+  readonly interior: FacilityInterior;
+  /** An unseen box over the doorway, for the mouse. */
+  private readonly doorProxy = new Mesh(new BoxGeometry(4.6, 4.4, 1.4));
   /** Its site sound (see AudioEngine.addSite); the dead and the dog near it share it. */
   readonly sound: number;
   distance = Infinity;
@@ -248,6 +257,29 @@ export class Facility {
     this.group.updateMatrixWorld(true);
     this.group.localToWorld(this.door.set(0, 0.25, 7.6));
     this.group.localToWorld(this.lookPoint.set(0, 2.2, 7));
+    this.place(0, 0, 9.4, this.doorOutside);
+    this.doorProxy.position.set(0, 2.2, 7.6);
+    this.doorProxy.visible = false;
+    this.group.add(this.doorProxy);
+    this.interior = new FacilityInterior(this.group, audio, dust);
+  }
+
+  /** The mouse is over the doorway (from outside). */
+  doorAt(mouse: { x: number; y: number }, camera: import('three').Camera) {
+    this.ray.setFromCamera(new Vector2((mouse.x / window.innerWidth) * 2 - 1, -(mouse.y / window.innerHeight) * 2 + 1), camera);
+    this.doorProxy.updateWorldMatrix(true, false);
+    return this.ray.intersectObject(this.doorProxy, false).length > 0;
+  }
+  private readonly ray = new Raycaster();
+
+  /** The creature is inside: the whole of the outside goes (the hall is buried; its rooms are seen in the dark). */
+  setCutaway(on: boolean) {
+    this.group.visible = !on;
+    for (const g of this.outdoorGlows()) g.hidden = on;
+  }
+
+  private outdoorGlows() {
+    return [this.beaconGlow, this.redGlow, this.deepGlow, this.lampGlow, this.podGlow, this.navGlow, this.fireGlow, this.floodGlow, this.floodPool, ...this.roofGlows];
   }
 
   /** A point of the facility's frame (x, z on the ground, lifted y) in the world. */
@@ -280,7 +312,8 @@ export class Facility {
   }
 
   addTo(scene: Object3D) {
-    scene.add(this.group, this.beaconGlow, this.redGlow, this.deepGlow, this.lampGlow, this.podGlow, this.navGlow, this.fireGlow, this.floodGlow, this.floodPool, ...this.roofGlows);
+    scene.add(this.group, ...this.outdoorGlows());
+    scene.add(this.interior.root, this.interior.bodies, ...this.interior.glows);
   }
 
   /** Build it a part at a time (see core/builder.ts), then merge it into one mesh per material. */
@@ -324,7 +357,16 @@ export class Facility {
       ...this.wreckSmoke,
       ...this.flames.map((f) => f.mesh),
       ...this.banner,
+      this.doorProxy,
     ]);
+    yield;
+    // the hall inside, merged the same way (its moving parts and its shadow-only roof apart)
+    yield* this.interior.build();
+    bakeStatic(this.interior.root, [...this.interior.keep, this.interior.casters]);
+    bakeStatic(this.interior.casters);
+    bakeStatic(this.interior.bodies);
+    this.interior.root.visible = false;
+    this.interior.bodies.visible = false;
   }
 
   // ------------------------------------------------------------------ build

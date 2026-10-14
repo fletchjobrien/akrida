@@ -132,6 +132,12 @@ export class Tracker {
   private readonly noteCol = new Vector3();
   private noteGlow = 0;
   private garbleTimer = 2;
+  /** How near it must be to where it leads to have arrived (the facility is bigger than the station). */
+  private arriveR = ARRIVE;
+  /** 0..1: how clean the signal is (it clears as it nears where it leads), eased. */
+  clarity = 0;
+  /** 0..1: it has arrived and gone quiet, eased. */
+  private quiet = 0;
 
   private readonly restQ = new Quaternion();
   private readonly ledMat: ShaderMaterial;
@@ -347,6 +353,7 @@ export class Tracker {
     this.song = EAST_SONG;
     this.songAt = 0;
     this.songNext = 0.8;
+    this.arriveR = 24;
     this.alerting = true;
     this.alertPhase = 0;
     this.alertHeld = 0;
@@ -360,6 +367,7 @@ export class Tracker {
     this.song = STATION_SONG;
     this.songAt = 0;
     this.alerting = false;
+    this.arriveR = ARRIVE;
   }
 
   /** Set it in a dock (at `at`, turned `q`): it sits there until it is taken out again. */
@@ -447,7 +455,8 @@ export class Tracker {
     const cos = (_v.x * tx + _v.z * tz) / (len * Math.max(1e-6, dist));
     const angle = Math.acos(clamp(cos, -1, 1));
     const wasHot = this.hot;
-    if (dist < ARRIVE) this.hot = true;
+    const arrived = dist < this.arriveR;
+    if (arrived) this.hot = true;
     else this.hot = this.hot ? angle < HOT_OUT : angle < HOT_IN;
     if (!this.awake) this.hot = false;
     const held = this.state === 'carried';
@@ -473,15 +482,19 @@ export class Tracker {
     if (before < cue && this.phase >= cue && this.heat < 0.5 && this.shown && !this.awake) this.audio.trackerPulse(0.2);
     void cue;
     // the song from where it leads: it carries on whether or not it points true, and comes
-    // through (out of the static) only as far as it does, so turning it is like tuning in
-    if (this.awake) {
+    // through (out of the static) only as far as it does, so turning it is like tuning in.
+    // Far off the signal is weak and comes through broken; it clears as it nears, and once
+    // it is there the radio falls silent.
+    this.clarity += (1 - smoothstep(this.arriveR + 6, 170, dist) - this.clarity) * Math.min(1, dt * 0.8);
+    this.quiet = arrived ? Math.min(1, this.quiet + dt * 0.6) : Math.max(0, this.quiet - dt * 2);
+    if (this.awake && this.quiet < 0.99) {
       this.songNext -= dt;
       if (this.songNext <= 0) {
         const [tone, beats] = this.song[this.songAt];
         this.songAt = (this.songAt + 1) % this.song.length;
         this.songNext += beats * BEAT;
         if (tone >= 0) {
-          this.audio.trackerSong(tone, beats * BEAT, 0.9);
+          this.audio.trackerSong(tone, beats * BEAT, 0.9, this.clarity);
           this.songCol.copy(rgb(SONG_COLORS[tone]));
           this.noteGlow = 1;
         }
@@ -490,7 +503,7 @@ export class Tracker {
       this.garbleTimer -= dt;
       if (this.garbleTimer <= 0) {
         this.garbleTimer = 1.2 + Math.random() * 3;
-        if (this.heat < 0.4 && this.shown) this.audio.trackerGarble(0.5);
+        if ((this.heat < 0.4 || Math.random() < 0.6 * (1 - this.clarity)) && this.shown) this.audio.trackerGarble(0.5 * (1 - this.quiet));
       }
     }
     this.noteGlow = Math.max(0, this.noteGlow - dt * 0.9);
@@ -517,7 +530,7 @@ export class Tracker {
     (this.ledMat.uniforms.uLight.value as Vector3).copy(step(this.light));
     (this.tipMat.uniforms.uLight.value as Vector3).copy(step(Math.min(1, this.light * 1.05)));
     // pointing true, it sings, and its light is the colour of each tone as it comes
-    const sing = this.alerting ? 0 : smoothstep(0.5, 1, this.heat);
+    const sing = this.alerting ? 0 : smoothstep(0.5, 1, this.heat) * (1 - this.quiet);
     if (sing > 0.01) {
       this.noteCol.copy(this.songCol).multiplyScalar(0.85 + 0.4 * this.noteGlow);
       (this.ledMat.uniforms.uLight.value as Vector3).lerp(this.noteCol, sing);
@@ -568,8 +581,11 @@ export class Tracker {
       clarity = 1 / (1 + d * 0.25);
       pan = clamp((G.position.x - listener.x) * 0.18, -0.8, 0.8);
     }
-    const hum = this.heat * (held ? 0.6 + 0.4 * holdW : 0.45);
-    const fizz = this.awake ? (1 - this.heat) * (held ? 0.45 + 0.55 * holdW : 0.25) : 0;
+    const near = 1 - this.quiet;
+    const hum = this.heat * (held ? 0.6 + 0.4 * holdW : 0.45) * near;
+    // a weak signal is never clean: static under the song too, until it clears
+    const hiss = held ? 0.45 + 0.55 * holdW : 0.25;
+    const fizz = this.awake ? ((1 - this.heat) + this.heat * 0.7 * (1 - this.clarity)) * hiss * near : 0;
     this.audio.setTracker(level, pan, clarity, hum, fizz);
   }
 

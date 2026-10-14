@@ -33,7 +33,8 @@ blue.
 
 **Click to use.** Click anything you can use, from up to 30 units away. Your
 creature walks over to it and starts: the escape pods, the stranger, the
-ship's keypad or door, and the tracker. If something blocks the way, it
+ship's keypad or door, the tracker, and in the facility its door, the
+monitors, the pipes and the vault's door. If something blocks the way, it
 starts once it is close enough, or gives up. Move with the keys, or click
 the open sand, to call it off. Sound starts with the click that wakes the
 creature (see below), because browsers block audio until the page gets a user
@@ -333,6 +334,14 @@ doorway, and it pulses softly.
      like the dying stranger's song, but in other tones. The light and the
      antenna take the colour of each tone as it sounds, and bloom with
      each note.
+   - **Far off, the signal is weak.** The further your creature is from
+     where the tracker leads, the more broken the song comes through, even
+     pointing true: it cuts out in short gaps, its pitch wavers, it is
+     thin and crushed, and static hisses under it. It clears as your
+     creature comes nearer, and is clean within about 25 units.
+   - **There, it falls silent.** Once your creature has arrived (within 12
+     units of the station's middle, or 24 of the facility's), the song and
+     the static fade away and the light burns a steady green.
    - **Tones and colours:** the song uses seven tones, from D4 to E5 (D, E,
      F#, A, B, D, E). Each tone has its own colour, from warm to cool as
      the tones go up: red, orange, gold, green, cyan, blue and violet. The
@@ -341,8 +350,7 @@ doorway, and it pulses softly.
      wider, and it ends on a question that is not answered.
    - In the hand, it uses the way the arm points it (toward the cursor). Held
      out in both hands, it uses the way your creature faces. On the ground, it
-     uses the way its antenna points. At the station (within 12 units of its
-     middle), it stays solid.
+     uses the way its antenna points. Where it has arrived, it stays solid.
    - Sounds are louder while you hold it out. On the ground, they come from
      where it lies.
 4. Click it in your creature's hand (or click your creature) to drop it. When the
@@ -613,6 +621,10 @@ doorway (or click it) to leave.
   - its lights blink green and it chirps, softly, every couple of seconds;
   - a ghost of the tracker in green light, with a chevron under it, sinks
     into the cradle again and again, to show what goes there;
+  - when your creature comes close, the dock sings: the same song the
+    tracker sang all the way to the station (and fell silent on arriving),
+    out of its own small speaker, its lights taking the colour of each
+    tone. So it is plain the tracker belongs in it;
   - the first time your creature comes near it, it looks at the dock.
     Click the dock (the cursor turns light blue over it) with the tracker
     in hand.
@@ -868,8 +880,109 @@ desert, to a vast installation lying half sunk in the sand.
   low, dissonant chord swells out of the wind, with a cold metallic shimmer
   over it, and your creature stops to look at the door. When it reaches the
   green one behind the barricade, a sad chord plays and it looks down at it.
-- The interior is not built yet. For now, the door's dark is as far as it
-  goes.
+- **Going in:** click the doorway. The view goes dark and comes back
+  inside. Walk back out through the doorway to leave.
+
+### Inside the facility
+
+The hall is buried, so while your creature is inside, nothing outside is
+drawn: the rooms stand in the dark, lit by their own lamps, and by the sun
+through a hole in the roof.
+
+- **The hall:** a great space under tall plated walls ribbed in orange.
+  Along the far wall runs a long band of coloured strokes: an Akridian song,
+  written as colours, a stroke for each tone as long as it is held. The high
+  windows are packed solid with sand, and sand has trickled down the wall
+  from a cracked one. A gantry crane's rail runs along the top.
+- **The cradle:** in the middle of the hall, a round dais under a gantry,
+  ringed with cold blue lights. Hanging over it on cables is the frame of an
+  Akridian not yet built: a spine, ribs round a heart that still glows, the
+  outline of a skull, arms of bare rods. Two robot arms stand frozen on the
+  dais; one reaches for the frame, the other lies where a blast tore it
+  down. This is where they made more Akridians. The first time your
+  creature comes in, it looks up at the hanging heart.
+- **The roof:** part of it has fallen in. Its plates and a bent beam lie in
+  a heap under the hole, with sand poured over them, and sand still falls
+  in a thin stream through the hole. Sunlight comes down in a slanting
+  shaft, with motes drifting in it, and falls across the barricade. A torn
+  cable at the hole's edge sparks.
+- **The fight:** the Akridians held the hall behind a barricade of
+  overturned tables, crates and a tipped cabinet across the front of the
+  cradle. The humans came in through the door. The barricade is scorched and
+  holed, and the far wall behind it is peppered with burns and bullet holes.
+  A grenade blackened the floor in front of it. Spent casings lie strewn by
+  the door.
+  - Five Akridians lie dead, each its own colour: a teal one sitting where
+    it was hit, its back to the barricade; a blue one fallen over the crate
+    it fired from; a violet one thrown on its back by the dais; an ochre one
+    face down by the plant room, one arm reaching on, with the trail where
+    it dragged itself from the barricade; and a green one slumped against
+    the vault's door, one hand still raised to it, its hands smeared down
+    the door.
+  - One human lies face down near the door in black armour, holed by their
+    fire, his blood red under him, his rifle beside him.
+- **West:** the security office, behind a long window onto the plant room:
+  a desk under a bank of six monitors, a chair pushed back, papers on the
+  floor, an emptied gun rack. Behind it, the plant room: two tall tanks,
+  pumps, a workbench, a ladder, and the manifold where six coloured pipes
+  begin.
+- **East:** the lab, with three empty capsules (one smashed), shelves of
+  half-made heads in their makers' colours, and a workbench with a head
+  opened up on it. Beside it, the vault: a closed room with a roof of its
+  own and a heavy door, hazard-striped, with no handle on the outside. Its
+  lock's light is red.
+- **The pipes:** six pipes run from the plant room up and along the length
+  of the far wall, over the vault's roof, down its front beside the door,
+  and into it. Each is a different size and banded in its own colour.
+  Knocked, each rings on its own tone: the stranger's tones (see
+  `PIPE_TONES` in `src/story/tune.ts`), the thickest the lowest, each
+  banded in its tone's colour (low tones warm, high tones cool).
+
+### The cameras and the survivor
+
+- **The monitors:** click the bank of monitors in the security office. Your
+  creature steps up to the desk, and the view becomes a camera's feed:
+  grainy green-grey monochrome, scan lines, snow, a slow rolling bar, the
+  corners of the frame, a blinking red record light and the camera's number
+  in tally marks. Click to switch to the next camera (with a click and a
+  burst of snow). Any step with the keys ends it. There are four cameras:
+  the hall, the door, the lab, and inside the vault.
+- **Inside the vault**, one Akridian is still alive: a soft rose colour,
+  crouched in the corner by the pipes with its knees drawn up and its arms
+  round them, shaking, a hand lamp turned low beside it. Near the vault you
+  can hear it through the wall now and then: a muffled whimper, a gasp.
+- **Its door** only opens from inside. Click it, and your creature tries
+  it: the handle is wrenched, the bolts knock in their keeps, the lock
+  flashes red and chirps no. Inside, it freezes and will not answer for a
+  while.
+- **Knocking:** click a pipe. Your creature steps up to the pipes and raps
+  on it with its knuckles. Close to the pipes, each click knocks at once,
+  so you can play a rhythm. Inside, it hears every knock.
+  - When the knocking stops for a moment, it knocks back, muffled through
+    the wall: the same pattern, on the same pipes, after a nervous pause, a
+    little slower, its timing unsteady. Sometimes its nerve fails before the
+    last knock. It cannot know who is out there: it could be a human,
+    trying to lure it out. If you knock over its answer, it stops dead.
+    After a few wrong patterns it sometimes does not answer at all.
+  - **Knock the three tones the dying stranger sang, in order** (the tune
+    that opened the ship's door: low, high, middle). Then it knows one of
+    its own is outside. It knocks them back, slowly and carefully. Then its
+    bolts are drawn one by one, a seal breaks with a long hiss, the lock
+    turns green, and the door grinds open.
+  - It gets up out of its corner and comes out of the vault, hunched, still
+    shaking, and stops near your creature, its eyes on it. Then, softly, in
+    a voice that shakes, it sings the stranger's three tones. Your creature
+    cannot take its eyes off it.
+  - Dying undoes this, like everything since the last checkpoint: the door
+    shuts and locks, and it is back in its corner.
+
+**Code:**
+- The hall inside is `src/world/facilityInterior.ts` (rooms, walls to bump
+  into, lamps, the cradle, the fight, the dead, the pipes, the vault, the
+  cameras). It is built with the facility, a part at a time, and merged into
+  one mesh per material. The survivor and the knocking are in
+  `src/story/Survivor.ts`. Going in and out, the monitors and the knocks are
+  wired in `src/main.ts` (`setInside`, `startFeeds`, `knocking`).
 
 ## Stamina
 
@@ -930,6 +1043,20 @@ To add server logic later (saves, story state), add a `main` script to
   so it does not crawl when the camera moves.
 - **Edge pass.** A post pass reads depth and normals. It darkens the outer
   edges of rocks and adds light highlights on their creases.
+- **Indoors.** Inside the station, the roof and the near walls are hidden
+  but still cast their shadow, and lamps light only what is inside its walls
+  (`roomLight` in `src/render/shared.ts`, up to eight lamps). Inside the
+  buried facility, everything outside the hall is not drawn at all
+  (`uVoid`): the ground and the drift over the hall are discarded, and so is
+  every lit surface outside its walls, so its rooms stand in the dark. A roof
+  and walls drawn only into the sun's shadow map keep the hall dark, except
+  where the sun comes in through the hole in its roof.
+- **Camera feeds.** Watching the facility's cameras, the scene is drawn from
+  a perspective camera instead (the edge pass turns its depth back into
+  distance). The post pass then makes it a monitor's picture: a warm-weighted
+  monochrome (a low-light camera sees warm things brighter), six levels with
+  dither, scan lines, a rolling bar, snow, slipping lines, a vignette, the
+  frame's corners, a record light and the camera's number.
 - **Two ground meshes.** The desert is a grid that follows the camera; the
   GPU adds the dunes to it. The highlands have their own mesh, cut along the
   faces of the rock, so every edge of the rock is a true, sharp edge. Both
@@ -1013,8 +1140,30 @@ There are no audio files. The Web Audio API makes all sound at start-up:
   near 1.9 kHz, with its level moved by three slow LFOs, plus a sine whistle
   that wanders between about 800 and 2200 Hz. The garbled voice is a
   sawtooth that jumps between random pitches through a narrow band-pass. How
-  true it points sets the mix of song and static. Two bell notes (a sine
-  plus a partial at 2.76 times the pitch) sound when it finds the way.
+  true it points sets the mix of song and static. How near it is to where it
+  leads sets how clean each note is: far off, each note is cut by short
+  gaps (gain dropping to 4 % for 20 to 120 ms), its playback rate wanders by
+  up to 2.5 %, a narrower band-pass thins it, and part of it goes through a
+  waveshaper that rounds it to five steps (a bit crusher), with static under
+  it. Two bell notes (a sine plus a partial at 2.76 times the pitch) sound
+  when it finds the way.
+- **The facility's hall** has its own bus: the deep moan of a huge hollow
+  space (brown noise through three slowly drifting resonant band-passes,
+  48 to 118 Hz), the wind keening through the hole in its roof, the hiss and
+  patter of the falling sand (placed where it falls), the cradle's heart (a
+  deep chord on B1, F#2 and B2, two of its voices a fraction of a hertz
+  apart so it beats slowly, with a high shimmer that swells like breath),
+  and the monitors' whine and hum near the office. What sounds in the hall
+  goes into a long, dark reverb (a 4.2-second impulse, low-passed). The
+  frame groans now and then, and something drips in the dark.
+- **A knock on a pipe** is the knuckle (a short, low knock of filtered
+  noise and a thud) and the pipe ringing: its tone, its second and third
+  harmonics, and the metal's own inharmonic clang (partials at 2.76, 5.4
+  and 8.93 times the tone, as in a struck bar), dying fast; thicker pipes
+  ring longer. Heard through the vault's wall, the same knock is
+  low-passed at 650 Hz. The survivor's voice is the specimen's, muffled
+  through the wall; its song is the tracker's song voice, pitched to the
+  stranger's tones, with a shake in it.
 - **The stranger's voice** is made sample by sample (`src/audio/voice.ts`).
   A glottal pulse (Rosenberg's shape) with jitter, shimmer and period
   doubling goes through a cascade of formant resonators (Klatt's design).
@@ -1032,13 +1181,14 @@ src/
   world/                  terrain, noise, rocks, wind, particles, footprints,
                           crater, pods and ship, stain map (blood, drag marks),
                           the tracker, the highlands and their station,
-                          the facility in the east
+                          the facility in the east and its buried hall
   character/              creature rig and procedural animation
   audio/                  synthesised sound, the stranger's voice
   story/                  the opening, the stranger, the tune,
                           pulling the ship's door open, picking up the tracker,
                           looking into the pods, the three dead,
-                          the dead at the facility's door
+                          the dead at the facility's door, the survivor
+                          hiding in its vault
 ```
 
 ## Sources

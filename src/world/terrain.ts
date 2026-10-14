@@ -194,6 +194,8 @@ void main() {
   vec2 p = vWorldPos.xz;
   // the grid leaves the highlands to their own mesh
   if (length(p - uHigh.xy) < uCut) discard;
+  // inside the buried facility the ground is not drawn: its rooms are seen in the dark
+  if (uVoid > 0.5) discard;
   float d = worldDither();
   vec3 n = sandNormal(p);
   // tilt the sand's own detail by the lie of the highlands under it

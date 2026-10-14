@@ -13,7 +13,7 @@ import {
   type Material,
   type ShaderMaterial,
 } from 'three';
-import { noise1 } from '../core/math';
+import { noise1, smoothstep } from '../core/math';
 import { shared, toonMaterial } from '../render/shared';
 import { rgb } from '../render/palette';
 import { SHADOW_LAYER } from '../render/PixelRenderer';
@@ -22,6 +22,7 @@ import { ditherMaterial } from '../render/dither';
 import { convexHull, type RockInfo } from './rocks';
 import type { Dust } from './particles';
 import type { AudioEngine } from '../audio/AudioEngine';
+import { BEAT, SONG_COLORS, STATION_SONG } from '../story/tune';
 
 /** The deck's height over the station's ground, in the habitat's frame. */
 const DECK = 0.85;
@@ -154,6 +155,11 @@ export class StationInterior {
     ghost: new Group(),
   };
   private dockChirp = 0;
+  /** Near the waiting dock, it sings the tracker's song: where it is in it, and the tone's colour. */
+  private dockSongAt = 0;
+  private dockSongNext = 0;
+  private dockNote = -1;
+  private dockNoteGlow = 0;
   /** The specimen's tether, from its back up to the tank's lid, and the lid's underside (habitat frame). */
   private tether!: Mesh;
   private lidY = 0;
@@ -979,7 +985,34 @@ export class StationInterior {
       let k = 1;
       if (ds === 'ready') k = time % 0.9 < 0.45 ? 1 : 0.15;
       else if (ds === 'busy') k = 0.4 + 0.6 * Math.abs(Math.sin(time * 14));
-      const c = ds === 'busy' ? [0.35, 0.85, 1] : [0.3, 1, 0.45];
+      let c = ds === 'busy' ? [0.35, 0.85, 1] : [0.3, 1, 0.45];
+      // close by, the waiting dock sings the song the tracker sang all the way here (and
+      // fell silent on arriving), its lights the colour of each tone, so it is plain the
+      // tracker belongs in it
+      const near = ds === 'ready' ? 1 - smoothstep(3, 5.5, listener.distanceTo(this.dock.look)) : 0;
+      this.dockNoteGlow = Math.max(0, this.dockNoteGlow - dt * 1.2);
+      if (near > 0) {
+        this.dockSongNext -= dt;
+        if (this.dockSongNext <= 0) {
+          const [tone, beats] = STATION_SONG[this.dockSongAt];
+          this.dockSongAt = (this.dockSongAt + 1) % STATION_SONG.length;
+          this.dockSongNext = beats * BEAT;
+          if (tone >= 0) {
+            this.dockNote = tone;
+            this.dockNoteGlow = 1;
+            this.audio.dockSong(tone, beats * BEAT, 0.16 * near);
+          }
+        }
+        if (this.dockNote >= 0) {
+          const nc = rgb(SONG_COLORS[this.dockNote]).toArray();
+          const w = near * (0.5 + 0.5 * this.dockNoteGlow);
+          c = [c[0] + (nc[0] - c[0]) * w, c[1] + (nc[1] - c[1]) * w, c[2] + (nc[2] - c[2]) * w];
+          k = Math.max(k, 0.55 + 0.45 * this.dockNoteGlow);
+        }
+      } else {
+        this.dockSongAt = 0;
+        this.dockSongNext = 0.4;
+      }
       for (const l of this.dock.lights) (l.uniforms.uLight.value as Vector3).set(c[0] * k, c[1] * k, c[2] * k);
       this.dock.glow.color.set(c[0], c[1], c[2]);
       this.dock.glow.strength = 0.7 * k * inside;
@@ -1003,6 +1036,8 @@ export class StationInterior {
     // the work bay's lamp stutters; when it dies the cracked screen buzzes
     const n = noise1(time * 5, 17);
     this.flick = n > -0.25 ? 1 : Math.random() < 0.4 ? 0.85 : 0.15;
+    shared.uRoomKind.value = 0;
+    for (let i = this.lamps.length; i < shared.uRoomLight.value.length; i++) shared.uRoomLight.value[i].w = 0;
     this.lamps.forEach((l, i) => {
       const v = shared.uRoomLight.value[i];
       v.set(l.pos.x, l.pos.y, l.pos.z, l.base * (l.flicker ? this.flick : 1) * (i === 4 ? (0.85 + 0.15 * Math.sin(time * 1.3)) * (0.35 + 0.65 * this.tank.level) : 1));

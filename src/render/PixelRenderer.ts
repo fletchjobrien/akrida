@@ -6,6 +6,7 @@ import {
   MeshDepthMaterial,
   NearestFilter,
   OrthographicCamera,
+  PerspectiveCamera,
   PlaneGeometry,
   RGBADepthPacking,
   Scene,
@@ -87,6 +88,18 @@ uniform float uBlur;
 uniform float uGhost;
 uniform float uDesat;
 uniform float uVignette;
+uniform vec3 uPersp;
+uniform float uFeed;
+uniform float uFeedFlash;
+uniform float uFeedTime;
+uniform float uFeedId;
+uniform float uVoidOn;
+
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 
 float bayer4(vec2 p) {
   ivec2 i = ivec2(mod(p, 4.0));
@@ -96,7 +109,14 @@ float bayer4(vec2 p) {
   return (m[idx] + 0.5) / 16.0;
 }
 
-float depthAt(ivec2 p) { return texelFetch(tDepth, p, 0).r * uDepthRange; }
+float depthAt(ivec2 p) {
+  float z = texelFetch(tDepth, p, 0).r;
+  if (uPersp.z < 0.5) return z * uDepthRange;
+  // a perspective camera (a security camera's feed): back to distance along the view
+  float n = uPersp.x;
+  float f = uPersp.y;
+  return 2.0 * n * f / (f + n - (z * 2.0 - 1.0) * (f - n));
+}
 vec3 normalAt(ivec2 p) {
   vec2 xy = texelFetch(tInfo, p, 0).rg * 2.0 - 1.0;
   return vec3(xy, sqrt(max(0.0, 1.0 - dot(xy, xy))));
@@ -104,6 +124,12 @@ vec3 normalAt(ivec2 p) {
 
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy);
+  // a security camera's feed: now and then a line of it slips sideways
+  if (uFeed > 0.5) {
+    float row = floor(gl_FragCoord.y);
+    float tick = floor(uFeedTime * 12.0);
+    if (hash12(vec2(row * 0.37, tick)) < 0.025 + 0.2 * uFeedFlash) p.x += int(hash12(vec2(row, tick + 7.0)) * 4.0) - 1;
+  }
   vec4 c = texelFetch(tColor, p, 0);
   vec4 info = texelFetch(tInfo, p, 0);
   float d = depthAt(p);
@@ -126,6 +152,8 @@ void main() {
   }
 
   vec3 col = c.rgb;
+  // nothing drawn: inside the buried facility, the dark round its rooms
+  if (c.a < 0.5 && uVoidOn > 0.5) col = ${glslRgb(0x0c0a0b)};
   if (depthEdge > 0.0 && info.b > 0.0) {
     col *= mix(1.0, 0.64, info.b);
   } else if (normalEdge > 0.18 && info.a > 0.0) {
@@ -160,6 +188,46 @@ void main() {
     // fade in dithered steps, the way pixel art fades
     float dq = clamp(floor(dark * 8.0 + bayer4(gl_FragCoord.xy)) / 8.0, 0.0, 1.0);
     col = mix(col, ${glslRgb(0x140b0d)}, dq);
+  }
+
+  // A security camera's feed: grainy green-grey monochrome on a worn monitor,
+  // scan lines, a slow rolling bar, snow, the corners of its frame, a blinking
+  // record light and the camera's number as tally marks; a burst of snow when
+  // it switches.
+  if (uFeed > 0.5) {
+    // a low-light camera: it sees warm things brighter than cold ones
+    float lum = dot(col, vec3(0.62, 0.3, 0.08));
+    lum = clamp((lum - 0.06) * 1.55, 0.0, 1.0);
+    float bars = floor(lum * 6.0 + bayer4(gl_FragCoord.xy)) / 6.0;
+    vec3 mono = mix(${glslRgb(0x0a120e)}, ${glslRgb(0xc8f0d0)}, bars);
+    float roll = fract(uFeedTime * 0.11);
+    float fy = gl_FragCoord.y / float(size.y);
+    mono *= 1.0 + 0.12 * smoothstep(0.06, 0.0, abs(fy - (1.0 - roll)));
+    if (int(gl_FragCoord.y) % 2 == 0) mono *= 0.8;
+    float sn = hash12(gl_FragCoord.xy + floor(uFeedTime * 24.0) * 17.0);
+    if (sn < 0.015 + 0.9 * uFeedFlash) mono = mix(mono, vec3(sn < 0.015 + 0.45 * uFeedFlash ? 0.85 : 0.05), 0.75);
+    vec2 uv = (vec2(p) - vec2(size) * 0.5) / vec2(size) * 2.0;
+    float vig = smoothstep(0.55, 1.35, length(uv * vec2(1.0, 0.9)));
+    mono *= 1.0 - vig * 0.85;
+    // its frame's corners
+    ivec2 sz = size;
+    ivec2 q = ivec2(gl_FragCoord.xy);
+    int m = 5;
+    int L = 9;
+    bool cx = q.x == m || q.x == sz.x - 1 - m;
+    bool cy = q.y == m || q.y == sz.y - 1 - m;
+    bool nearX = q.x >= m && q.x < m + L || q.x <= sz.x - 1 - m && q.x > sz.x - 1 - m - L;
+    bool nearY = q.y >= m && q.y < m + L || q.y <= sz.y - 1 - m && q.y > sz.y - 1 - m - L;
+    if ((cx && nearY) || (cy && nearX)) mono = ${glslRgb(0xd8f8e0)};
+    // the record light, blinking, and the camera's number in tally marks beside it
+    vec2 rec = vec2(float(m + 5), float(sz.y - m - 6));
+    if (length(gl_FragCoord.xy - rec) < 2.2 && fract(uFeedTime * 0.8) < 0.6) mono = ${glslRgb(0xff3a2a)};
+    for (int k = 0; k < 4; k++) {
+      if (float(k) > uFeedId) break;
+      int tx = m + 11 + k * 3;
+      if (q.x == tx && q.y <= sz.y - m - 3 && q.y >= sz.y - m - 9) mono = ${glslRgb(0xd8f8e0)};
+    }
+    col = mono;
   }
 
   // Pixel cursor: a small plus that fades out when the mouse rests. Over
@@ -246,6 +314,17 @@ export class PixelRenderer {
   ghost = 0;
   desat = 0;
   vignette = 0;
+  /**
+   * A security camera's feed: while set, the scene is drawn from this camera
+   * instead, as a grainy monitor picture (`feedId` is its number, `feedFlash`
+   * the snow of switching to it).
+   */
+  feedCam: PerspectiveCamera | null = null;
+  feedId = 0;
+  feedFlash = 0;
+  feedTime = 0;
+  /** Debugging: draw a feed without the monitor's look. */
+  feedRaw = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({
@@ -299,6 +378,12 @@ export class PixelRenderer {
         uGhost: { value: 0 },
         uDesat: { value: 0 },
         uVignette: { value: 0 },
+        uPersp: { value: new Vector3(0, 1, 0) },
+        uFeed: { value: 0 },
+        uFeedFlash: { value: 0 },
+        uFeedTime: { value: 0 },
+        uFeedId: { value: 0 },
+        uVoidOn: { value: 0 },
       },
     });
     const postMesh = new Mesh(quad, this.postMat);
@@ -534,7 +619,8 @@ export class PixelRenderer {
     r.setRenderTarget(this.mainRT);
     r.setClearColor(0x000000, 0);
     r.clear(true, true, false);
-    r.render(scene, this.camera);
+    const cam = this.feedCam ?? this.camera;
+    r.render(scene, cam);
 
     // 3. Edges, cursor, fade.
     const pu = this.postMat.uniforms;
@@ -542,6 +628,13 @@ export class PixelRenderer {
     pu.tInfo.value = this.mainRT.textures[1];
     pu.tDepth.value = this.mainRT.depthTexture;
     pu.uDepthRange.value = this.camera.far - this.camera.near;
+    const fc = this.feedCam;
+    (pu.uPersp.value as Vector3).set(fc ? fc.near : 0, fc ? fc.far : 1, fc ? 1 : 0);
+    pu.uFeed.value = fc && !this.feedRaw ? 1 : 0;
+    pu.uFeedFlash.value = this.feedFlash;
+    pu.uFeedTime.value = this.feedTime;
+    pu.uFeedId.value = this.feedId;
+    pu.uVoidOn.value = shared.uVoid.value;
     this.screenToLow(this.cursorScreen.x, this.cursorScreen.y, pu.uCursor.value);
     pu.uCursorAlpha.value = this.cursorAlpha;
     pu.uCursorGlow.value = this.cursorGlow;
