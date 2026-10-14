@@ -1,4 +1,4 @@
-import { Raycaster, Scene, Vector2, Vector3, type Object3D } from 'three';
+import { Quaternion, Raycaster, Scene, Vector2, Vector3, type Mesh, type Object3D } from 'three';
 import { PixelRenderer } from './render/PixelRenderer';
 import { shared } from './render/shared';
 import { Terrain, terrainHeight } from './world/terrain';
@@ -99,6 +99,11 @@ let glanceT = 0;
 let glanceWait = 2;
 /** Reaching into the reader with a card: seconds left. */
 let insertT = 0;
+/** Setting the tracker in the dock to take its update: how far along. */
+let dockSeq: { t: number; placed: boolean; written: boolean; taken: boolean } | null = null;
+let dockSeen = false;
+const dockAt = new Vector3();
+const dockQ = new Quaternion();
 /** How long the drone has been hunting the creature (it panics, then drops what it holds). */
 let huntT = 0;
 let heartT = 0;
@@ -154,7 +159,8 @@ type Usable =
   | { kind: 'pod'; site: CrashSite }
   | { kind: 'hatch' }
   | { kind: 'card'; card: DataCards['cards'][number] }
-  | { kind: 'reader' };
+  | { kind: 'reader' }
+  | { kind: 'dock' };
 /**
  * Walking over to use something the player clicked: where to, the nearest it
  * has come, and for how long it has come no nearer (blocked by a hull or rock).
@@ -232,6 +238,9 @@ function respawn() {
   cards?.reset();
   specimen?.reset();
   tracker?.resetTarget();
+  station?.interior.setDock('off');
+  dockSeq = null;
+  dockSeen = false;
   const cp = checkpoint;
   if (cp?.inside && station) {
     inside = false;
@@ -642,6 +651,7 @@ function usableAt(mouse: Vector2, ground: Vector3): Usable | null {
     if (c && near(c.mesh.position.x, c.mesh.position.z, WALK_RANGE)) return { kind: 'card', card: c };
   }
   if (cards && station && inside && cards.held?.state === 'held' && !cards.complete && readerAt(mouse)) return { kind: 'reader' };
+  if (station && inside && station.interior.dock.state === 'ready' && tracker?.carried && !dockSeq && proxyAt(mouse, station.interior.dock.proxy)) return { kind: 'dock' };
   if (station && station.interior.floorY && (inside || near(station.doorOutside.x, station.doorOutside.z, WALK_RANGE)) && station.doorAt(mouse, pr.camera)) {
     return { kind: 'hatch' };
   }
@@ -650,8 +660,10 @@ function usableAt(mouse: Vector2, ground: Vector3): Usable | null {
 
 const readerRay = new Raycaster();
 function readerAt(mouse: Vector2) {
+  return proxyAt(mouse, station!.interior.reader.proxy);
+}
+function proxyAt(mouse: Vector2, proxy: Mesh) {
   readerRay.setFromCamera(new Vector2((mouse.x / window.innerWidth) * 2 - 1, -(mouse.y / window.innerHeight) * 2 + 1), pr.camera);
-  const proxy = station!.interior.reader.proxy;
   proxy.updateWorldMatrix(true, false);
   return readerRay.intersectObject(proxy, false).length > 0;
 }
@@ -673,6 +685,8 @@ function stillUsable(u: Usable) {
       return u.card.state === 'lying';
     case 'reader':
       return !!cards?.held && !cards.complete;
+    case 'dock':
+      return !!station && station.interior.dock.state === 'ready' && !!tracker?.carried;
     default:
       return true;
   }
@@ -703,6 +717,8 @@ function useSpot(u: Usable, out: Vector3) {
       return out.copy(u.card.mesh.position);
     case 'reader':
       return out.copy(station!.interior.reader.stand);
+    case 'dock':
+      return out.copy(station!.interior.dock.stand);
   }
 }
 
@@ -725,6 +741,8 @@ function usePoint(u: Usable, out: Vector3) {
       return out.copy(u.card.mesh.position);
     case 'reader':
       return out.copy(station!.interior.reader.look);
+    case 'dock':
+      return out.copy(station!.interior.dock.look);
   }
 }
 
@@ -745,6 +763,7 @@ function canUse(u: Usable, d: number, stuck: boolean) {
     case 'card':
       return d < 0.4 || (stuck && d < 1.1);
     case 'reader':
+    case 'dock':
       return d < 0.3 || (stuck && d < 1.0);
   }
 }
@@ -785,6 +804,10 @@ function use(u: Usable) {
       // lean in and slide it home
       insertT = 0.75;
       cards!.insert();
+      break;
+    case 'dock':
+      // lean in and stand it in the dock
+      dockSeq = { t: 0, placed: false, written: false, taken: false };
   }
 }
 
@@ -962,6 +985,8 @@ function update(dt: number, now: number) {
     look = lookPoint.copy(grabAt);
   } else if (insertT > 0 && station) {
     look = lookPoint.copy(station.interior.reader.look);
+  } else if (dockSeq && station) {
+    look = lookPoint.copy(station.interior.dock.look);
   } else if (droneNear && (!droneBehind || glanceT > 0)) {
     // it cannot look away from it
     look = lookPoint.copy(drone.position);
@@ -1035,6 +1060,36 @@ function update(dt: number, now: number) {
     control.move.set(0, 0);
     control.sprint = false;
     creature.holdOut = insertT > 0.1 ? 1 : 0;
+  }
+  if (dockSeq && station && tracker) {
+    // it stands the tracker in the dock, waits while it takes the station's data, and takes it back
+    const q = dockSeq;
+    q.t += dt;
+    control.move.set(0, 0);
+    control.sprint = false;
+    creature.holdOut = q.t < 0.55 || (q.t > 3.3 && q.t < 3.9) ? 1 : 0;
+    const I = station.interior;
+    if (!q.placed && q.t > 0.5) {
+      q.placed = true;
+      tracker.dock(I.dockPose(dockAt, dockQ), dockQ);
+      creature.carrying = false;
+      I.setDock('busy');
+      I.showScreen(0, 0x50d8ff, 2.8);
+      I.showScreen(2, 0x50d8ff, 2.8);
+      audio.dockUpload(2.6, 0.5);
+    }
+    if (!q.written && q.t > 3.1) {
+      q.written = true;
+      const e = eastSite({ x: 0, z: 0 });
+      tracker.retarget(e.x, e.z);
+      I.setDock('done');
+    }
+    if (!q.taken && q.t > 3.7) {
+      q.taken = true;
+      tracker.take(creature);
+      creature.carrying = true;
+    }
+    if (q.t > 4.3) dockSeq = null;
   }
   // the cursor right by the body: the arm holding something stays still, so it can be clicked
   const holdingSomething = !!tracker?.carried || !!cards?.held;
@@ -1233,11 +1288,8 @@ function finishFrame(dt: number, target: Vector3) {
     cards.locked = huntT > 0;
     if (cards.justCompleted && specimen) {
       specimen.begin();
-      // the station's data gives the tracker its next fix, far to the east
-      if (tracker) {
-        const e = eastSite({ x: 0, z: 0 });
-        tracker.retarget(e.x, e.z);
-      }
+      // the station's data is ready to go: the dock by the reader lights up for the tracker
+      station?.interior.setDock('ready');
       noticeTime = 2;
       noticeWhat = { lookPoint: station!.interior.tank.at.clone().setY(station!.interior.tank.at.y + 1) };
     }
@@ -1268,6 +1320,12 @@ function finishFrame(dt: number, target: Vector3) {
   // reaching the mountain's peak is a checkpoint
   if (!checkpoint && station && !inside && !wake.active && Math.hypot(creature.pos.x - HIGH.x, creature.pos.z - HIGH.z) < 16) saveCheckpoint('peak');
   npcStrike.update(dt);
+  if (station && inside && !dockSeen && station.interior.dock.state === 'ready' && !wake.active && Math.hypot(creature.pos.x - station.interior.dock.stand.x, creature.pos.z - station.interior.dock.stand.z) < 3.5) {
+    // the dock calling for the tracker catches its eye
+    dockSeen = true;
+    noticeTime = 2.2;
+    noticeWhat = { lookPoint: station.interior.dock.look };
+  }
   if (facility) facility.update(dt, elapsed, creature.pos);
   if (aftermath) aftermath.update(dt, elapsed, creature.pos);
   if (facility && !facilitySeen && !wake.active && facility.distance < 36) {
@@ -1469,6 +1527,13 @@ if (import.meta.env.DEV || new URLSearchParams(location.search).has('debug')) {
     SITE4,
     get facility() {
       return facility;
+    },
+    /** Use something as if it had been clicked and walked to (the dock, the reader). */
+    useNow(kind: 'dock' | 'reader') {
+      use({ kind });
+    },
+    get dockSeq() {
+      return dockSeq;
     },
     get aftermath() {
       return aftermath;

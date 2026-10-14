@@ -828,7 +828,9 @@ export class Creature {
       const f = this.feet[i];
       const leg = rig.legs[i];
       _hip.set(LEG.hipWidth * f.side, -0.04, 0);
-      rig.pelvis.localToWorld(_hip);
+      // into the rig's own frame, where the hooves are: the same as the world for the
+      // player, but not for a rig carried in something else (the specimen's tank)
+      rig.root.worldToLocal(rig.pelvis.localToWorld(_hip));
 
       const fy = f.yaw;
       const ffx = Math.sin(fy);

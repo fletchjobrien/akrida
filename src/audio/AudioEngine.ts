@@ -512,12 +512,15 @@ export class AudioEngine {
   private exhales: Buf[] = [];
   private notes: Buf[][] = [];
   private padVoices: Buf[] = [];
-  // the tracker: its own bus, a held chord for when it points true, and radio static
+  private songVoices: Buf[] = [];
+  // the tracker: its own bus, the song it picks up when it points true, and radio static
   private tracker: {
     bus: GainNode;
     pan: StereoPannerNode;
     low: BiquadFilterNode;
+    /** The song comes through here, louder the truer it points. */
     hot: GainNode;
+    /** The static between stations. */
     fizz: GainNode | null;
   } | null = null;
   // the highlands: wind moaning through the rock, a thin whistle, and the hum at their heart
@@ -1696,48 +1699,128 @@ export class AudioEngine {
     const send = ctx.createGain();
     send.gain.value = 0.55;
     low.connect(send).connect(this.reverbSend);
-    // pointing true: a soft open fifth on G, two voices a hair apart on each note so it shimmers
+    // pointing true: the song comes through, as from a radio, a little narrow and warm,
+    // with a long soft echo
     const hot = ctx.createGain();
     hot.gain.value = 0;
-    const warm = ctx.createBiquadFilter();
-    warm.type = 'lowpass';
-    warm.frequency.value = 900;
-    warm.connect(hot).connect(bus);
-    for (const [f, g] of [
-      [196.0, 0.32],
-      [196.45, 0.26],
-      [293.66, 0.22],
-      [294.2, 0.18],
-      [392.0, 0.1],
-    ]) {
-      const o = ctx.createOscillator();
-      o.frequency.value = f;
-      const og = ctx.createGain();
-      og.gain.value = g;
-      o.connect(og).connect(warm);
-      o.start();
-    }
-    // a slow swell on the chord, like breath
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.23;
-    const lg = ctx.createGain();
-    lg.gain.value = 180;
-    lfo.connect(lg).connect(warm.frequency);
-    lfo.start();
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = 900;
+    band.Q.value = 0.35;
+    hot.connect(band).connect(bus);
+    const echo = ctx.createGain();
+    echo.gain.value = 0.9;
+    band.connect(echo).connect(this.reverbSend);
     this.tracker = { bus, pan, low, hot, fizz: this.white ? this.trackerFizz(ctx, this.white, bus) : null };
     return this.tracker;
   }
 
+  /**
+   * Radio static between stations: hiss through a narrow band that surges and
+   * fades as if the signal comes and goes, and a thin heterodyne whistle
+   * wandering up and down under it.
+   */
   private trackerFizz(ctx: AudioContext, white: Buf, bus: GainNode) {
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    g.connect(bus);
     const src = this.loop(ctx, white);
     const bp = ctx.createBiquadFilter();
     bp.type = 'bandpass';
-    bp.frequency.value = 2400;
-    bp.Q.value = 0.9;
-    const g = ctx.createGain();
-    g.gain.value = 0;
-    src.connect(bp).connect(g).connect(bus);
+    bp.frequency.value = 1900;
+    bp.Q.value = 0.8;
+    const surge = ctx.createGain();
+    surge.gain.value = 0.7;
+    for (const [f, d] of [
+      [0.37, 0.25],
+      [1.9, 0.12],
+      [7.3, 0.08],
+    ]) {
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = f;
+      const lg = ctx.createGain();
+      lg.gain.value = d;
+      lfo.connect(lg).connect(surge.gain);
+      lfo.start();
+    }
+    src.connect(bp).connect(surge).connect(g);
+    const whistle = ctx.createOscillator();
+    whistle.frequency.value = 1500;
+    const wl = ctx.createOscillator();
+    wl.frequency.value = 0.11;
+    const wg = ctx.createGain();
+    wg.gain.value = 700;
+    wl.connect(wg).connect(whistle.frequency);
+    const wv = ctx.createGain();
+    wv.gain.value = 0.05;
+    whistle.connect(wv).connect(g);
+    whistle.start();
+    wl.start();
     return g;
+  }
+
+  /**
+   * A burst of what is out there between stations: a crackle, and a voice
+   * breaking through for a moment, too garbled to make out, then gone.
+   */
+  trackerGarble(level: number) {
+    const ctx = this.ctx;
+    const t = this.trackerBus();
+    if (!ctx || !t || !t.fizz) return;
+    const now = ctx.currentTime;
+    if (this.crackles.length) {
+      const c = ctx.createBufferSource();
+      c.buffer = this.any(this.crackles);
+      c.playbackRate.value = 1.2 + Math.random() * 0.5;
+      const cg = ctx.createGain();
+      cg.gain.value = level * 0.6;
+      c.connect(cg).connect(t.fizz);
+      c.start(now);
+    }
+    const dur = 0.3 + Math.random() * 0.6;
+    const v = ctx.createOscillator();
+    v.type = 'sawtooth';
+    const vg = ctx.createGain();
+    vg.gain.value = 0;
+    let at = now + 0.05;
+    while (at < now + dur) {
+      v.frequency.setValueAtTime(140 + Math.random() * 260, at);
+      vg.gain.setValueAtTime(Math.random() < 0.7 ? level * 0.5 : 0, at);
+      at += 0.04 + Math.random() * 0.1;
+    }
+    vg.gain.setValueAtTime(0, at);
+    const f1 = ctx.createBiquadFilter();
+    f1.type = 'bandpass';
+    f1.frequency.value = 800 + Math.random() * 900;
+    f1.Q.value = 3;
+    v.connect(f1).connect(vg).connect(t.fizz);
+    v.start(now);
+    v.stop(now + dur + 0.1);
+  }
+
+  /**
+   * One note of the song the tracker picks up when it points true: tone
+   * `tone` (SONG_TONES), held `seconds`, through its song channel (which is
+   * only open as far as it points true).
+   */
+  trackerSong(tone: number, seconds: number, level: number) {
+    const ctx = this.ctx;
+    const t = this.trackerBus();
+    const buf = this.songVoices[tone];
+    if (!ctx || !t || !buf) return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    // held notes are stretched a little slower, so they hang
+    const hold = Math.max(seconds, 0.3);
+    src.playbackRate.value = hold > 1.2 ? 0.995 : 1;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(level, now);
+    g.gain.setValueAtTime(level, now + Math.min(hold, 1.0));
+    g.gain.setTargetAtTime(0.0001, now + Math.min(hold, 1.0), hold > 1.2 ? 0.5 : 0.18);
+    src.connect(g).connect(t.hot);
+    src.start(now);
+    src.stop(now + 3);
   }
 
   /**
@@ -1752,8 +1835,8 @@ export class AudioEngine {
     t.bus.gain.setTargetAtTime(level, now, 0.12);
     t.pan.pan.setTargetAtTime(pan, now, 0.12);
     t.low.frequency.setTargetAtTime(700 * Math.pow(12, clarity), now, 0.12);
-    t.hot.gain.setTargetAtTime(hot * 0.026, now, 0.5);
-    t.fizz?.gain.setTargetAtTime(fizz * 0.012, now, 0.2);
+    t.hot.gain.setTargetAtTime(hot * 0.55, now, 0.25);
+    t.fizz?.gain.setTargetAtTime(fizz * 0.03, now, 0.2);
   }
 
   /** A sine with an envelope into the tracker's bus (or `to`). */
@@ -1814,6 +1897,69 @@ export class AudioEngine {
     const now = ctx.currentTime;
     this.trackerVoice(2093, 2093, now, 0.004, 0.035, 0.05, level, 'square');
     this.trackerVoice(2637, 2637, now + 0.075, 0.004, 0.035, 0.05, level * 0.9, 'square');
+  }
+
+  /** The dock calling for the tracker: a soft, bright two-note chirp, in the room. */
+  dockChirp(level: number) {
+    const ctx = this.ctx;
+    if (!ctx || level < 0.003) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    out.connect(this.master);
+    const r = this.roomBus();
+    if (r) out.connect(r.echo);
+    this.tone(now, 1318.5, 0.09, 0.5, out, 'triangle');
+    this.tone(now + 0.11, 1760, 0.14, 0.5, out, 'triangle');
+  }
+
+  /**
+   * The tracker taking its update: a click as it seats, a rising hum, a fast
+   * patter of data, the song's tones running up as the new place is written
+   * into it, and a bright, settled chord when it is done.
+   */
+  dockUpload(seconds: number, level: number) {
+    const ctx = this.ctx;
+    if (!ctx || !this.white) return;
+    const now = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.value = level;
+    out.connect(this.master);
+    const r = this.roomBus();
+    if (r) out.connect(r.echo);
+    this.burst(now, 0.01, 4200, 3200, 5, 0.6, out);
+    this.tone(now + 0.02, 140, 0.1, 0.5, out);
+    // the hum, rising as it works
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(110, now + 0.1);
+    o.frequency.exponentialRampToValueAtTime(330, now + seconds);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 700;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.08, now + 0.4);
+    g.gain.setValueAtTime(0.08, now + seconds - 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + seconds + 0.1);
+    o.connect(lp).connect(g).connect(out);
+    o.start(now + 0.1);
+    o.stop(now + seconds + 0.2);
+    // the data: a patter of tiny blips
+    for (let t = 0.3; t < seconds - 0.2; t += 0.035 + Math.random() * 0.04) {
+      const b = ctx.createOscillator();
+      b.type = 'square';
+      b.frequency.value = 1800 + Math.random() * 2400;
+      const bg = ctx.createGain();
+      bg.gain.setValueAtTime(0.025, now + t);
+      bg.gain.setValueAtTime(0, now + t + 0.012);
+      b.connect(bg).connect(out);
+      b.start(now + t);
+      b.stop(now + t + 0.02);
+    }
+    // the tones of its new song running up through it, and the chord when it is written
+    [293.66, 369.99, 440, 587.33, 659.26].forEach((f, k) => this.tone(now + seconds * 0.55 + k * 0.12, f * 2, 0.25, 0.08, out, 'triangle'));
+    for (const f of [587.33, 739.99, 880, 1174.66]) this.tone(now + seconds, f, 1.4, 0.06, out, 'sine');
   }
 
   /** It loses the way: a soft falling pair. */
@@ -3389,6 +3535,7 @@ export class AudioEngine {
       this.exhales = v.exhales.map(mono);
       this.notes = v.notes.map((takes) => takes.map(mono));
       this.padVoices = v.pads.map(mono);
+      this.songVoices = v.songs.map(mono);
     };
     try {
       const worker = new Worker(new URL('./voiceWorker.ts', import.meta.url), { type: 'module' });

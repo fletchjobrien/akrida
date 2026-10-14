@@ -26,6 +26,7 @@ import type { Ship } from './ship';
 import type { Dust } from './particles';
 import type { AudioEngine } from '../audio/AudioEngine';
 import type { Creature } from '../character/Creature';
+import { BEAT, EAST_SONG, SONG_COLORS, STATION_SONG, type Song } from '../story/tune';
 
 /** Within this angle of the way to go it holds a solid light; it lets go a little wider (hysteresis). */
 const HOT_IN = (26 * Math.PI) / 180;
@@ -89,7 +90,7 @@ const _ay = new Vector3();
 const _az = new Vector3();
 const _hand = new Vector3();
 
-export type TrackerState = 'placed' | 'carried' | 'falling' | 'ground';
+export type TrackerState = 'placed' | 'carried' | 'falling' | 'ground' | 'docked';
 
 /**
  * A hand-held tracker from the ship, about the size of a walkie-talkie: an
@@ -123,6 +124,14 @@ export class Tracker {
   alerting = false;
   private alertPhase = 0;
   private alertHeld = 0;
+  /** The song it picks up from where it leads, and where it is in it. */
+  private song: Song = STATION_SONG;
+  private songAt = 0;
+  private songNext = 0.5;
+  private readonly songCol = rgb(SONG_COLORS[3]);
+  private readonly noteCol = new Vector3();
+  private noteGlow = 0;
+  private garbleTimer = 2;
 
   private readonly restQ = new Quaternion();
   private readonly ledMat: ShaderMaterial;
@@ -335,6 +344,9 @@ export class Tracker {
   retarget(x: number, z: number) {
     this.target.set(x, 0, z);
     this.target.y = terrainHeight(x, z);
+    this.song = EAST_SONG;
+    this.songAt = 0;
+    this.songNext = 0.8;
     this.alerting = true;
     this.alertPhase = 0;
     this.alertHeld = 0;
@@ -345,7 +357,20 @@ export class Tracker {
   resetTarget() {
     this.target.set(HIGH.x, 0, HIGH.z);
     this.target.y = terrainHeight(this.target.x, this.target.z);
+    this.song = STATION_SONG;
+    this.songAt = 0;
     this.alerting = false;
+  }
+
+  /** Set it in a dock (at `at`, turned `q`): it sits there until it is taken out again. */
+  dock(at: Vector3, q: Quaternion) {
+    this.state = 'docked';
+    this.inShip = false;
+    this.group.position.copy(at);
+    this.group.quaternion.copy(q);
+    this.rest.copy(at);
+    this.restQ.copy(q);
+    this.audio.trackerGrab(0.3);
   }
 
   /** Let go of it: it falls from where it is with the creature's motion. */
@@ -407,6 +432,9 @@ export class Tracker {
       G.quaternion.copy(_q);
     } else if (this.state === 'falling') {
       this.fall(dt);
+    } else if (this.state === 'docked') {
+      G.position.copy(this.rest);
+      G.quaternion.copy(this.restQ);
     }
 
     // ---- which way it points, and whether that is the way
@@ -442,10 +470,30 @@ export class Tracker {
     const throb = Math.pow(0.5 - 0.5 * Math.cos(this.phase * Math.PI * 2), 1.6);
     // the swell of its sound peaks with the light
     const cue = 0.41;
-    if (before < cue && this.phase >= cue && this.heat < 0.5 && this.shown) {
-      const level = held ? 0.2 + 0.18 * holdW : this.awake ? 0.3 : 0.2;
-      this.audio.trackerPulse(level);
+    if (before < cue && this.phase >= cue && this.heat < 0.5 && this.shown && !this.awake) this.audio.trackerPulse(0.2);
+    void cue;
+    // the song from where it leads: it carries on whether or not it points true, and comes
+    // through (out of the static) only as far as it does, so turning it is like tuning in
+    if (this.awake) {
+      this.songNext -= dt;
+      if (this.songNext <= 0) {
+        const [tone, beats] = this.song[this.songAt];
+        this.songAt = (this.songAt + 1) % this.song.length;
+        this.songNext += beats * BEAT;
+        if (tone >= 0) {
+          this.audio.trackerSong(tone, beats * BEAT, 0.9);
+          this.songCol.copy(rgb(SONG_COLORS[tone]));
+          this.noteGlow = 1;
+        }
+      }
+      // and between stations, now and then, something breaks through the static
+      this.garbleTimer -= dt;
+      if (this.garbleTimer <= 0) {
+        this.garbleTimer = 1.2 + Math.random() * 3;
+        if (this.heat < 0.4 && this.shown) this.audio.trackerGarble(0.5);
+      }
     }
+    this.noteGlow = Math.max(0, this.noteGlow - dt * 0.9);
     const sleepy = this.awake ? 1 : 0.6;
     const searching = (0.06 + 0.94 * throb) * sleepy;
     this.light = searching + (1 - searching) * this.heat;
@@ -468,15 +516,29 @@ export class Tracker {
     const step = (v: number) => palette[Math.max(0, Math.min(4, Math.round(v * 3.6 + this.flash * 1.4)))];
     (this.ledMat.uniforms.uLight.value as Vector3).copy(step(this.light));
     (this.tipMat.uniforms.uLight.value as Vector3).copy(step(Math.min(1, this.light * 1.05)));
-    if (!this.alerting) for (const g of [this.tipGlow, this.ledGlow, this.pool]) g.color.lerpVectors(GLOW_RED, GLOW_GREEN, this.heat);
+    // pointing true, it sings, and its light is the colour of each tone as it comes
+    const sing = this.alerting ? 0 : smoothstep(0.5, 1, this.heat);
+    if (sing > 0.01) {
+      this.noteCol.copy(this.songCol).multiplyScalar(0.85 + 0.4 * this.noteGlow);
+      (this.ledMat.uniforms.uLight.value as Vector3).lerp(this.noteCol, sing);
+      (this.tipMat.uniforms.uLight.value as Vector3).lerp(this.noteCol, sing);
+    }
+    if (!this.alerting) {
+      for (const g of [this.tipGlow, this.ledGlow, this.pool]) {
+        g.color.lerpVectors(GLOW_RED, GLOW_GREEN, this.heat);
+        if (sing > 0.01) g.color.lerp(this.songCol, sing);
+      }
+    }
 
     // ---- glows: halos on the light and the tip, and a pool of green on whatever is under it
     G.updateMatrixWorld(true);
     this.tip.getWorldPosition(this.tipGlow.position);
     this.led.getWorldPosition(this.ledGlow.position);
     const lit = this.shown ? this.light : 0;
-    this.tipGlow.strength = lit * (0.75 + 0.35 * this.flash) * (0.85 + 0.25 * holdW);
-    this.ledGlow.strength = lit * 0.6 * (0.8 + 0.3 * holdW);
+    // each note blooms as it comes
+    const bloom = 1 + 0.6 * sing * this.noteGlow;
+    this.tipGlow.strength = lit * (0.75 + 0.35 * this.flash) * (0.85 + 0.25 * holdW) * bloom;
+    this.ledGlow.strength = lit * 0.6 * (0.8 + 0.3 * holdW) * bloom;
     const ground = this.inShip ? this.floor : this.groundAt(G.position.x, G.position.z);
     const above = G.position.y - ground;
     this.pool.position.set(G.position.x, ground + 0.012, G.position.z);
@@ -506,8 +568,8 @@ export class Tracker {
       clarity = 1 / (1 + d * 0.25);
       pan = clamp((G.position.x - listener.x) * 0.18, -0.8, 0.8);
     }
-    const hum = this.heat * (held ? 0.45 + 0.55 * holdW : 0.35);
-    const fizz = this.awake ? (1 - this.heat) * (held ? 0.25 + 0.75 * holdW : 0.12) : 0;
+    const hum = this.heat * (held ? 0.6 + 0.4 * holdW : 0.45);
+    const fizz = this.awake ? (1 - this.heat) * (held ? 0.45 + 0.55 * holdW : 0.25) : 0;
     this.audio.setTracker(level, pan, clarity, hum, fizz);
   }
 

@@ -19,6 +19,7 @@ scope.onmessage = (e) => {
     ...voices.exhales,
     ...voices.notes.flat(),
     ...voices.pads,
+    ...voices.songs,
   ].map((a) => a.buffer);
   scope.postMessage(voices, buffers);
 };

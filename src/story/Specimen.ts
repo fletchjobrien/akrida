@@ -1,4 +1,4 @@
-import { BoxGeometry, CylinderGeometry, Group, IcosahedronGeometry, Mesh, Object3D, Vector2, Vector3, type BufferGeometry, type Material } from 'three';
+import { BoxGeometry, CylinderGeometry, Group, Mesh, Object3D, Vector2, Vector3, type BufferGeometry, type Material } from 'three';
 import { Creature, type CreatureInput, type World } from '../character/Creature';
 import type { Skin } from '../character/rig';
 import { blendPose, clonePose, type ScriptPose } from '../character/scriptPose';
@@ -28,28 +28,28 @@ const STEAM_FADE = C(0xa8b4b2);
 const SAND = C(PALETTE.sandMid);
 const SAND_FADE = C(PALETTE.sandLit);
 const BUBBLE = C(0x9af0e8);
-const BLOOD = C(0x7a1010);
-const BLOOD_FADE = C(0x3a0606);
-const GORE = C(0x9a5a5a);
+const BLOOD = C(0x26303c);
+const BLOOD_FADE = C(0x1a2028);
+const GORE = C(0x5a5652);
 const SPARK = C(0xfff0c0);
 const SPARK_COOL = C(0xe0702a);
 
 type Phase = 'tank' | 'drain' | 'settle' | 'door' | 'wake' | 'walk' | 'outside' | 'dead';
 
 /** What it is doing while it makes its way out. */
-type Act = 'walk' | 'trip' | 'spasm' | 'retch';
+type Act = 'walk' | 'trip' | 'knees' | 'catch';
 
 /** How big it is beside the creature: it is drawn at this scale, in a frame of its own. */
-const S = 0.65;
+const S = 1;
 /** Seconds out on the sand before the drone takes it. */
 export const PREY_AFTER = 2;
 
-/** Raw and hairless: what the tank grew. */
+/** Grey primer, the shell not yet finished (the finished parts get the creature's colours). */
 const SKIN: Skin = {
-  fur: [0x5a3a3e, 0x8a5e5e, 0xb4867c],
-  belly: [0x3e2438, 0x5e3a52, 0x845a6c],
-  hoof: [0x3a2a2c, 0x6a4e4e],
-  eye: 0xc8d0c0,
+  fur: [0x5e5a56, 0x86817a, 0xa9a39a],
+  belly: [0x6a6660, 0x948e86, 0xb4ada2],
+  hoof: [0x1e1e22, 0x34343a],
+  eye: PALETTE.eye,
 };
 
 // ---------------------------------------------------------------------- poses
@@ -103,17 +103,19 @@ const DOWN = mk(LIMP, { eyeOpen: 1, tremble: 0.9, exertion: 1, headYaw: 0.9, nec
 /** Standing, swaying, barely: knees going, head hanging. */
 const SWAY = mk(STAND, { pelvisY: 0.6, pelvisPitch: 0.3, neckPitch: 0.4, headPitch: 0.3, tremble: 1, exertion: 1, eyeOpen: 1 });
 
-/** Doubled over to retch. */
-const HEAVE = mk(STAND, {
-  pelvisY: 0.55,
-  pelvisPitch: 0.75,
-  spinePitch: 0.3,
-  chestPitch: 0.25,
-  neckPitch: 0.5,
-  headPitch: 0.35,
-  handL: hand(0.22, 0.42, 0.3),
-  handR: hand(-0.2, 0.48, 0.25),
-  tremble: 1,
+/** Stopped, bent over with its hands braced on its knees, dragging in air. */
+const BRACE = mk(STAND, {
+  pelvisY: 0.6,
+  pelvisPitch: 0.62,
+  spinePitch: 0.22,
+  chestPitch: 0.18,
+  neckPitch: 0.1,
+  headPitch: 0.1,
+  handL: hand(0.15, 0.4, 0.22),
+  handR: hand(-0.15, 0.4, 0.22),
+  footL: { x: 0.13, z: 0.04, lift: 0, tilt: 0.25, pitch: 0, poleDown: 0 },
+  footR: { x: -0.13, z: -0.05, lift: 0, tilt: 0.25, pitch: 0, poleDown: 0 },
+  tremble: 0.85,
   exertion: 1,
   eyeOpen: 1,
 });
@@ -151,20 +153,24 @@ const TRIP: Key[] = [
 /** How far (in its own frame) a fall carries it forward. */
 const TRIP_LUNGE = 0.45;
 
-/** A fit, standing: it seizes and jerks where it stands, the knees half going. */
-const SPASM: Key[] = [
+/** Its legs give: it sinks to its knees, catches itself on its hands, hangs there, and gets up again. */
+const KNEES: Key[] = [
   { t: 0, pose: SWAY, ease: 'linear' },
-  { t: 0.15, pose: mk(SWAY, { pelvisY: 0.52, spinePitch: -0.25, chestPitch: -0.2, neckPitch: -0.6, headPitch: -0.4, armPitch: -0.9, armOut: 0.7, elbow: -0.3 }), ease: 'out' },
-  { t: 0.75, pose: mk(SWAY, { pelvisY: 0.55, spinePitch: -0.15, neckPitch: -0.4, armPitch: -0.6, armOut: 0.5 }), ease: 'linear' },
-  { t: 1.0, pose: SWAY, ease: 'inOut' },
+  { t: 0.3, pose: mk(KNEEL, { tremble: 1 }), ease: 'in' },
+  { t: 0.6, pose: FOURS, ease: 'out' },
+  { t: 1.6, pose: mk(FOURS, { neckPitch: 0.75, tremble: 1 }), ease: 'linear' },
+  { t: 2.0, pose: STEP_L, ease: 'inOut' },
+  { t: 2.4, pose: KNEEL, ease: 'out' },
+  { t: 2.8, pose: RISE, ease: 'inOut' },
+  { t: 3.2, pose: SWAY, ease: 'inOut' },
 ];
 
-/** Doubled over, retching up what was in it. */
-const RETCH: Key[] = [
+/** It stops, braces its hands on its knees and hangs its head, then pushes on. */
+const CATCH: Key[] = [
   { t: 0, pose: SWAY, ease: 'linear' },
-  { t: 0.3, pose: HEAVE, ease: 'inOut' },
-  { t: 1.4, pose: HEAVE, ease: 'linear' },
-  { t: 1.75, pose: SWAY, ease: 'inOut' },
+  { t: 0.35, pose: BRACE, ease: 'out' },
+  { t: 1.4, pose: mk(BRACE, { neckPitch: 0.3 }), ease: 'linear' },
+  { t: 1.8, pose: SWAY, ease: 'inOut' },
 ];
 
 function sample(keys: Key[], t: number, out: ScriptPose) {
@@ -190,19 +196,21 @@ type Gib = { obj: Object3D; vel: Vector3; spin: Vector3; rest: boolean; bled: bo
  * and the figure in it sinks to lie in a heap on the tank's floor. The door
  * hisses round in a burst of steam. It gets up the way a newborn thing would,
  * in fits: pushing up, the arms giving, again, onto its knees, and up. Then it
- * stumbles out, weaving, shaking, its knees going under it: it falls on its
- * face and drags itself back up, it seizes where it stands, it doubles over
- * and retches. It follows the cord out through the habitat and the airlock,
- * falls down the steps, and staggers on over the sand until the drone finds it
- * and it comes apart.
+ * stumbles out on legs it has never used, weaving and lurching to one side, its
+ * knees going under it: it pitches onto its face and drags itself back up, it
+ * sinks to its knees and hangs on its hands, it stops and braces its hands on
+ * its knees. It follows the cord out through the habitat and the airlock, falls
+ * down the steps, and staggers on over the sand until the drone finds it and it
+ * comes apart.
  *
- * It is one of the creature's own kind at its very beginning, before it was
- * finished: stunted and hairless, raw and veined, its head swollen, half of
- * it already machine. A steel plate bolted over one side of its skull with a
- * red optic in it, a bare steel arm with a joint like a vice, a steel shin and
- * hoof on one leg, a brace across its chest round a core that glows the
- * tank's colour, a row of steel studs down its spine, cables in its back, and
- * one arm left withered flesh.
+ * It is an Akridian, one of the creature's own kind, half built: the
+ * scientists here were trying to make more of them, since their makers never
+ * let them make their own. It stands as tall as the creature, in grey primer.
+ * Its head is finished in the creature's colours, with one horn fitted and the
+ * other a bare socket, and a side panel left off so its optics show, a lens
+ * flickering in there. Its eye is still booting. Its chest is open on its frame
+ * round a glowing core and bundled wiring; its left arm and left shin are bare
+ * frame and actuators; the umbilical is plugged into its open spine.
  */
 export class Specimen {
   phase: Phase = 'tank';
@@ -223,6 +231,9 @@ export class Specimen {
   private keyT = 0;
   private keyRate = 1;
   private fitTimer = 3;
+  private stagger = 0;
+  private staggerSide = 1;
+  private staggerWait = 2;
   private stepCool = 0;
   private lunge = 0;
   private voiceTimer = 1.2;
@@ -232,6 +243,7 @@ export class Specimen {
   private readonly tube: { p: Vector3; prev: Vector3; mesh: Mesh }[] = [];
   private navel!: Object3D;
   private optic!: Object3D;
+  private eye: Mesh | null = null;
   private metalMeshes = new Set<Mesh>();
   private readonly gibs: Gib[] = [];
   private readonly marks: Mesh[] = [];
@@ -241,21 +253,25 @@ export class Specimen {
   private twitch = { t: 0, neck: 0, head: 0, chest: 0, arm: 0, knee: 0 };
   private readonly wetMat = toonMaterial({ dark: 0x1a3432, mid: 0x24484a, light: 0x2e5a58, litAt: 0.6, outline: 0, highlight: 0 });
   private readonly printMat = toonMaterial({ dark: PALETTE.sandDeep, mid: PALETTE.sandShade, light: PALETTE.sandMid, litAt: 0.6, outline: 0, highlight: 0 });
-  private readonly bloodMat = toonMaterial({ dark: 0x2a0404, mid: 0x420808, light: 0x5a0e0e, litAt: 0.6, outline: 0, highlight: 0.5 });
+  private readonly bloodMat = toonMaterial({ dark: 0x161c24, mid: 0x1e2630, light: 0x28323e, litAt: 0.6, outline: 0, highlight: 0.5 });
   private readonly bileMat = toonMaterial({ dark: 0x2e3412, mid: 0x46501c, light: 0x5e6a26, litAt: 0.6, outline: 0, highlight: 0.6 });
   private readonly M = {
-    flesh: toonMaterial({ dark: 0x5a3a3e, mid: 0x8a5e5e, light: 0xb4867c, litAt: 0.5, outline: 0.6, highlight: 0.75 }),
-    withered: toonMaterial({ dark: 0x4a3034, mid: 0x6e4a4a, light: 0x8e6a62, litAt: 0.5, outline: 0.6, highlight: 0.5 }),
-    sac: toonMaterial({ dark: 0x3e2438, mid: 0x5e3a52, light: 0x845a6c, litAt: 0.5, outline: 0.5, highlight: 0.9 }),
-    vein: toonMaterial({ dark: 0x2a1424, mid: 0x401e38, light: 0x542a48, litAt: 0.5, outline: 0, highlight: 0 }),
-    metal: toonMaterial({ dark: 0x26282c, mid: 0x4a4e56, light: 0x8a909a, litAt: 0.5, outline: 0.7, highlight: 1 }),
-    rust: toonMaterial({ dark: 0x3a2418, mid: 0x5e3a26, light: 0x7e5034, litAt: 0.5, outline: 0.6, highlight: 0.4 }),
-    wire: toonMaterial({ dark: 0x121214, mid: 0x1e1e22, light: 0x34343a, litAt: 0.5, outline: 0, highlight: 0.3 }),
-    optic: toonMaterial({ dark: 0xff4a2a, mid: 0xff4a2a, light: 0xff4a2a, unlit: true, outline: 0 }),
+    // unpainted primer over most of it; the creature's own colours where it was finished
+    primer: toonMaterial({ dark: 0x5e5a56, mid: 0x86817a, light: 0xa9a39a, litAt: 0.55, outline: 0.6, highlight: 0.5 }),
+    shell: toonMaterial({ dark: PALETTE.furDark, mid: PALETTE.furMid, light: PALETTE.furLight, litAt: 0.6, outline: 0, highlight: 0.3 }),
+    belly: toonMaterial({ dark: PALETTE.bellyDark, mid: 0xa8808a, light: 0xc09aa0, litAt: 0.6, outline: 0, highlight: 0.2 }),
+    frame: toonMaterial({ dark: 0x1a1a1e, mid: 0x2c2c32, light: 0x48484f, litAt: 0.5, outline: 0.7, highlight: 0.9 }),
+    metal: toonMaterial({ dark: 0x34363c, mid: 0x5c6068, light: 0x9aa0a8, litAt: 0.5, outline: 0.7, highlight: 1 }),
+    cavity: toonMaterial({ dark: 0x0c0b0d, mid: 0x141217, light: 0x1e1b22, litAt: 0.5, outline: 0, highlight: 0 }),
+    wireR: toonMaterial({ dark: 0x5a1410, mid: 0x9a2a1e, light: 0xc4442e, litAt: 0.5, outline: 0, highlight: 0.3 }),
+    wireB: toonMaterial({ dark: 0x14285a, mid: 0x2a4a9a, light: 0x4a6ac4, litAt: 0.5, outline: 0, highlight: 0.3 }),
+    wireY: toonMaterial({ dark: 0x5a4a10, mid: 0x9a8418, light: 0xc4aa2e, litAt: 0.5, outline: 0, highlight: 0.3 }),
+    mark: toonMaterial({ dark: 0x7a3a24, mid: 0xb85a34, light: 0xd9824a, litAt: 0.55, outline: 0, highlight: 0.4 }),
+    optic: toonMaterial({ dark: 0x6ae8ff, mid: 0x6ae8ff, light: 0x6ae8ff, unlit: true, outline: 0 }),
     core: toonMaterial({ dark: 0x5ae8d8, mid: 0x5ae8d8, light: 0x5ae8d8, unlit: true, outline: 0 }),
-    milk: toonMaterial({ dark: 0x8a9488, mid: 0xc4ccbc, light: 0xe8eee0, litAt: 0.4, outline: 0.3, highlight: 1 }),
     tube: toonMaterial({ dark: 0x1e1e22, mid: 0x34343a, light: 0x55555e, litAt: 0.5, outline: 0.4, highlight: 0.8 }),
   };
+
 
   constructor(
     private readonly station: Station,
@@ -362,7 +378,7 @@ export class Specimen {
     this.build(c);
     this.holder.add(c.rig.root);
     // hanging in the fluid on its tether
-    this.holder.position.set(0, -0.5, 0);
+    this.holder.position.set(0, -0.72, 0);
     this.holder.rotation.set(0, 0, 0);
     tank.figure.add(this.holder);
     blendPose(this.pose, FLOAT, FLOAT, 0);
@@ -548,14 +564,16 @@ export class Specimen {
     // it never stops making some sound
     const at = this.at!;
     this.voiceTimer -= dt;
-    if (this.voiceTimer <= 0 && this.act !== 'retch') {
+    if (this.voiceTimer <= 0) {
       const out = this.phase === 'outside';
       this.voiceTimer = rand(0.8, 1.9);
-      const kinds = out ? (['gurgle', 'whimper', 'shriek', 'rattle', 'mewl', 'gasp'] as const) : (['gurgle', 'whimper', 'mewl', 'gasp', 'rattle'] as const);
+      const kinds = out ? (['whimper', 'gasp', 'mewl', 'gasp'] as const) : (['whimper', 'mewl', 'gasp', 'gasp'] as const);
       this.audio.specimenVoice(kinds[Math.floor(Math.random() * kinds.length)], 0.45 * level(listener.distanceTo(at)), this.pan(listener));
     }
     // the optic flickers
     this.optic.visible = Math.random() > 0.06;
+    // its eye still booting: it comes and goes, stutters, and holds for a while
+    if (this.eye) this.eye.visible = noise1(time * 2.3, 17) > -0.35 && Math.random() > 0.04;
     this.updateTube(dt, 9);
     this.drip();
   }
@@ -578,7 +596,7 @@ export class Specimen {
     if (this.keys) {
       this.keyT += dt * this.keyRate;
       sample(this.keys, this.keyT, this.pose);
-      this.jerks(dt, this.act === 'spasm' ? 2.2 : 0.8);
+      this.jerks(dt, 0.5);
       // a fall carries it forward onto its face
       if (this.lunge > 0 && this.keyT < 0.5) {
         const step = (TRIP_LUNGE / 0.5) * dt * this.keyRate;
@@ -641,21 +659,7 @@ export class Specimen {
     const pan = this.pan(listener);
     if (this.act !== 'walk') {
       this.scripted(dt);
-      if (this.act === 'retch' && this.keyT > 0.5 && this.keyT < 1.3) {
-        // it comes up out of it
-        c.rig.head.getWorldPosition(this.tmp);
-        const fx = Math.sin(c.yaw);
-        const fz = Math.cos(c.yaw);
-        for (let i = 0; i < 2; i++) {
-          this.dust.spawn(this.tmp.x + fx * 0.08, this.tmp.y - 0.04, this.tmp.z + fz * 0.08, fx * rand(0.2, 0.8), rand(-0.4, 0.2), fz * rand(0.2, 0.8), rand(0.5, 1), Math.random() < 0.6 ? BILE : FLUID, 1, {
-            g: 9,
-            drag: 0.3,
-            windK: 0,
-            c2: BILE_FADE,
-          });
-        }
-        if (this.keyT - dt <= 0.6) this.splat(at.x + fx * 0.25, at.z + fz * 0.25, 0.12, this.bileMat);
-      }
+      if (this.act === 'knees' && this.keyT > 0.6 && this.keyT - dt <= 0.6) this.audio.specimenSlap(0.3 * lv, pan, !out, false);
       if (this.act === 'trip' && this.keyT > 0.5 && this.keyT - dt <= 0.5) {
         // face first onto the deck or the sand
         this.audio.specimenSlap(0.5 * lv, pan, !out, true);
@@ -671,18 +675,34 @@ export class Specimen {
       const d = Math.hypot(dx, dz) || 1;
       dx /= d;
       dz /= d;
-      const weave = noise1(time * 0.9, 3) * (out ? 0.55 : 0.35) + Math.sin(time * 2.1) * 0.12;
+      let weave = noise1(time * 0.9, 3) * (out ? 0.45 : 0.3) + Math.sin(time * 2.1) * 0.1;
+      // now and then it lurches off to one side and has to catch itself
+      this.staggerWait -= dt;
+      if (this.staggerWait <= 0 && this.stagger <= 0) {
+        this.stagger = 0.45;
+        this.staggerSide = Math.random() < 0.5 ? -1 : 1;
+        this.staggerWait = rand(1.6, 3.5);
+      }
+      let push = 1;
+      if (this.stagger > 0) {
+        this.stagger -= dt;
+        const k = Math.sin((1 - this.stagger / 0.45) * Math.PI);
+        weave += this.staggerSide * 1.1 * k;
+        push = 1 + 0.4 * k;
+      }
       const cw = Math.cos(weave);
       const sw = Math.sin(weave);
       const wx = dx * cw + dz * sw;
       const wz = -dx * sw + dz * cw;
-      const lurch = 0.7 + 0.3 * Math.max(0, noise1(time * 1.6, 5) + 0.4);
-      const speed = (out ? 0.8 : 1) * lurch;
+      // halting steps: it slows, almost stops, then lurches on
+      const lurch = 0.55 + 0.45 * Math.max(0, noise1(time * 1.6, 5) + 0.35);
+      const speed = (out ? 0.48 : 0.58) * lurch * push;
       this.input.move.set(wx * speed, -wz * speed);
       // it looks at the creature when it is close: the red eye finds it
       if (listener.distanceTo(at) < 3.5) this.input.look = this.toLocal(this.look.copy(listener).setY(listener.y + 0.9), this.look);
       else this.input.look = null;
-      c.panic = 0.8;
+      c.panic = 0.6;
+      c.tired = Math.max(c.tired, 0.8);
       c.update(dt, this.input, this.world);
       this.holder.position.copy(this.origin);
       // its steps: a wet slap of a bare foot, the clank of the steel one
@@ -703,7 +723,7 @@ export class Specimen {
       this.fitTimer -= dt;
       if (this.fitTimer <= 0) {
         const r = Math.random();
-        this.fit(r < 0.4 ? 'trip' : r < 0.75 ? 'spasm' : 'retch', lv, pan);
+        this.fit(r < (out ? 0.25 : 0.15) ? 'trip' : r < 0.6 ? 'knees' : 'catch', lv, pan);
       }
     }
     // out of the airlock and onto the sand
@@ -715,15 +735,11 @@ export class Specimen {
 
   private fit(act: Act, lv: number, pan: number, rate = 1) {
     this.act = act;
-    this.fitTimer = this.phase === 'outside' ? rand(1.5, 2.6) : rand(5, 8);
+    this.fitTimer = this.phase === 'outside' ? rand(2, 3.5) : rand(4, 7);
     this.lunge = act === 'trip' ? 1 : 0;
     this.twitch.t = 0;
-    this.play(act === 'trip' ? TRIP : act === 'spasm' ? SPASM : RETCH, rate);
-    if (act === 'spasm') {
-      this.audio.specimenVoice(Math.random() < 0.6 ? 'shriek' : 'gurgle', 0.5 * lv, pan);
-      this.audio.specimenSlap(0.2 * lv, pan, true, true);
-    } else if (act === 'retch') this.audio.specimenVoice('retch', 0.55 * lv, pan);
-    else this.audio.specimenVoice('gasp', 0.45 * lv, pan);
+    this.play(act === 'trip' ? TRIP : act === 'knees' ? KNEES : CATCH, rate);
+    this.audio.specimenVoice(act === 'catch' ? 'gasp' : 'whimper', 0.45 * lv, pan);
   }
 
   /** A footprint: wet on the deck, a scuff in the sand. */
@@ -881,10 +897,13 @@ export class Specimen {
   }
 
   /**
-   * Make the creature's body into what the tank grew: hairless and raw, a
-   * swollen head with a steel plate and a red optic, horns no more than nubs,
-   * one arm steel and one withered, one leg steel below the knee, a brace and a
-   * glowing core in its chest, studs down its spine, cables from its back.
+   * Make the creature's body into one of its kind left half built: most of
+   * its shell still bare primer, only the head and one arm finished in the
+   * creature's own colours; the chest left open on its frame, the glowing core
+   * and its bundled wiring showing; the left arm and the left shin bare
+   * skeleton and actuators; one horn fitted, the other only a socket; a side
+   * panel of the head missing over the optics; calibration marks here and
+   * there; and the umbilical still plugged into its back.
    */
   private build(c: Creature) {
     const M = this.M;
@@ -896,94 +915,85 @@ export class Specimen {
       m.layers.enable(SHADOW_LAYER);
       m.frustumCulled = false;
       parent.add(m);
-      if (mat === M.metal || mat === M.rust || mat === M.wire) this.metalMeshes.add(m);
+      if (mat === M.metal || mat === M.frame) this.metalMeshes.add(m);
       return m;
     };
     const box = (parent: Object3D, w: number, h: number, d: number, mat: Material, x: number, y: number, z: number) => add(parent, new BoxGeometry(w, h, d), mat, x, y, z);
-    const lump = (parent: Object3D, r: number, mat: Material, x: number, y: number, z: number, sx = 1, sy = 1, sz = 1) => add(parent, new IcosahedronGeometry(r, 1), mat, x, y, z, sx, sy, sz);
+    const cyl = (parent: Object3D, r: number, h: number, mat: Material, x: number, y: number, z: number) =>
+      add(parent, new CylinderGeometry(r, r, h, 8).rotateZ(Math.PI / 2), mat, x, y, z);
     const meshesOf = (o: Object3D) => o.children.filter((k): k is Mesh => k instanceof Mesh);
-    const metal = (m: Mesh) => {
-      m.material = M.metal;
+    const bare = (m: Mesh, thin = 0.5) => {
+      m.material = M.frame;
+      m.scale.set(thin, 1, thin);
       this.metalMeshes.add(m);
     };
-    // the body: raw flesh everywhere the rig had fur
-    for (const m of rig.parts) if (!this.metalMeshes.has(m)) m.material = M.flesh;
-    rig.eye.material = M.milk;
-    // its head: swollen and lopsided, too big for it
-    rig.head.scale.setScalar(1.18);
-    const headMeshes = meshesOf(rig.head);
-    // the horns are no more than nubs, one of them a steel stub
-    for (const m of headMeshes) {
-      if (m === rig.eye || m === headMeshes[0]) continue;
-      m.scale.set(0.8, 0.4, 0.8);
-      m.position.y -= 0.04;
-    }
-    metal(headMeshes[2]);
-    lump(rig.head, 0.13, M.flesh, -0.07, 0.2, -0.02, 1.1, 0.9, 1);
-    lump(rig.head, 0.07, M.sac, 0.12, 0.2, -0.05);
-    box(rig.head, 0.006, 0.006, 0.16, M.vein, -0.1, 0.27, 0).rotation.y = 0.4;
-    box(rig.head, 0.006, 0.006, 0.12, M.vein, -0.02, 0.29, 0.03).rotation.y = -0.5;
-    // a steel plate bolted over the left of its face, a red optic in it, wires from it into the neck
-    box(rig.head, 0.21, 0.2, 0.035, M.metal, 0.12, 0.1, 0.118);
-    box(rig.head, 0.03, 0.2, 0.2, M.metal, 0.225, 0.1, 0.02);
-    for (const [x, y] of [
-      [0.04, 0.18],
-      [0.2, 0.18],
-      [0.04, 0.02],
-      [0.2, 0.02],
-    ])
-      box(rig.head, 0.014, 0.014, 0.012, M.rust, x, y, 0.138);
-    box(rig.head, 0.07, 0.055, 0.02, M.wire, 0.14, 0.1, 0.14);
-    const optic = add(rig.head, new BoxGeometry(0.04, 0.035, 0.012), M.optic, 0.14, 0.1, 0.152);
-    this.optic = optic;
-    box(rig.head, 0.012, 0.012, 0.14, M.wire, 0.18, -0.01, 0.0).rotation.x = 0.6;
-    box(rig.head, 0.012, 0.012, 0.12, M.wire, 0.1, -0.01, -0.02).rotation.x = 0.9;
-    // stitches across the raw side of its face
-    for (const y of [0.05, 0.12]) box(rig.head, 0.08, 0.006, 0.006, M.vein, -0.12, y, 0.113);
-    // its chest: a steel brace round a core that glows the tank's colour, ribs showing on the other side
-    box(rig.chest, 0.17, 0.22, 0.03, M.metal, 0.08, 0.15, 0.13);
-    box(rig.chest, 0.05, 0.05, 0.012, M.core, 0.08, 0.16, 0.148);
-    box(rig.chest, 0.2, 0.025, 0.03, M.rust, 0.02, 0.26, 0.128);
-    for (const y of [0.08, 0.13, 0.18]) box(rig.chest, 0.12, 0.012, 0.012, M.vein, -0.09, y, 0.124);
-    lump(rig.spine, 0.09, M.sac, 0, 0.07, 0.07, 1.1, 0.85, 0.9);
-    // studs down its spine, and the cables from its back
-    for (const y of [0.04, 0.12, 0.2, 0.28]) box(rig.chest, 0.05, 0.04, 0.04, M.metal, 0, y, -0.125);
-    for (const y of [0.04, 0.14]) box(rig.spine, 0.05, 0.04, 0.04, M.metal, 0, y, -0.1);
-    box(rig.chest, 0.02, 0.2, 0.02, M.wire, 0.05, 0.12, -0.14);
-    box(rig.chest, 0.02, 0.18, 0.02, M.wire, -0.05, 0.1, -0.14);
-    this.navel = new Object3D();
-    this.navel.position.set(0.0, 0.05, -0.15);
-    rig.chest.add(this.navel);
-    // the left arm is steel: bare struts, a vice of an elbow, a clamp of a hand
+    // the shell: bare primer everywhere to begin with
+    for (const m of rig.parts) m.material = M.primer;
+    // the head is finished: the creature's colours, one horn fitted, the other a socket
+    const head = meshesOf(rig.head);
+    head[0].material = M.shell;
+    head[2].material = M.shell;
+    bare(head[3], 0.6);
+    head[3].scale.y = 0.35;
+    head[3].position.y -= 0.04;
+    // a side panel of the head left off: its optics showing, a lens flickering in there
+    box(rig.head, 0.13, 0.15, 0.2, M.cavity, -0.16, 0.095, 0.0);
+    box(rig.head, 0.02, 0.16, 0.21, M.frame, -0.225, 0.095, 0.0);
+    cyl(rig.head, 0.03, 0.06, M.metal, -0.19, 0.12, 0.05);
+    this.optic = add(rig.head, new BoxGeometry(0.035, 0.035, 0.012), M.optic, -0.19, 0.12, 0.085);
+    box(rig.head, 0.01, 0.01, 0.14, M.wireY, -0.18, 0.06, -0.02);
+    // the creature's eye, still booting (it flickers; see update)
+    this.eye = rig.eye;
+    // the right arm is finished; the left is bare frame and actuators
+    for (const m of [...meshesOf(rig.arms[1].shoulder), ...meshesOf(rig.arms[1].elbow)]) m.material = M.shell;
+    rig.arms[1].hand.material = M.shell;
     const armL = rig.arms[0];
-    for (const m of [...meshesOf(armL.shoulder), ...meshesOf(armL.elbow)]) {
-      metal(m);
-      m.scale.set(0.55, 1, 0.55);
+    for (const m of [...meshesOf(armL.shoulder), ...meshesOf(armL.elbow)]) bare(m, 0.4);
+    armL.hand.material = M.metal;
+    cyl(armL.shoulder, 0.06, 0.1, M.metal, 0, 0, 0);
+    cyl(armL.elbow, 0.05, 0.09, M.metal, 0, 0, 0);
+    box(armL.shoulder, 0.012, 0.18, 0.012, M.wireR, 0.03, -0.11, 0.03);
+    box(armL.elbow, 0.012, 0.16, 0.012, M.wireB, -0.025, -0.1, 0.03);
+    box(armL.elbow, 0.03, 0.12, 0.03, M.metal, 0.03, -0.1, -0.02);
+    // the chest left open on its frame: the core glowing, the wiring bundled round it
+    box(rig.chest, 0.26, 0.2, 0.03, M.cavity, 0, 0.15, 0.115);
+    for (const x of [-0.12, 0.12]) box(rig.chest, 0.025, 0.22, 0.035, M.frame, x, 0.15, 0.125);
+    for (const y of [0.06, 0.24]) box(rig.chest, 0.26, 0.022, 0.035, M.frame, 0, y, 0.125);
+    box(rig.chest, 0.07, 0.07, 0.02, M.core, 0.0, 0.16, 0.135);
+    box(rig.chest, 0.1, 0.1, 0.01, M.frame, 0.0, 0.16, 0.13);
+    for (const [x, mat, r] of [
+      [-0.07, M.wireR, 0.3],
+      [-0.05, M.wireB, -0.2],
+      [0.06, M.wireY, 0.4],
+      [0.08, M.wireR, -0.3],
+    ] as const) {
+      const w = box(rig.chest, 0.014, 0.16, 0.014, mat, x, 0.15, 0.137);
+      w.rotation.z = r;
     }
-    metal(armL.hand);
-    box(armL.shoulder, 0.11, 0.08, 0.11, M.rust, 0, 0, 0);
-    box(armL.elbow, 0.09, 0.06, 0.09, M.rust, 0, 0, 0);
-    box(armL.elbow, 0.014, 0.18, 0.014, M.wire, 0.03, -0.1, 0.02);
-    for (const sx of [-1, 1]) box(armL.elbow, 0.02, 0.07, 0.02, M.metal, sx * 0.035, -0.28, 0.02);
-    // the right arm withered to a stick
-    const armR = rig.arms[1];
-    for (const m of [...meshesOf(armR.shoulder), ...meshesOf(armR.elbow)]) {
-      m.material = M.withered;
-      m.scale.set(0.55, 0.85, 0.55);
-    }
-    // the left leg steel below the knee; the right raw, and a little turned in
+    // a finished panel on its belly, a calibration mark, its maker's tag
+    box(rig.spine, 0.17, 0.11, 0.022, M.belly, 0, 0.09, 0.105);
+    box(rig.chest, 0.05, 0.012, 0.012, M.mark, 0.14, 0.27, 0.13);
+    box(rig.chest, 0.012, 0.05, 0.012, M.mark, 0.165, 0.25, 0.13);
+    box(rig.spine, 0.06, 0.04, 0.01, M.mark, -0.1, 0.16, 0.1);
+    // the spine open down its back, and the umbilical plugged into it
+    for (const y of [0.04, 0.12, 0.2, 0.28]) box(rig.chest, 0.06, 0.04, 0.04, M.metal, 0, y, -0.125);
+    for (const y of [0.04, 0.14]) box(rig.spine, 0.06, 0.04, 0.04, M.metal, 0, y, -0.1);
+    box(rig.chest, 0.014, 0.22, 0.014, M.wireB, 0.045, 0.14, -0.14);
+    box(rig.chest, 0.014, 0.2, 0.014, M.wireR, -0.045, 0.12, -0.14);
+    box(rig.chest, 0.08, 0.06, 0.05, M.metal, 0, 0.05, -0.15);
+    this.navel = new Object3D();
+    this.navel.position.set(0.0, 0.05, -0.18);
+    rig.chest.add(this.navel);
+    // the left shin and its hoof bare frame, a ram down the back of it
     const legL = rig.legs[0];
-    for (const seg of [legL.shin.obj, legL.cannon.obj]) for (const m of meshesOf(seg)) {
-      metal(m);
-      m.scale.set(0.6, 1, 0.6);
-    }
-    for (const m of meshesOf(legL.hoof)) metal(m);
-    box(legL.shin.obj, 0.1, 0.06, 0.1, M.rust, 0, 0, 0);
-    box(legL.shin.obj, 0.014, 0.2, 0.014, M.metal, 0.04, -0.13, -0.03);
-    box(legL.cannon.obj, 0.08, 0.05, 0.08, M.rust, 0, 0, 0);
-    for (const seg of [rig.legs[1].shin.obj, rig.legs[1].cannon.obj]) for (const m of meshesOf(seg)) m.material = M.withered;
-    for (const m of meshesOf(rig.legs[1].hoof)) m.material = M.withered;
-    // a steel cap over its left hip
-    box(rig.pelvis, 0.08, 0.1, 0.16, M.metal, 0.15, 0.0, 0);
+    for (const seg of [legL.shin.obj, legL.cannon.obj]) for (const m of meshesOf(seg)) bare(m, 0.45);
+    for (const m of meshesOf(legL.hoof)) m.material = M.metal;
+    cyl(legL.shin.obj, 0.06, 0.13, M.metal, 0, 0, 0);
+    box(legL.shin.obj, 0.025, 0.2, 0.025, M.metal, 0.0, -0.13, -0.05);
+    box(legL.shin.obj, 0.012, 0.22, 0.012, M.wireY, 0.03, -0.12, 0.03);
+    // the right leg's thigh finished; its hoof still bare
+    for (const m of meshesOf(rig.legs[1].thigh.obj)) m.material = M.shell;
+    // the hips: an actuator housing on the left, its cover not yet fitted
+    cyl(rig.pelvis, 0.07, 0.06, M.metal, 0.16, 0.0, 0);
   }
 }

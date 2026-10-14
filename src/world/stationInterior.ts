@@ -6,6 +6,7 @@ import {
   Matrix4,
   Mesh,
   Object3D,
+  Quaternion,
   RingGeometry,
   SphereGeometry,
   Vector3,
@@ -131,6 +132,33 @@ export class StationInterior {
     stand: new Vector3(),
     look: new Vector3(),
   };
+  /**
+   * The dock beside the reader, where the tracker goes once the three cards are
+   * in: a cradle shaped to take it, ringed with lights, a little screen with the
+   * tracker's outline on it.
+   */
+  readonly dock = {
+    proxy: new Mesh(new BoxGeometry(0.5, 0.5, 0.45)),
+    stand: new Vector3(),
+    look: new Vector3(),
+    /** 'off' until the cards are in; 'ready' waiting for it; 'busy' taking the update; 'done'. */
+    state: 'off' as 'off' | 'ready' | 'busy' | 'done',
+    lights: [] as ShaderMaterial[],
+    glow: null as unknown as Glow,
+    /** The tracker drawn in light over the cradle, sinking into it while it waits. */
+    ghost: new Group(),
+  };
+  private dockChirp = 0;
+  /** Where the tracker stands in the dock, and how it is turned (world space). */
+  dockPose(at: Vector3, q: Quaternion) {
+    this.root.updateWorldMatrix(true, false);
+    this.root.localToWorld(at.set(2.86, 1.63 + 0.14, -1.24));
+    this.root.getWorldQuaternion(q);
+    // standing up, its face to the room, leant back a little against the cradle
+    q.multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), -0.22));
+    return at;
+  }
+
   /** Screens shown something else for a while: a colour, until a time. */
   private readonly screenShow: ({ color: number[]; until: number } | null)[] = [null, null, null];
   private now = 0;
@@ -308,6 +336,12 @@ export class StationInterior {
     const c = [0xd02828, 0x30b040, 0x2860d8][i];
     const v = this.reader.leds[i].uniforms.uLight.value as Vector3;
     v.copy(rgb(c)).multiplyScalar(state === 'full' ? 1.4 : state === 'dim' ? 0.3 : 0.05);
+  }
+
+  /** The dock's lights: dark until the cards are in, then calling for the tracker. */
+  setDock(state: 'off' | 'ready' | 'busy' | 'done') {
+    this.dock.state = state;
+    if (state === 'off') for (const l of this.dock.lights) (l.uniforms.uLight.value as Vector3).set(0.06, 0.1, 0.07);
   }
 
   /** Inside the rooms (habitat, tube or lab), for a point in the world. */
@@ -586,6 +620,58 @@ export class StationInterior {
       R.add(this.reader.proxy);
       this.root.localToWorld(this.reader.stand.set(rx, DECK, -0.42));
       this.root.localToWorld(this.reader.look.set(rx, 1.75, rz));
+      // the dock, to the reader's left: a heavy base, a cradle shaped to stand the tracker in,
+      // lights round the cradle, and a little screen showing the tracker's outline
+      {
+        const dx = 2.86;
+        const dz = -1.24;
+        const lit = (c: number) => {
+          const mat = toonMaterial({ dark: c, mid: c, light: c, unlit: true, outline: 0 });
+          this.dock.lights.push(mat);
+          return mat;
+        };
+        this.box(dx - 0.24, 1.55, dz - 0.16, dx + 0.24, 1.63, dz + 0.16, m.metal);
+        this.box(dx - 0.24, 1.6, dz + 0.16, dx + 0.24, 1.62, dz + 0.17, m.accent, R, false);
+        // the cradle: a back plate, two side cheeks and a lip, the shape of the device
+        this.box(dx - 0.13, 1.63, dz - 0.12, dx + 0.13, 2.0, dz - 0.08, m.metal);
+        for (const sx of [-1, 1]) this.box(dx + sx * 0.11, 1.63, dz - 0.1, dx + sx * 0.13, 1.86, dz + 0.04, m.metal);
+        this.box(dx - 0.11, 1.63, dz + 0.02, dx + 0.11, 1.68, dz + 0.05, m.metal);
+        // a socket in its floor, gold contacts
+        this.box(dx - 0.05, 1.631, dz - 0.04, dx + 0.05, 1.636, dz + 0.0, M.dead, R, false);
+        // the lights round it: down each cheek, along the lip, across the top of the back
+        const green = 0x50ff70;
+        for (const sx of [-1, 1]) this.box(dx + sx * 0.135, 1.64, dz + 0.02, dx + sx * 0.14, 1.85, dz + 0.04, lit(green), R, false);
+        this.box(dx - 0.1, 1.68, dz + 0.05, dx + 0.1, 1.69, dz + 0.055, lit(green), R, false);
+        this.box(dx - 0.12, 1.99, dz - 0.075, dx + 0.12, 2.0, dz - 0.07, lit(green), R, false);
+        // its screen: the tracker drawn in light, an arrow down into the cradle
+        this.box(dx + 0.15, 1.66, dz + 0.16, dx + 0.23, 1.76, dz + 0.171, M.dead, R, false);
+        const icon = lit(green);
+        this.box(dx + 0.17, 1.675, dz + 0.172, dx + 0.21, 1.735, dz + 0.175, icon, R, false);
+        this.box(dx + 0.175, 1.735, dz + 0.172, dx + 0.18, 1.75, dz + 0.175, icon, R, false);
+        // a ghost of the tracker over the cradle, in dithered green light, and a chevron
+        // under it pointing down into the cradle
+        {
+          const ghost = this.dock.ghost;
+          const holo = ditherMaterial(0x40e060, 0xb8ffc8, 0.5);
+          this.box(-0.07, 0, -0.03, 0.07, 0.2, 0.03, holo, ghost, false);
+          this.box(0.035, 0.2, -0.008, 0.045, 0.3, 0.008, holo, ghost, false);
+          for (const sx of [-1, 1]) {
+            const arm = this.box(sx * 0.03 - 0.008, -0.1, -0.006, sx * 0.03 + 0.008, -0.03, 0.006, lit(green), ghost, false);
+            arm.rotation.z = -sx * 0.75;
+          }
+          ghost.position.set(dx, 2.1, dz - 0.02);
+          ghost.visible = false;
+          R.add(ghost);
+          this.keep.push(ghost);
+        }
+        this.dock.glow = this.glow(green, 0.55, dx, 1.8, dz + 0.1, 0.6);
+        this.dock.proxy.position.set(dx, 1.78, dz);
+        this.dock.proxy.visible = false;
+        R.add(this.dock.proxy);
+        this.root.localToWorld(this.dock.stand.set(dx + 0.05, DECK, -0.45));
+        this.root.localToWorld(this.dock.look.set(dx, 1.75, dz));
+        this.setDock('off');
+      }
       // the cord: out of the reader's side, down the desk's edge, sprawled across the deck,
       // through the tube to the tank
       const cordMat = toonMaterial({ dark: 0x0e0e10, mid: 0x1c1c20, light: 0x34343a, litAt: 0.55, outline: 0.5, highlight: 0.6 });
@@ -873,6 +959,34 @@ export class StationInterior {
       return;
     }
     shared.uRoomInv.value.copy(this.inv);
+    // the dock: blinking green and chirping while it waits, racing while it takes the update,
+    // a steady green once it is done
+    const ds = this.dock.state;
+    if (ds !== 'off') {
+      let k = 1;
+      if (ds === 'ready') k = time % 0.9 < 0.45 ? 1 : 0.15;
+      else if (ds === 'busy') k = 0.4 + 0.6 * Math.abs(Math.sin(time * 14));
+      const c = ds === 'busy' ? [0.35, 0.85, 1] : [0.3, 1, 0.45];
+      for (const l of this.dock.lights) (l.uniforms.uLight.value as Vector3).set(c[0] * k, c[1] * k, c[2] * k);
+      this.dock.glow.color.set(c[0], c[1], c[2]);
+      this.dock.glow.strength = 0.7 * k * inside;
+      if (ds === 'ready') {
+        // the ghost sinks into the cradle, again and again, fading as it goes in
+        const g = this.dock.ghost;
+        const f = (time * 0.7) % 1;
+        g.position.y = 2.18 - 0.4 * f * f;
+        g.visible = f < 0.85 && (f < 0.6 || Math.random() < 0.6);
+        this.dockChirp -= dt;
+        if (this.dockChirp <= 0) {
+          this.dockChirp = 1.8;
+          this.audio.dockChirp(0.12 / (1 + listener.distanceToSquared(this.dock.look) * 0.08));
+        }
+      }
+      if (ds !== 'ready') this.dock.ghost.visible = false;
+    } else {
+      this.dock.glow.strength = 0;
+      this.dock.ghost.visible = false;
+    }
     // the work bay's lamp stutters; when it dies the cracked screen buzzes
     const n = noise1(time * 5, 17);
     this.flick = n > -0.25 ? 1 : Math.random() < 0.4 ? 0.85 : 0.15;

@@ -3,6 +3,16 @@
 A story game in a pixel-art desert. The world is 3D, but the game renders it at
 low resolution so that it looks like hand-made 2D pixel art.
 
+## The world
+
+The planet is Akrida. Humanity sent robots ahead of it to terraform the
+planet. By the time the humans arrived, the robots had become sentient: they
+were the Akridians, and your creature is one of them, half machine and half
+alien creature. That led to conflict, and the humans went to war with them.
+The humans never designed the Akridians to reproduce, so some scientists
+tried to make more of them. Tone and colour mean a great deal to the
+Akridians: each tone of their songs has its own colour.
+
 ## Controls
 
 | Input | Action |
@@ -308,13 +318,27 @@ doorway, and it pulses softly.
 3. **Hot or cold.** The device leads to the research station high in
    the highlands, 130 units north-east of the ship (up and to the right on
    screen; see below):
+   - **It is a radio.** Once it is awake, the place it leads to sings, all the
+     time, and the tracker picks the song up. Turning it is like tuning a
+     radio: the further off you point, the more the song drowns in static.
    - **Wrong way:** the light, its halo and its glow on the ground throb red,
      very slowly (one throb in about 2.3 to 3.4 seconds, a little quicker the
-     nearer you point). Each throb comes with a deep, soft pulse of sound and
-     faint radio static.
+     nearer you point). You hear radio static that surges and fades, a thin
+     whistle that wanders up and down, crackles, and now and then a voice
+     breaking through for a moment, too garbled to make out.
    - **Right way** (within about 26 degrees of it, until you turn 34 degrees
-     off): the light and the antenna burn a solid green. Two soft bell notes
-     chime, and a quiet chord hums under everything.
+     off): two soft bell notes chime, the static clears, and the song comes
+     through: a slow, simple Akridian song, in clear, humming tones, a
+     little narrow and warm like a radio, with a long soft echo. It sounds
+     like the dying stranger's song, but in other tones. The light and the
+     antenna take the colour of each tone as it sounds, and bloom with
+     each note.
+   - **Tones and colours:** the song uses seven tones, from D4 to E5 (D, E,
+     F#, A, B, D, E). Each tone has its own colour, from warm to cool as
+     the tones go up: red, orange, gold, green, cyan, blue and violet. The
+     station's song rises, turns back and settles home, then rests a breath
+     before it starts again. The song of the place in the east is higher and
+     wider, and it ends on a question that is not answered.
    - In the hand, it uses the way the arm points it (toward the cursor). Held
      out in both hands, it uses the way your creature faces. On the ground, it
      uses the way its antenna points. At the station (within 12 units of its
@@ -335,6 +359,9 @@ At the station it burns solid green.
 - The ship, its effects, the keypad and the door are in `src/world/ship.ts`.
 - The tracker (model, light, hot or cold, falling, sound levels) is in
   `src/world/tracker.ts`. Its target is the centre of the highlands (`HIGH`).
+  The songs, their tones and their colours are in `src/story/tune.ts`
+  (`SONG_TONES`, `SONG_COLORS`, `STATION_SONG`, `EAST_SONG`); each tone is
+  sung by `songSamples` in `src/audio/voice.ts`.
 - Picking it up is a scripted pose sequence in `src/story/PickupScene.ts`.
   Holding it out is a blend in the creature's normal update (`holdOut` in
   `src/character/Creature.ts`): both arms reach by IK to a point in front of
@@ -536,56 +563,68 @@ doorway (or click it) to leave.
     and it gurgles as it breathes air.
   - The tank's door unseals with a pop and a long hiss, and slides round in a
     gust of steam. The cold air makes it jerk and shriek.
-  - **What it is:** one of your creature's own kind at its very beginning,
-    before it was finished. Your creature's kind are half machine, half
-    alien flesh, and this one is a primordial stage of that. It is stunted
-    (about two thirds your creature's height), hairless, raw and veined, its
-    head swollen and lopsided with a bruised growth on it and horns no more
-    than nubs (one a steel stub). Its body is half made:
-    - a steel plate bolted over the left of its face with a flickering red
-      optic in it, and wires running from it into the neck; a milk-white eye;
-      stitches across the raw side of its face;
-    - a steel brace across its chest round a core that glows the tank's
-      colour, the ribs showing on the other side, a bruised belly;
-    - a row of steel studs down its spine, and cables from its back that
-      drag behind it;
-    - a bare steel left arm with rusted joints and a clamp of a hand; the
-      right arm withered to a stick;
-    - the left leg steel below the knee, the right raw.
-  - **How it moves:** it gets up the way a newborn thing would, in fits. It
+  - **What it is:** an Akridian, one of your creature's own kind, half
+    built. This is what the scientists here were working on: more
+    Akridians. It is as tall as your creature, and it looks like a robot
+    taken off the line before it was done:
+    - most of it is bare grey primer;
+    - its head is finished in your creature's colours, with one horn fitted
+      and the other a bare socket; a side panel of the head is left off, so
+      its optics show, with a cyan lens flickering in there; its eye is
+      still booting and flickers on and off;
+    - its chest is open on its frame round a glowing core, with red, blue
+      and yellow wiring bundled round it;
+    - its right arm is finished, and its left is bare frame and actuators;
+    - its right thigh is finished, and its left shin and hoof are bare frame
+      with a ram down the back; one hip has its actuator housing open;
+    - calibration marks and a maker's tag on its shell, steel studs down its
+      open spine, and the umbilical still plugged into it.
+  - **How it moves:** it gets up in fits, on legs it has never used. It
     pushes up off the floor and its arms give; it pushes again, gets onto
-    its hands and knees, onto one knee, and up. Then it stumbles out on two
-    legs, weaving and lurching, shaking all over, its head and eye darting.
-    Its fits:
-    - it trips and pitches onto its face, lies there twitching, and drags
-      itself back up the same way;
-    - it seizes where it stands, the head snapping round, the arms flung,
-      the knees half going;
-    - it doubles over and retches bile onto the floor.
+    its hands and knees, onto one knee, and up. Then it stumbles out,
+    weaving, and now and then it lurches off to one side and has to catch
+    itself. Its steps are halting: it slows, almost stops, then lurches on.
+    Its falls and stops:
+    - its legs go, and it pitches onto its face, lies there twitching, and
+      drags itself back up;
+    - its legs give, and it sinks to its knees, catches itself on its
+      hands, hangs there, and gets up again;
+    - it stops, braces its hands on its knees and hangs its head, then
+      pushes on.
     It falls out over the tank's lip and down the airlock's steps. When your
-    creature comes close, the red optic turns to look at it.
-  - **How it sounds:** gurgling, bubbling breaths; broken whimpers that climb
-    and crack; ragged, rasping shrieks of pain; choking hurks and a wet
-    spatter when it retches; wet slaps of its bare foot and the clank of the
-    steel one, and a wet smack (with a joint cracking) when it falls.
+    creature comes close, its eye turns to look at it.
+  - **How it sounds:** gurgles as the tank drains, a shriek when the cold air
+    hits it, then broken whimpers, thin mewls and gasps as it walks; the
+    slap of one hoof and the clank of the bare-frame one; a smack when it
+    falls.
   - It leaves wet footprints across the deck, drips as it goes, and sparks
-    now and then where metal meets flesh. It follows the cord through the
-    tube and the habitat (about 24 seconds from the release to the sand),
-    falls down the airlock's steps, and staggers out a few body lengths onto
-    the sand. Two seconds after it reaches the sand the drone locks on and
-    dives straight into it. It bursts: flesh and steel are flung across the
-    sand, the flesh bleeding where it lands and the steel sparking, among
-    splashes of blood and bile.
+    now and then from its open frame. It follows the cord through the tube
+    and the habitat (about 34 seconds from the release to the sand), falls
+    down the airlock's steps, and staggers out a few body lengths onto the
+    sand. Two seconds after it reaches the sand the drone locks on and dives
+    straight into it. It bursts: parts and steel are flung across the sand,
+    the steel sparking, among splashes of its dark blue-grey fluid.
   - After that, the drone never comes for your creature again.
-- **The next fix:** the moment the third card goes in, the station's data
-  gives the tracker a new place to lead to, far to the east of the station
-  (the facility, see below).
-  Wherever the tracker is, it starts blinking a fast green and chirping (a
-  sharp double chirp with each blink), so you can find it. It keeps on until
-  your creature picks it up (if your creature is already holding it, it
-  keeps on for three seconds). From then on it leads east. Dying before the
-  thing in the tank is dead undoes this too: the tracker goes back to
-  leading to the station.
+- **The dock:** on the desk, to the left of the reader, is a dock for the
+  tracker: a heavy base with a cradle the shape of the device, lights down
+  its cheeks and along its lip, and a little screen with the tracker drawn
+  on it. It is dark until the third card goes in. Then:
+  - its lights blink green and it chirps, softly, every couple of seconds;
+  - a ghost of the tracker in green light, with a chevron under it, sinks
+    into the cradle again and again, to show what goes there;
+  - the first time your creature comes near it, it looks at the dock.
+    Click the dock (the cursor turns light blue over it) with the tracker
+    in hand.
+- **The update:** your creature leans in and sets the tracker in the
+  cradle. It seats with a click. The dock's lights race cyan, two of the
+  screens above the desk light cyan, and a hum rises under a patter of
+  data while the song's tones run up. After about two and a half seconds it
+  is done: a bright chord, the dock goes steady green, and the tracker has
+  a new place to lead to, far to the east of the station (the facility, see
+  below). It blinks a fast green and chirps, and your creature takes it back
+  up. From then on it leads east.
+- Dying before the thing in the tank is dead undoes this too: the dock goes
+  dark again and the tracker goes back to leading to the station.
 
 ### The drone
 
@@ -686,15 +725,18 @@ something comes for it.
 - The locusts are in `src/story/Locusts.ts`.
 - The data cards are in `src/story/DataCards.ts`; the thing in the tank, its
   release, its body and its stumbling walk in `src/story/Specimen.ts`. Its
-  body is the creature's own rig with its materials swapped and steel parts
-  added. It lives in a frame of its own, scaled down (0.65) about the tank,
-  so its walk, its steps and the ground all keep their proportions. It walks
+  body is the creature's own rig with its materials swapped and frame,
+  wiring and actuators added. It lives in a frame of its own about the tank
+  (full size), which carries it while it is in the tank. It walks
   with the creature's own gait (driven like an NPC toward points along the
-  cord), and its getting up, falls, fits and retching are scripted poses
+  cord), and its getting up, falls and stops are scripted poses
   built from the wake-up's (`src/story/WakeUp.ts`), with sudden jerks laid
   over them. Its cables are a rope of segments (Verlet integration). Glass
   and fluid are drawn see-through with a dither (`src/render/dither.ts`).
-  Both reset on death (`reset()`). The tracker's next fix is `eastSite()` in
+  Both reset on death (`reset()`). The dock (`dock`, `setDock`,
+  `dockPose`) is in `src/world/stationInterior.ts`, and the sequence that
+  seats the tracker, updates it and gives it back is `dockSeq` in
+  `src/main.ts`. The tracker's next fix is `eastSite()` in
   `src/world/highlands.ts`.
 - The drone is in `src/story/Drone.ts`; the strike (explosion, the body,
   the death) in `src/story/Strike.ts`. The checkpoints and the respawn are in
@@ -957,11 +999,18 @@ There are no audio files. The Web Audio API makes all sound at start-up:
   sound starts, only the heartbeat is made at once. The other sounds are built
   a few milliseconds at a time over the next frames, and the voices below are
   built in a Web Worker (`src/audio/voiceWorker.ts`), off the main thread.
-- **The tracker** has its own sound bus. It plays a slow sine throb (about
-  104 Hz with a triangle an octave up and a faint ring at 1568 Hz), a held open
-  fifth on G (each note doubled a fraction of a hertz apart, so it shimmers)
-  when it points true, band-passed static while it searches, and two bell
-  notes (a sine plus a partial at 2.76 times the pitch) when it finds the way.
+- **The tracker** has its own sound bus. Asleep, it plays a slow sine throb
+  (about 104 Hz with a triangle an octave up and a faint ring at 1568 Hz).
+  Awake, it is a radio. The song is one voice buffer per tone, made at
+  start-up with the stranger's voice synthesiser (a clear hum with a
+  little breath and vibrato) plus a pure tone and a second tone 0.4 %
+  sharp, so each note beats slowly. The notes go through a wide band-pass
+  near 900 Hz and an echo. The static is white noise through a band-pass
+  near 1.9 kHz, with its level moved by three slow LFOs, plus a sine whistle
+  that wanders between about 800 and 2200 Hz. The garbled voice is a
+  sawtooth that jumps between random pitches through a narrow band-pass. How
+  true it points sets the mix of song and static. Two bell notes (a sine
+  plus a partial at 2.76 times the pitch) sound when it finds the way.
 - **The stranger's voice** is made sample by sample (`src/audio/voice.ts`).
   A glottal pulse (Rosenberg's shape) with jitter, shimmer and period
   doubling goes through a cascade of formant resonators (Klatt's design).

@@ -1,5 +1,5 @@
 import { clamp, lerp, rng } from '../core/math';
-import { TONES, TUNE } from '../story/tune';
+import { SONG_TONES, TONES, TUNE } from '../story/tune';
 
 /**
  * A voice for the dying stranger, synthesised sample by sample: a glottal
@@ -338,6 +338,48 @@ export function breathSamples(sr: number, seed: number, inhale: boolean) {
   );
 }
 
+/**
+ * A tone of one of the tracker's songs: the same voice as the stranger's, but
+ * whole and clear, a long, open hum with a slow vibrato that blooms as it is
+ * held, a pure tone under it, and a faint second voice a hair above, so it
+ * shimmers like something carried a long way.
+ */
+export function songSamples(sr: number, freq: number) {
+  const seconds = 1.6;
+  const voice = render(
+    sr,
+    seconds,
+    23,
+    (t) => {
+      const a = env(t, 0, 0.12) * (1 - env(t, seconds - 0.7, seconds));
+      const vib = 1 + Math.sin(t * 2 * Math.PI * 4.8) * 0.007 * env(t, 0.25, 0.8);
+      return {
+        f0: freq * vib,
+        voice: a,
+        breath: a * 0.35,
+        f1: Math.max(330, freq * 1.05),
+        f2: Math.max(800, freq * 2.1),
+        f3: Math.max(2300, freq * 3.4),
+        gurgle: 0,
+        stat: 0,
+        rasp: 0.03,
+        jitter: 0.002,
+      };
+    },
+    0.4,
+  );
+  for (let i = 0; i < voice.length; i++) {
+    const t = i / sr;
+    const a = env(t, 0, 0.1) * (1 - env(t, seconds - 0.75, seconds - 0.02));
+    const vib = Math.sin(t * 2 * Math.PI * 4.8) * 0.007 * env(t, 0.25, 0.8);
+    voice[i] +=
+      Math.sin(2 * Math.PI * freq * t * (1 + vib)) * 0.34 * a +
+      Math.sin(2 * Math.PI * freq * 1.004 * t * (1 + vib)) * 0.14 * a +
+      Math.sin(2 * Math.PI * freq * 2 * t) * 0.05 * a * env(t, 0.2, 0.6);
+  }
+  return voice;
+}
+
 /** Every voice buffer the game uses (mono samples at `sr`). */
 export interface Voices {
   gargles: Float32Array[];
@@ -347,6 +389,8 @@ export interface Voices {
   notes: Float32Array[][];
   /** The keypad's tone for each TONES index. */
   pads: Float32Array[];
+  /** The tracker's song voice for each SONG_TONES index. */
+  songs: Float32Array[];
 }
 
 /** Build them all (half a second or more: run it in a worker, see voiceWorker.ts). */
@@ -357,6 +401,7 @@ export function buildVoices(sr: number): Voices {
     exhales: [0, 1, 2, 3, 4].map((i) => breathSamples(sr, 500 + i, false)),
     notes: TONES.map((f, k) => [0, 1].map((v) => noteSamples(sr, f, 600 + k * 10 + v))),
     pads: TONES.map((f, k) => padSamples(sr, f, (TUNE as readonly number[]).includes(k))),
+    songs: SONG_TONES.map((f) => songSamples(sr, f)),
   };
 }
 
@@ -365,13 +410,14 @@ export function buildVoices(sr: number): Voices {
  * started. Calls `done` when finished.
  */
 export function buildVoicesSliced(sr: number, done: (v: Voices) => void) {
-  const v: Voices = { gargles: [], inhales: [], exhales: [], notes: TONES.map(() => []), pads: [] };
+  const v: Voices = { gargles: [], inhales: [], exhales: [], notes: TONES.map(() => []), pads: [], songs: [] };
   const jobs: (() => void)[] = [
     ...[0, 1, 2].map((i) => () => v.gargles.push(gargleSamples(sr, 300 + i))),
     ...[0, 1, 2, 3].map((i) => () => v.inhales.push(breathSamples(sr, 400 + i, true))),
     ...[0, 1, 2, 3, 4].map((i) => () => v.exhales.push(breathSamples(sr, 500 + i, false))),
     ...TONES.flatMap((f, k) => [0, 1].map((n) => () => v.notes[k].push(noteSamples(sr, f, 600 + k * 10 + n)))),
     ...TONES.map((f, k) => () => v.pads.push(padSamples(sr, f, (TUNE as readonly number[]).includes(k)))),
+    ...SONG_TONES.map((f) => () => v.songs.push(songSamples(sr, f))),
   ];
   const step = () => {
     const job = jobs.shift();
