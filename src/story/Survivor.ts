@@ -5,7 +5,7 @@ import { blendPose, type ScriptPose } from '../character/scriptPose';
 import { noise1 } from '../core/math';
 import type { AudioEngine } from '../audio/AudioEngine';
 import type { FacilityInterior } from '../world/facilityInterior';
-import { PIPE_TONES, TONES, TUNE } from './tune';
+import { BEAT, PIPE_TONES, TONES, WALL_SONG } from './tune';
 import { KNEEL, RISE, STAND, ease, hand, mk } from './WakeUp';
 
 /** A soft rose, its eye bright: alive. */
@@ -44,6 +44,20 @@ const CROUCH: ScriptPose = mk(STAND, {
 /** Out of hiding at last: standing hunched, arms held in close, still shaking. */
 const WARY: ScriptPose = mk(STAND, { pelvisY: 0.66, spinePitch: 0.18, chestPitch: 0.1, neckPitch: 0.2, tremble: 0.7, exertion: 0.6, elbow: -1.3, armOut: 0.02 });
 
+/** Overjoyed: up on its hooves, head up, both arms thrown up high. */
+const JOY: ScriptPose = mk(STAND, {
+  pelvisPitch: 0.05,
+  spinePitch: -0.08,
+  chestPitch: -0.1,
+  neckPitch: -0.15,
+  headPitch: -0.25,
+  handL: hand(0.3, 1.75, 0.18, 1),
+  handR: hand(-0.3, 1.75, 0.18, 1),
+  tremble: 0.15,
+  exertion: 0.9,
+  eyeOpen: 1,
+});
+
 type Knock = { pipe: number; at: number };
 
 /**
@@ -51,8 +65,10 @@ type Knock = { pipe: number; at: number };
  * soft rose colour, crouched in the corner by the pipes, shaking. It cannot
  * see who is out there. It hears the knocks on the pipes and knocks back,
  * nervously, the same pattern, testing: anyone could be out there. Knock the
- * three tones the dying stranger sang, in order, and it knows one of its own
- * is outside: it knocks them back, draws the bolts, and comes out.
+ * song painted on the hall's wall, and it knows one of its own is outside: it
+ * knocks it back, draws the bolts, and comes out, still afraid, peeking out
+ * and starting back; and when it sees who it is, it jumps for joy, sings, and
+ * from then on keeps close.
  *
  * A phrase ends when the knocking stops for a moment. It answers after a
  * pause, a little slower than it was knocked, its timing unsteady; now and
@@ -62,10 +78,10 @@ type Knock = { pipe: number; at: number };
  */
 export class Survivor {
   readonly creature: Creature;
-  state: 'hiding' | 'answering' | 'trusting' | 'rising' | 'walking' | 'out' = 'hiding';
+  state: 'hiding' | 'answering' | 'trusting' | 'rising' | 'peeking' | 'watching' | 'excited' | 'with' = 'hiding';
   /** It has let them in: the door is open (or opening). */
   get freed() {
-    return this.state === 'rising' || this.state === 'walking' || this.state === 'out';
+    return this.state === 'rising' || this.state === 'peeking' || this.state === 'watching' || this.state === 'excited' || this.state === 'with';
   }
   private readonly world: World;
   private readonly pose: ScriptPose = mk(CROUCH, {});
@@ -81,8 +97,10 @@ export class Survivor {
   private reachAt = -9;
   private voiceTimer = 3;
   private t = 0;
-  private path: Vector3[] = [];
+  /** Its way out, a step at a time: where to, crouched or not, how long to stay there. */
+  private steps: { to: Vector3; crouch: boolean; wait: number; flinch?: boolean }[] = [];
   private seg = 0;
+  private waited = 0;
   private readonly input: CreatureInput = { move: new Vector2(), sprint: false, crouch: false, look: null };
   private readonly look = new Vector3();
   private readonly tmp = new Vector3();
@@ -140,8 +158,8 @@ export class Survivor {
     this.voiceTimer = 0.8;
   }
 
-  /** The knocks of the stranger's tune, as pipes. */
-  private static readonly TUNE_PIPES = TUNE.map((t) => PIPE_TONES.indexOf(t as (typeof PIPE_TONES)[number]));
+  /** The knocks of the song painted on the wall, as pipes. */
+  private static readonly TUNE_PIPES = WALL_SONG.map(([t]) => PIPE_TONES.indexOf(t as (typeof PIPE_TONES)[number]));
 
   /** It has heard the whole of a phrase: decide how it answers. */
   private answerPhrase() {
@@ -258,46 +276,117 @@ export class Survivor {
       c.updateScripted(dt, this.pose, this.world);
       if (this.t > 2.1 && I.vault.state === 'open') {
         c.releaseScript(0.5);
-        this.state = 'walking';
-        this.path = [I.vault.inside.clone(), I.vault.outside.clone()];
+        // out the way a frightened thing comes out: creep to the doorway and look, flinch
+        // back, creep out again, and only then step out
+        const v = I.vault;
+        const back = v.inside.clone().lerp(I.hide, 0.45);
+        const peek = v.inside.clone().lerp(v.outside, 0.38);
+        this.steps = [
+          { to: v.inside.clone(), crouch: true, wait: 1.3 },
+          { to: back, crouch: true, wait: 1.1, flinch: true },
+          { to: peek, crouch: true, wait: 1.4 },
+          { to: v.outside.clone(), crouch: false, wait: 0 },
+        ];
         this.seg = 0;
+        this.waited = 0;
+        this.state = 'peeking';
       }
       return;
     }
 
-    // out: walking from the corner to the door and out of it, then standing, wary, eyes on the creature
-    c.panic = 0.5;
-    c.tired = Math.max(c.tired, 0.6);
+    if (this.state === 'excited') {
+      // it sees who it is: it jumps for joy, arms up, again and again, and sings
+      const hop = Math.max(0, Math.sin(this.t * Math.PI * 2.6)) * (this.t < 2.4 ? 1 : 0);
+      blendPose(this.pose, WARY, JOY, ease('out', Math.min(1, this.t * 3)) * (this.t < 2.6 ? 1 : Math.max(0, 1 - (this.t - 2.6) * 2)));
+      const p = this.pose;
+      p.pelvisY += hop * 0.22;
+      p.footL.lift += hop * 0.2;
+      p.footR.lift += hop * 0.2;
+      p.handL.x += Math.sin(this.t * 9) * 0.08;
+      p.handR.x += Math.sin(this.t * 9 + 1) * 0.08;
+      p.headYaw = Math.sin(this.t * 5) * 0.25;
+      c.updateScripted(dt, p, this.world);
+      // a quick, bright run up the song, then it whole
+      const notes = [0, 0.14, 0.28, 0.42];
+      const tones = [5, 6, 7, 8];
+      for (let i = 0; i < notes.length; i++) if (this.t >= notes[i] && this.t - dt < notes[i]) this.audio.survivorNote(TONES[tones[i]] , 0.2, 0.2, this.pan(listener));
+      if (this.t > 3.1) {
+        c.releaseScript(0.3);
+        this.state = 'with';
+        this.t = 0;
+        this.sung = false;
+      }
+      return;
+    }
+
+    c.tired = Math.max(c.tired, 0.3);
     this.input.move.set(0, 0);
+    this.input.crouch = false;
     this.input.look = this.look.copy(listener).setY(listener.y + 1.1);
-    if (this.state === 'walking') {
-      const to = this.path[this.seg];
-      const dx = to.x - c.pos.x;
-      const dz = to.z - c.pos.z;
+    const dl = Math.hypot(listener.x - c.pos.x, listener.z - c.pos.z);
+    if (this.state === 'peeking') {
+      // still afraid: low, slow, shaking, the head darting
+      c.panic = 0.9;
+      const st = this.steps[this.seg];
+      this.input.crouch = st.crouch;
+      const dx = st.to.x - c.pos.x;
+      const dz = st.to.z - c.pos.z;
       const d = Math.hypot(dx, dz);
-      if (d < 0.25) {
-        if (this.seg < this.path.length - 1) this.seg++;
-        else this.state = 'out';
-      } else {
-        const s = Math.min(0.45, d * 0.8);
+      if (d > 0.18 && this.waited === 0) {
+        const s = Math.min(st.flinch ? 0.9 : 0.32, d * 0.9);
         this.input.move.set((dx / d) * s, (-dz / d) * s);
+        if (st.flinch && d > 0.5 && this.t > 0.05) {
+          // it starts back with a gasp
+          this.audio.specimenVoice('gasp', 0.14, this.pan(listener));
+          this.t = -99;
+        }
+      } else {
+        this.waited += dt;
+        if (this.waited >= st.wait) {
+          this.waited = 0;
+          this.t = 0;
+          if (this.seg < this.steps.length - 1) this.seg++;
+          else this.state = 'watching';
+        }
+      }
+    } else if (this.state === 'watching') {
+      // out, wary, eyes on the creature until it comes near enough to see who it is
+      c.panic = 0.6;
+      if (dl < 6.5) {
+        this.state = 'excited';
+        this.t = 0;
+        c.releaseScript();
+        blendPose(this.pose, WARY, WARY, 0);
+        return;
+      }
+    } else if (this.state === 'with') {
+      // calm now, and it keeps close: it follows the creature about, never too near
+      c.panic = Math.max(0, c.panic - dt * 0.4);
+      if (dl > 3.2) {
+        const s = Math.min(dl > 6 ? 0.9 : 0.5, (dl - 2.2) * 0.4);
+        this.input.move.set(((listener.x - c.pos.x) / dl) * s, (-(listener.z - c.pos.z) / dl) * s);
       }
     }
     c.update(dt, this.input, this.world);
-    // and once it is out, it sings them softly: the stranger's three tones, the song of its own
-    if (this.state === 'out' && !this.sung) {
+    // once it is with the creature, it sings the song from the wall, softly
+    if (this.state === 'with' && !this.sung && this.t > 0.6) {
       this.sung = true;
       this.t = 0;
+      this.singAt = 0;
     }
-    if (this.state === 'out' && this.sung && this.t < 4) {
-      const notes = [0.4, 1.3, 2.2];
-      for (let i = 0; i < notes.length; i++) {
-        if (this.t >= notes[i] && this.t - dt < notes[i]) this.audio.survivorNote(TONES[TUNE[i]], i === 2 ? 1.4 : 0.8, 0.22, this.pan(listener));
+    if (this.state === 'with' && this.sung && this.singAt < WALL_SONG.length) {
+      let at = 0;
+      for (let i = 0; i < this.singAt; i++) at += WALL_SONG[i][1] * BEAT * 1.4;
+      if (this.t >= at) {
+        const [tone, beats] = WALL_SONG[this.singAt];
+        this.audio.survivorNote(TONES[tone], beats * BEAT * 1.4, 0.2, this.pan(listener));
+        this.singAt++;
       }
     }
   }
+  private singAt = 0;
 
-  /** Answered with the tune: once its knocks are done, the bolts, the door, and out. */
+  /** Answered with the song: once its knocks are done, the bolts, the door, and out. */
   private trustT = -1;
   private trust(dt: number) {
     if (this.state !== 'trusting' || this.answer.length) return;

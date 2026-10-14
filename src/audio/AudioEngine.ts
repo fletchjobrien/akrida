@@ -2011,7 +2011,7 @@ export class AudioEngine {
     bus.connect(this.master);
     // a long, dark reverb: the hall is huge, its walls hard, its far end lost in the dark
     const verb = ctx.createGain();
-    verb.gain.value = 0.55;
+    verb.gain.value = 0.3;
     const conv = ctx.createConvolver();
     conv.buffer = impulseResponse(ctx, 4.2);
     const dark = ctx.createBiquadFilter();
@@ -2037,31 +2037,9 @@ export class AudioEngine {
         lfo.connect(lg).connect(bp.frequency);
         lfo.start();
         const g2 = ctx.createGain();
-        g2.gain.value = g * 0.06;
+        g2.gain.value = g * 0.03;
         air.connect(bp).connect(g2).connect(bus);
       }
-      // the wind's thin keening through the hole in the roof, far up
-      const hiss = this.loop(ctx, this.white);
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = 1300;
-      bp.Q.value = 22;
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = 0.09;
-      const lg = ctx.createGain();
-      lg.gain.value = 240;
-      lfo.connect(lg).connect(bp.frequency);
-      lfo.start();
-      const wg = ctx.createGain();
-      wg.gain.value = 0.02;
-      const sw = ctx.createOscillator();
-      sw.frequency.value = 0.06;
-      const swg = ctx.createGain();
-      swg.gain.value = 0.016;
-      sw.connect(swg).connect(wg.gain);
-      sw.start();
-      hiss.connect(bp).connect(wg).connect(bus);
-      wg.connect(verb);
     }
     // sand pouring in through the hole: a soft, steady hiss with a grainy patter in it
     const sand = ctx.createGain();
@@ -2188,11 +2166,11 @@ export class AudioEngine {
     const h = this.hallBus();
     if (!ctx || !h) return;
     const now = ctx.currentTime;
-    h.sand.gain.setTargetAtTime(sand * 0.12, now, 0.2);
+    h.sand.gain.setTargetAtTime(sand * 0.05, now, 0.2);
     h.sandPan.pan.setTargetAtTime(sandPan, now, 0.2);
-    h.core.gain.setTargetAtTime(core * 0.05, now, 0.3);
+    h.core.gain.setTargetAtTime(core * 0.022, now, 0.3);
     h.corePan.pan.setTargetAtTime(corePan, now, 0.3);
-    h.whine.gain.setTargetAtTime(monitors * 0.12, now, 0.2);
+    h.whine.gain.setTargetAtTime(monitors * 0.035, now, 0.2);
   }
 
   /** The hiss and hum of watching a camera's feed (0..1). */

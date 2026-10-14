@@ -72,7 +72,21 @@ export const TONE_COLORS = [0xff4a3a, 0xff7a34, 0xffa53a, 0xffd04a, 0xc8f05a, 0x
 /**
  * The pipes outside the vault in the facility, left to right as seen from the
  * hall: the tone each rings with when it is knocked (indices into TONES). Their
- * size goes with their tone, the lowest the thickest. The stranger's three are
- * among them, but not in order.
+ * size goes with their tone, the lowest the thickest, and each is banded in its
+ * tone's colour: six colours that cannot be mistaken for one another (red,
+ * orange, green, cyan, blue, violet). They are not in order.
  */
-export const PIPE_TONES = [3, 0, 6, 1, 4, 7] as const;
+export const PIPE_TONES = [5, 0, 7, 2, 8, 6] as const;
+
+/**
+ * The song painted on the facility's wall, as [tone (TONES), beats]: up
+ * through green, cyan and blue, back to cyan, and down to a long low red. The
+ * one hiding in the vault opens to it.
+ */
+export const WALL_SONG = [
+  [5, 1],
+  [6, 1],
+  [7, 2],
+  [6, 1],
+  [0, 2],
+] as const;

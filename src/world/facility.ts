@@ -275,8 +275,12 @@ export class Facility {
   /** The creature is inside: the whole of the outside goes (the hall is buried; its rooms are seen in the dark). */
   setCutaway(on: boolean) {
     this.group.visible = !on;
+    this.cut = on;
     for (const g of this.outdoorGlows()) g.hidden = on;
   }
+
+  /** The creature is inside: what goes on outside (the wind, the fire, the dog) is barely heard. */
+  private cut = false;
 
   private outdoorGlows() {
     return [this.beaconGlow, this.redGlow, this.deepGlow, this.lampGlow, this.podGlow, this.navGlow, this.fireGlow, this.floodGlow, this.floodPool, ...this.roofGlows];
@@ -1010,7 +1014,7 @@ export class Facility {
   update(dt: number, time: number, listener: Vector3) {
     const d = Math.hypot(listener.x - this.center.x, listener.z - this.center.z);
     this.distance = d;
-    const level = d < 110 ? 1 / (1 + (d / 16) * (d / 16)) : 0;
+    const level = (d < 110 ? 1 / (1 + (d / 16) * (d / 16)) : 0) * (this.cut ? 0.04 : 1);
     const pan = clamp((this.center.x - listener.x) / 18, -0.8, 0.8);
     this.audio.setSite(this.sound, level, pan, 1 - clamp(d / 80, 0, 1), 0.7);
     if (d > 120) {
@@ -1143,7 +1147,7 @@ export class Facility {
   /** The dropship burning: flames licking, embers and a great column of black smoke, its nav light blinking, now and then something in it going up. */
   private updateWreck(dt: number, time: number, listener: Vector3) {
     const d = Math.hypot(listener.x - this.wreckAt.x, listener.z - this.wreckAt.z);
-    const level = d < 120 ? 1 / (1 + (d / 9) * (d / 9)) : 0;
+    const level = (d < 120 ? 1 / (1 + (d / 9) * (d / 9)) : 0) * (this.cut ? 0.03 : 1);
     this.audio.setSite(this.fireSound, level, clamp((this.wreckAt.x - listener.x) / 14, -0.8, 0.8), 1 - clamp(d / 60, 0, 1), 0.6);
     for (const f of this.flames) {
       const n = noise1(time * 7 + f.seed, f.seed) * 0.5 + 0.5;

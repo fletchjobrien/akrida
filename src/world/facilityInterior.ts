@@ -2,7 +2,7 @@ import {
   BoxGeometry,
   BufferGeometry,
   Color,
-  ConeGeometry,
+  SphereGeometry,
   CylinderGeometry,
   Group,
   IcosahedronGeometry,
@@ -23,7 +23,7 @@ import { ditherMaterial } from '../render/dither';
 import { Creature, type World } from '../character/Creature';
 import type { Skin } from '../character/rig';
 import type { FootPose, HandPose, ScriptPose } from '../character/scriptPose';
-import { PIPE_TONES, TONE_COLORS, TONES } from '../story/tune';
+import { PIPE_TONES, TONE_COLORS, TONES, WALL_SONG } from '../story/tune';
 import { convexHull, footprintOf, type RockInfo } from './rocks';
 import type { Dust } from './particles';
 import type { AudioEngine } from '../audio/AudioEngine';
@@ -278,9 +278,14 @@ export class FacilityInterior {
   private readonly lamps: { pos: Vector3; base: number; flicker: number; warm?: boolean }[] = [];
   private readonly screens: { mat: ShaderMaterial; feed: number; seed: number }[] = [];
   private readonly coreMat: ShaderMaterial;
+  private readonly stripMat: ShaderMaterial;
   private readonly coreGlow: Glow;
   private readonly coreAt = new Vector3();
+  /** The middle of the song painted on the far wall (world space). */
+  readonly muralAt = new Vector3();
   private dayGlow: Glow | null = null;
+  /** Pools of light on the floor, and how bright each is. */
+  private readonly pools: { g: Glow; k: number }[] = [];
   private readonly breachAt = new Vector3();
   private readonly sandAt = new Vector3();
   private readonly officeAt = new Vector3();
@@ -311,7 +316,8 @@ export class FacilityInterior {
     const t = (dark: number, mid: number, light: number, outline = 0.6, highlight = 0.6) => toonMaterial({ dark, mid, light, litAt: 0.55, outline, highlight });
     const u = (c: number) => toonMaterial({ dark: c, mid: c, light: c, unlit: true, outline: 0 });
     this.M = {
-      deck: t(0x222228, 0x34343c, 0x4c4c56),
+      deck: t(0x29292f, 0x3f3f47, 0x8a8274),
+      deck2: t(0x25252a, 0x393940, 0x7c7468),
       grate: t(0x16161a, 0x24242a, 0x383842, 0.5, 0.3),
       lining: t(0x55514b, 0x847e72, 0xb0aa9b),
       liningDark: t(0x45413c, 0x6a655c, 0x8e887c),
@@ -344,7 +350,8 @@ export class FacilityInterior {
     };
     this.world = { height: () => this.floorY, rocks: [] };
     this.coreMat = u(0x5ad8ff);
-    this.coreGlow = new Glow(rgb(0x5ad8ff), 1.6, { core: 0.5 });
+    this.stripMat = u(0xd8c49a);
+    this.coreGlow = new Glow(rgb(0x5ad8ff), 0.9, { core: 0.6 });
     this.coreGlow.strength = 0;
     this.glows.push(this.coreGlow);
     this.vault.lock = u(0xff3a2a);
@@ -504,10 +511,20 @@ export class FacilityInterior {
   /** The floor, the outer walls seen from inside (cut down toward the front), the way in. */
   private buildShell() {
     const M = this.M;
-    // the floor: dark plates, seams across them, hazard-striped walkways, drains
-    this.box(X0 - 0.3, F - 0.3, Z0 - 0.3, X1 + 0.3, F, Z1 + 0.3, M.deck);
-    for (let x = -15; x <= 15; x += 2) this.box(x - 0.01, F, Z0, x + 0.01, F + 0.004, Z1, M.grate, this.root, false);
-    for (let z = -6; z <= 6; z += 2) this.box(X0, F, z - 0.01, X1, F + 0.004, z + 0.01, M.grate, this.root, false);
+    // the floor: big plates in two tones, a little apart, their seams dark
+    this.box(X0 - 0.3, F - 0.3, Z0 - 0.3, X1 + 0.3, F - 0.004, Z1 + 0.3, M.grate);
+    for (let x = X0; x < X1 - 0.1; x += 2.1) {
+      for (let z = Z0; z < Z1 - 0.1; z += 2.1) {
+        const k = (Math.round((x - X0) / 2.1) + Math.round((z - Z0) / 2.1)) % 2;
+        this.box(x + 0.03, F - 0.02, z + 0.03, Math.min(X1, x + 2.07), F, Math.min(Z1, z + 2.07), k ? M.deck : M.deck2, this.root, false);
+      }
+    }
+    // round the cradle: a ring set in the floor, orange, then black and yellow
+    this.add(this.root, new TorusGeometry(3.0, 0.07, 3, 32).rotateX(Math.PI / 2), M.accent, 0, F + 0.002, -3.8, false).scale.y = 0.2;
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      this.cube(0.4, 0.008, 0.12, k % 2 ? M.yellow : M.hazard, Math.cos(a) * 3.3, F + 0.004, -3.8 + Math.sin(a) * 3.3, this.root, false).rotation.y = -a + Math.PI / 2;
+    }
     // the walkway in from the door, edged in yellow and black
     for (const sx of [-1, 1]) {
       for (let z = -1; z < Z1; z += 0.5) this.box(sx * 1.6 - 0.06, F, z, sx * 1.6 + 0.06, F + 0.006, z + 0.25, M.yellow, this.root, false);
@@ -552,7 +569,14 @@ export class FacilityInterior {
     const day = this.glow(0xffe8b8, 3.2, 0, F + 0.02, Z1 - 0.9, 0);
     day.material.uniforms.uFlat.value = 1;
     this.dayGlow = day;
-    this.lamp(0, 3.6, 5.0, 0.6);
+  }
+
+  /** A pool of a lamp's light on the floor under it. */
+  private pool2(color: number, size: number, x: number, z: number, k = 0.22) {
+    const g = this.glow(color, size, x, F + 0.02, z, 0);
+    g.material.uniforms.uFlat.value = 1;
+    this.pools.push({ g, k });
+    return g;
   }
 
   /**
@@ -603,20 +627,11 @@ export class FacilityInterior {
         this.box(x - 0.6, F + 0.12, z + 0.06, x - 0.56, F + 5.2, z + 0.08, M.sand, this.root, false);
       }
     }
-    // the band of painted tones across the middle: the Akridians write a song as colours,
-    // a stroke for each tone, as long as it is held, a pale dot for each rest
-    let x = -7.6;
-    let k = 0;
-    while (x < 7.4) {
-      const tone = (k * 5 + (k >> 2) * 3) % TONE_COLORS.length;
-      const len = 0.18 + ((k * 7) % 4) * 0.16;
-      const row = (k * 3) % 3;
-      const c = TONE_COLORS[tone];
-      const paint = toonMaterial({ dark: shade(c, 0.45), mid: shade(c, 0.75), light: c, litAt: 0.5, outline: 0, highlight: 0.4 });
-      this.box(x, F + 2.4 + row * 0.32, z + 0.02, x + len, F + 2.6 + row * 0.32, z + 0.035, paint, this.root, false);
-      x += len + 0.1;
-      k++;
-    }
+    // a line of warm strip lights along it, under the windows
+    for (let x = -14.7 + 2.1; x <= 14.8; x += 4.2) this.box(x - 0.9, F + 4.6, z, x + 0.9, F + 4.68, z + 0.05, this.stripMat, this.root, false);
+    // the song painted on the wall
+    this.song(-5.3, F + 2.05, z + 0.38, 1.3);
+    this.w(-5.3, F + 2.05, z + 0.4, this.muralAt);
     // the rail of a gantry crane, its hook block parked over the cradle
     this.box(X0 + 0.5, F + 6.3, z + 0.35, X1 - 0.5, F + 6.5, z + 0.75, M.metal);
     this.box(-0.6, F + 6.1, z + 0.3, 0.6, F + 6.3, z + 1.2, M.accent);
@@ -626,10 +641,44 @@ export class FacilityInterior {
     for (let i = 0; i < 46; i++) {
       const bx = -6.5 + ((i * 3.71) % 13);
       const by = F + 0.6 + ((i * 1.93) % 3.6);
+      // (they missed the song)
+      if (bx > -8.6 && bx < -2.0 && by > F + 0.9 && by < F + 3.3) continue;
       if (i % 5 === 0) {
         this.add(this.root, new CylinderGeometry(0.12, 0.14, 0.01, 6).rotateX(Math.PI / 2), M.charred, bx, by, z + 0.04, false);
         this.cube(0.04, 0.04, 0.01, M.ember, bx, by, z + 0.05, this.root, false);
       } else this.cube(0.05, 0.05, 0.01, M.dark, bx, by, z + 0.036, this.root, false);
+    }
+  }
+
+  /**
+   * The song the Akridians painted on their wall, the way they write music: a
+   * stroke for each note in its tone's colour, as long as it is held, set as
+   * high as its tone. Centred at (x, y) on a wall facing +z at depth z; `s` is
+   * its size. Painted in a glowing paint, it shows in the dark.
+   */
+  private song(x: number, y: number, z: number, s: number) {
+    const M = this.M;
+    const unit = 0.55 * s;
+    const total = WALL_SONG.reduce((n, [, b]) => n + b, 0) * unit + (WALL_SONG.length - 1) * 0.12 * s;
+    const w = total + 0.7 * s;
+    const h = 1.5 * s;
+    // its panel: dark, framed in orange, with a pale rule along the bottom
+    this.box(x - w / 2, y - h / 2, z, x + w / 2, y + h / 2, z + 0.03, M.dark, this.root, false);
+    this.box(x - w / 2 - 0.06 * s, y + h / 2, z, x + w / 2 + 0.06 * s, y + h / 2 + 0.07 * s, z + 0.04, M.accent, this.root, false);
+    this.box(x - w / 2 - 0.06 * s, y - h / 2 - 0.07 * s, z, x + w / 2 + 0.06 * s, y - h / 2, z + 0.04, M.accent, this.root, false);
+    for (const sx of [-1, 1]) this.box(x + sx * (w / 2 + 0.03 * s) - 0.03 * s, y - h / 2, z, x + sx * (w / 2 + 0.03 * s) + 0.03 * s, y + h / 2, z + 0.04, M.accent, this.root, false);
+    const lo = Math.min(...WALL_SONG.map(([t]) => t));
+    const hi = Math.max(...WALL_SONG.map(([t]) => t));
+    let at = x - total / 2;
+    for (const [tone, beats] of WALL_SONG) {
+      const len = beats * unit;
+      const ty = y - h * 0.3 + ((tone - lo) / Math.max(1, hi - lo)) * h * 0.6;
+      const c = TONE_COLORS[tone];
+      const paint = toonMaterial({ dark: c, mid: c, light: c, unlit: true, outline: 0 });
+      this.box(at, ty - 0.09 * s, z + 0.03, at + len, ty + 0.09 * s, z + 0.045, paint, this.root, false);
+      // a fainter trace of it below, where the paint ran
+      this.box(at + len * 0.3, ty - 0.2 * s, z + 0.03, at + len * 0.34, ty - 0.09 * s, z + 0.04, paint, this.root, false);
+      at += len + 0.12 * s;
     }
   }
 
@@ -702,7 +751,11 @@ export class FacilityInterior {
     }
     for (const sx of [-1, 1]) this.box(sx * 0.1 - 0.025, 0.1, -0.025, sx * 0.1 + 0.025, 0.95, 0.025, M.metal, H);
     this.keep.push(H);
-    this.lamp(cx, F + 3.0, cz + 0.4, 0.75, 0);
+    this.lamp(cx, F + 3.0, cz + 0.4, 0.95, 0);
+    this.pool2(0x5ad8ff, 2.4, cx, cz, 0.12);
+    // the lamp over the song on the wall
+    this.lamp(-5.3, F + 3.8, Z0 + 1.6, 0.9, 0);
+    this.pool2(0xffd8a0, 2.4, -5.3, Z0 + 1.6, 0.16);
     // the robot arms: one still reaching for the frame, one fallen across the dais
     const robot = (x: number, z: number, yaw: number, lift: number, reach: number, fallen: boolean) => {
       const b = new Group();
@@ -756,17 +809,15 @@ export class FacilityInterior {
     const top = new Vector3(b.x, F + 7.6, b.z);
     const drop = (F + 7.6 - F) / Math.max(0.2, l.y);
     const foot = top.clone().addScaledVector(l, -drop);
-    // the shaft itself: a slanting column of light, a share of its pixels lit
-    const shaft = ditherMaterial(0xc8b48a, 0xfff0c8, 0.07);
-    const len = top.distanceTo(foot);
-    const col = this.add(R, new BoxGeometry(b.hx * 1.25, len, b.hz * 1.3), shaft, (top.x + foot.x) / 2, (top.y + foot.y) / 2, (top.z + foot.z) / 2, false);
-    col.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), top.clone().sub(foot).normalize());
+    // where it falls on the floor, a warm glow round the sunlit patch
+    this.pool2(0xffe0a0, 2.6, foot.x, foot.z, 0.16);
     this.w(top.x, top.y - 0.4, top.z, this.breachAt);
     this.w(top.x, top.y, top.z, this.shaftTop);
     this.w(foot.x, foot.y, foot.z, this.shaftFoot);
     // the heap under the hole: broken roof plates, a bent beam, sand
-    const sand = this.add(R, new ConeGeometry(1.7, 1.0, 9), M.sand, b.x, F + 0.5, b.z);
-    sand.scale.set(1.2, 1, 0.9);
+    const sand = this.add(R, new SphereGeometry(1.7, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2), M.sand, b.x, F, b.z);
+    sand.scale.set(1.25, 0.62, 1.0);
+    this.add(R, new SphereGeometry(0.7, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), M.sand, b.x + 0.2, F + 0.9, b.z - 0.1).scale.set(1, 0.7, 1);
     this.w(b.x, F + 1.0, b.z, this.sandAt);
     for (const [w, d, x, y, z, rx, rz] of [
       [2.2, 1.4, b.x - 0.9, F + 0.45, b.z + 0.4, 0.3, -0.45],
@@ -783,8 +834,8 @@ export class FacilityInterior {
     for (let k = 0; k < 9; k++) {
       const a = k * 2.1;
       const r = 1.6 + (k % 3) * 0.5;
-      const s = this.add(R, new IcosahedronGeometry(0.25 + (k % 3) * 0.1, 0), M.sand, b.x + Math.cos(a) * r, F + 0.05, b.z + Math.sin(a) * r * 0.8);
-      s.scale.set(1.4, 0.3, 1.1);
+      const s = this.add(R, new SphereGeometry(0.35 + (k % 3) * 0.12, 8, 3, 0, Math.PI * 2, 0, Math.PI / 2), M.sand, b.x + Math.cos(a) * r, F, b.z + Math.sin(a) * r * 0.8);
+      s.scale.set(1.5, 0.35, 1.1);
     }
     this.round(b.x, b.z, 1.7);
     // torn cable hanging from the hole's edge, sparking now and then
@@ -807,7 +858,8 @@ export class FacilityInterior {
       this.cube(1.62, 0.04, 0.08, M.accent, 0, 0.82, 0, g);
       for (const sx of [-1, 1]) for (const sy of [0.15, 0.7]) this.cube(0.05, 0.05, 0.7, M.metal, sx * 0.7, sy, -0.36, g);
       // scorched and holed from the door's side
-      this.add(g, new CylinderGeometry(0.22, 0.26, 0.01, 7).rotateX(Math.PI / 2), M.charred, 0.3, 0.45, 0.04, false);
+      this.cube(0.5, 0.14, 0.01, M.soot, 0.25, 0.5, 0.035, g, false).rotation.z = 0.35;
+      this.cube(0.3, 0.08, 0.01, M.soot, -0.35, 0.3, 0.035, g, false).rotation.z = -0.2;
       for (let i = 0; i < 6; i++) this.cube(0.04, 0.04, 0.01, M.dark, -0.6 + i * 0.23, 0.25 + ((i * 0.37) % 0.5), 0.035, g, false);
       this.block(
         [
@@ -832,7 +884,8 @@ export class FacilityInterior {
     // the lamp hanging over it, swinging a little on its chain, stuttering
     this.box(0.47, F + 4.3, -0.33, 0.53, F + 7.6, -0.27, M.dark, R, false);
     this.cube(0.7, 0.18, 0.4, M.metal, 0.5, F + 4.2, -0.3);
-    this.lamp(0.5, F + 4.0, -0.3, 0.85, 1);
+    this.lamp(0.5, F + 4.0, -0.3, 1.1, 1);
+    this.pool2(0xffe0b0, 2.8, 0.5, -0.3, 0.26);
     table(-4.6, -0.5, 0.15);
     table(-2.5, -0.3, -0.05);
     crate(-1.0, -0.4, 0.3);
@@ -1038,7 +1091,7 @@ export class FacilityInterior {
     this.box(x1 - 0.5, F + 0.2, 5.4, x1 - 0.15, F + 2.0, 6.6, M.metal);
     for (let k = 0; k < 4; k++) this.box(x1 - 0.55, F + 0.6, 5.55 + k * 0.28, x1 - 0.5, F + 1.7, 5.6 + k * 0.28, M.dark, R, false);
     this.rect(x1 - 0.55, 5.35, x1 - 0.1, 6.65);
-    this.lamp(mx, F + 2.4, 3.2, 0.8, 0);
+    this.lamp(mx, F + 2.4, 3.2, 0.95, 0);
     this.glow(0x7ae0a0, 1.4, mx, F + 1.4, 2.4, 0.2);
   }
 
@@ -1077,7 +1130,8 @@ export class FacilityInterior {
     for (const x of [-10.3, -9.7]) this.box(x - 0.03, F, Z0 + 0.05, x + 0.03, F + 5.6, Z0 + 0.12, M.metal, R, false);
     this.cube(0.9, 0.5, 0.02, M.yellow, -13.3, F + 2.2, Z0 + 0.03, R, false);
     this.cube(0.7, 0.3, 0.025, M.hazard, -13.3, F + 2.2, Z0 + 0.035, R, false);
-    this.lamp(-12.6, F + 3.2, -2.8, 0.6, 1);
+    this.lamp(-12.6, F + 3.2, -2.8, 0.85, 1);
+    this.pool2(0xffd090, 2.0, -12.6, -2.8, 0.21);
   }
 
   /**
@@ -1110,7 +1164,7 @@ export class FacilityInterior {
         const m = this.add(R, new CylinderGeometry(r, r, len, 8), M.metal, (ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
         m.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), b.clone().sub(a).normalize());
         // its colour, in bands along it
-        const bands = Math.max(1, Math.floor(len / 1.6));
+        const bands = len > 2 ? Math.max(1, Math.floor(len / 5)) : 0;
         for (let i = 0; i < bands; i++) {
           const t = (i + 0.5) / bands;
           const bm = this.add(R, new CylinderGeometry(r + 0.012, r + 0.012, 0.12, 8), band, ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t, false);
@@ -1155,9 +1209,10 @@ export class FacilityInterior {
     const mid = PIPE_X + ((n - 1) * PIPE_STEP) / 2;
     this.w(mid, F, VAULT.z1 + 1.05, this.pipeStand);
     this.w(mid, F + 1.1, VAULT.z1 + 0.2, this.pipeLook);
-    // a stencil over them: a hand, knocking (or so it looks)
-    this.cube(1.0, 0.3, 0.02, M.yellow, mid, F + 2.35, VAULT.z1 + 0.02, R, false);
-    this.lamp(mid, F + 2.6, VAULT.z1 + 1.6, 0.5, 0);
+    // and painted by the door, small, the song from the hall's wall
+    this.song(15.85, F + 2.1, VAULT.z1, 0.4);
+    this.lamp(mid, F + 2.6, VAULT.z1 + 1.6, 0.85, 0);
+    this.pool2(0xffe0b0, 1.8, mid, VAULT.z1 + 1.3, 0.14);
   }
 
   /** A short stub of pipe inside the vault, where it comes through the wall. */
@@ -1274,7 +1329,8 @@ export class FacilityInterior {
     this.cube(0.16, 0.16, 0.02, M.dark, 12.5, F + 1.1, 3.41, R, false);
     this.cube(0.3, 0.02, 0.06, M.metal, 13.1, F + 0.93, 3.0, R, false).rotation.y = 0.4;
     this.cube(0.24, 0.02, 0.05, M.accent, 12.0, F + 0.93, 3.5, R, false).rotation.y = -0.8;
-    this.lamp(12.6, F + 2.6, 3.2, 0.6, 0);
+    this.lamp(12.6, F + 2.6, 3.2, 0.85, 0);
+    this.pool2(0xd8f0ff, 2.0, 12.6, 3.2, 0.12);
     // the cameras: one over the hall, one by the door, one in the lab, one in the vault
     const feed = (ax: number, ay: number, az: number, lx: number, ly: number, lz: number, fov: number) => {
       this.feeds.push({ at: this.w(ax, ay, az), look: this.w(lx, ly, lz), fov });
@@ -1311,13 +1367,14 @@ export class FacilityInterior {
     this.lamps.forEach((l, i) => {
       const v = shared.uRoomLight.value[i];
       let k = l.base * (l.flicker ? this.flick : 1);
-      if (i === 1) k *= core;
+      if (i === 0) k *= core;
       v.set(l.pos.x, l.pos.y, l.pos.z, k);
     });
     for (let i = this.lamps.length; i < shared.uRoomLight.value.length; i++) shared.uRoomLight.value[i].w = 0;
     for (const g of this.glows) g.strength = 0.35 * inside;
     this.coreGlow.strength = 0.55 * core * inside;
     if (this.dayGlow) this.dayGlow.strength = 0.2 * inside;
+    for (const p of this.pools) p.g.strength = p.k * inside * (p.k > 0.2 ? this.flick : 1);
     (this.coreMat.uniforms.uLight.value as Vector3).set(0.35, 0.85, 1).multiplyScalar(0.75 + 0.25 * core);
     // the vault's lock: red, steady; flashing when someone tries it; green when it lets go
     const vs = this.vault;
@@ -1371,16 +1428,16 @@ export class FacilityInterior {
     // its sounds: the sand, the cradle's heart, the monitors; a groan of the frame, a drip
     const near = (p: Vector3, r: number) => clamp(1 - listener.distanceTo(p) / r, 0, 1);
     const pan = (p: Vector3) => clamp((p.x - listener.x) / 8, -0.8, 0.8);
-    this.audio.setHall(near(this.sandAt, 14) ** 1.5, pan(this.sandAt), 0.25 + 0.75 * near(this.coreAt, 16), pan(this.coreAt), near(this.officeAt, 7));
+    this.audio.setHall(near(this.sandAt, 9) ** 2, pan(this.sandAt), 0.15 + 0.85 * near(this.coreAt, 12) ** 2, pan(this.coreAt), near(this.officeAt, 5) ** 2);
     this.groanTimer -= dt;
     if (this.groanTimer <= 0) {
-      this.groanTimer = 7 + Math.random() * 12;
-      this.audio.hallGroan(0.25, (Math.random() - 0.5) * 1.4);
+      this.groanTimer = 20 + Math.random() * 25;
+      this.audio.hallGroan(0.1, (Math.random() - 0.5) * 1.2);
     }
     this.dripTimer -= dt;
     if (this.dripTimer <= 0) {
-      this.dripTimer = 1.5 + Math.random() * 5;
-      this.audio.hallDrip(0.04 + Math.random() * 0.04, (Math.random() - 0.5) * 1.6);
+      this.dripTimer = 7 + Math.random() * 9;
+      this.audio.hallDrip(0.015 + Math.random() * 0.015, (Math.random() - 0.5) * 1.2);
     }
   }
 

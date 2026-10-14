@@ -889,22 +889,30 @@ The hall is buried, so while your creature is inside, nothing outside is
 drawn: the rooms stand in the dark, lit by their own lamps, and by the sun
 through a hole in the roof.
 
-- **The hall:** a great space under tall plated walls ribbed in orange.
-  Along the far wall runs a long band of coloured strokes: an Akridian song,
-  written as colours, a stroke for each tone as long as it is held. The high
-  windows are packed solid with sand, and sand has trickled down the wall
-  from a cracked one. A gantry crane's rail runs along the top.
+- **The hall:** a great space under tall plated walls ribbed in orange, its
+  floor laid in big plates of two tones. The high windows are packed solid
+  with sand, and sand has trickled down the wall from a cracked one. Warm
+  strip lights run under them, and a gantry crane's rail along the top.
+  Lamps throw pools of light on the floor.
+- **The song on the wall:** to the left of the cradle, on a dark panel
+  framed in orange, the Akridians painted a song the way they write music:
+  a stroke for each note, in its tone's colour, as long as the note is held
+  and set as high as its tone. Five notes: green, cyan, a long blue, cyan,
+  and a long low red. The fire that peppered the wall round it missed it.
+  The same song is painted small beside the vault's door. The first time
+  your creature comes near the big one, it stops to look at it.
 - **The cradle:** in the middle of the hall, a round dais under a gantry,
   ringed with cold blue lights. Hanging over it on cables is the frame of an
   Akridian not yet built: a spine, ribs round a heart that still glows, the
   outline of a skull, arms of bare rods. Two robot arms stand frozen on the
   dais; one reaches for the frame, the other lies where a blast tore it
-  down. This is where they made more Akridians. The first time your
+  down. A ring set in the floor round it, orange, then black and yellow.
+  This is where they made more Akridians. The first time your
   creature comes in, it looks up at the hanging heart.
 - **The roof:** part of it has fallen in. Its plates and a bent beam lie in
   a heap under the hole, with sand poured over them, and sand still falls
-  in a thin stream through the hole. Sunlight comes down in a slanting
-  shaft, with motes drifting in it, and falls across the barricade. A torn
+  in a thin stream through the hole. Sunlight comes down through it, with
+  motes drifting in it, and falls warm across the barricade. A torn
   cable at the hole's edge sparks.
 - **The fight:** the Akridians held the hall behind a barricade of
   overturned tables, crates and a tipped cabinet across the front of the
@@ -934,9 +942,10 @@ through a hole in the roof.
 - **The pipes:** six pipes run from the plant room up and along the length
   of the far wall, over the vault's roof, down its front beside the door,
   and into it. Each is a different size and banded in its own colour.
-  Knocked, each rings on its own tone: the stranger's tones (see
-  `PIPE_TONES` in `src/story/tune.ts`), the thickest the lowest, each
-  banded in its tone's colour (low tones warm, high tones cool).
+  Knocked, each rings on its own tone (see `PIPE_TONES` in
+  `src/story/tune.ts`), the thickest the lowest, each banded in its tone's
+  colour: green, red, blue, orange, violet and cyan, left to right. They are
+  the colours of the song on the wall.
 
 ### The cameras and the survivor
 
@@ -964,15 +973,22 @@ through a hole in the roof.
     last knock. It cannot know who is out there: it could be a human,
     trying to lure it out. If you knock over its answer, it stops dead.
     After a few wrong patterns it sometimes does not answer at all.
-  - **Knock the three tones the dying stranger sang, in order** (the tune
-    that opened the ship's door: low, high, middle). Then it knows one of
-    its own is outside. It knocks them back, slowly and carefully. Then its
-    bolts are drawn one by one, a seal breaks with a long hiss, the lock
-    turns green, and the door grinds open.
-  - It gets up out of its corner and comes out of the vault, hunched, still
-    shaking, and stops near your creature, its eyes on it. Then, softly, in
-    a voice that shakes, it sings the stranger's three tones. Your creature
-    cannot take its eyes off it.
+  - **Knock the song painted on the wall**: its colours, in order, on the
+    pipes of those colours (green, cyan, blue, cyan, red; `WALL_SONG` in
+    `src/story/tune.ts`). Only one of its own would know it. It knocks the
+    song back, slowly and carefully. Then its bolts are drawn one by one, a
+    seal breaks with a long hiss, the lock turns green, and the door grinds
+    open.
+  - **It comes out the way a frightened thing does.** It gets up out of its
+    corner and creeps, crouched low and shaking, to the doorway, and looks
+    out. It starts back with a gasp, waits, creeps out again and peers
+    round, and only then steps out.
+  - **Then it sees who it is.** When your creature is near, it jumps for
+    joy, again and again, both arms thrown up, its head bobbing, with a
+    quick bright run of notes. Then it calms, and keeps close: it follows
+    your creature about the hall, never too near, its eyes on it, and
+    softly, in a voice that shakes, it sings the song from the wall. Your
+    creature cannot take its eyes off it.
   - Dying undoes this, like everything since the last checkpoint: the door
     shuts and locks, and it is back in its corner.
 
@@ -1149,13 +1165,16 @@ There are no audio files. The Web Audio API makes all sound at start-up:
   when it finds the way.
 - **The facility's hall** has its own bus: the deep moan of a huge hollow
   space (brown noise through three slowly drifting resonant band-passes,
-  48 to 118 Hz), the wind keening through the hole in its roof, the hiss and
-  patter of the falling sand (placed where it falls), the cradle's heart (a
+  48 to 118 Hz), the hiss and patter of the falling sand (only near where it
+  falls), the cradle's heart (a
   deep chord on B1, F#2 and B2, two of its voices a fraction of a hertz
   apart so it beats slowly, with a high shimmer that swells like breath),
-  and the monitors' whine and hum near the office. What sounds in the hall
+  and the monitors' hum close to the office. It is kept low and sparse, so
+  that the knocks and the voices are clear over it. What sounds in the hall
   goes into a long, dark reverb (a 4.2-second impulse, low-passed). The
-  frame groans now and then, and something drips in the dark.
+  frame groans now and then, far off, and something drips in the dark.
+  While your creature is inside, what goes on outside (the wind, the burning
+  dropship, the dog) is turned almost all the way down.
 - **A knock on a pipe** is the knuckle (a short, low knock of filtered
   noise and a thud) and the pipe ringing: its tone, its second and third
   harmonics, and the metal's own inharmonic clang (partials at 2.76, 5.4
@@ -1163,7 +1182,7 @@ There are no audio files. The Web Audio API makes all sound at start-up:
   ring longer. Heard through the vault's wall, the same knock is
   low-passed at 650 Hz. The survivor's voice is the specimen's, muffled
   through the wall; its song is the tracker's song voice, pitched to the
-  stranger's tones, with a shake in it.
+  pipes' tones, with a shake in it.
 - **The stranger's voice** is made sample by sample (`src/audio/voice.ts`).
   A glottal pulse (Rosenberg's shape) with jitter, shimmer and period
   doubling goes through a cascade of formant resonators (Klatt's design).

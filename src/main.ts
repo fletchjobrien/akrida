@@ -157,6 +157,7 @@ const feedCam = new PerspectiveCamera(62, 16 / 9, 0.08, 60);
 let knocking: { pipe: number; t: number; sounded: boolean } | null = null;
 let survivorSeen = false;
 let hallSeen = false;
+let muralSeen = false;
 // the carrion locusts eating them
 let locusts: Locusts | null = null;
 // the tracker left in the ship's doorway, and taking it up
@@ -1465,6 +1466,15 @@ function finishFrame(dt: number, target: Vector3) {
     hallSeen = true;
     noticeTime = 2.8;
     noticeWhat = { lookPoint: facility.interior.heart };
+  }
+  // the song painted on the far wall: the first time it comes near, it stops to look at it
+  if (facility && inside && room === 'facility' && hallSeen && !muralSeen && noticeTime <= 0) {
+    const m = facility.interior.muralAt;
+    if (Math.hypot(creature.pos.x - m.x, creature.pos.z - m.z) < 5.5) {
+      muralSeen = true;
+      noticeTime = 2.5;
+      noticeWhat = { lookPoint: m };
+    }
   }
   if (survivor && inside && room === 'facility') {
     survivor.update(dt, creature.pos);
